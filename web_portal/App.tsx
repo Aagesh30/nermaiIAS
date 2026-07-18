@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -21,7 +21,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
 // Configure your Host IP address for local network connections
-const DEFAULT_HOST_IP = "192.168.0.240";
+const DEFAULT_HOST_IP = "192.168.31.18";
 // Timeout in ms for all API calls — 12s gives plenty of room on LAN
 const API_TIMEOUT_MS = 12000;
 
@@ -234,8 +234,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("home");
 
-  
-    const [erpSub, setErpSub] = useState("students");
+
+  const [erpSub, setErpSub] = useState("students");
   const [lmsSub, setLmsSub] = useState("quiz");
   const [crmSub, setCrmSub] = useState("leads");
   const [darkMode, setDarkMode] = useState(false);
@@ -3665,192 +3665,192 @@ export default function App() {
             )}
 
             {devTab === "manual-test" && (
-                <ScrollView style={{ flex: 1, padding: 15 }} contentContainerStyle={{ paddingBottom: 50 }}>
-                  <View style={[styles.card, darkMode && styles.cardDark]}>
-                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 15 }]}>Define New Mock Test</Text>
-                    
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Test Title:</Text>
-                    <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Test Title" placeholderTextColor="#999" value={newTest.title} onChangeText={t => setNewTest({ ...newTest, title: t })} />
-                    
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Test Description:</Text>
-                    <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Test Description" placeholderTextColor="#999" value={newTest.description} onChangeText={d => setNewTest({ ...newTest, description: d })} />
-                    
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Duration (Minutes):</Text>
-                    <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Duration (Minutes)" placeholderTextColor="#999" keyboardType="numeric" value={newTest.duration} onChangeText={du => setNewTest({ ...newTest, duration: du })} />
-                    
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Passing Marks:</Text>
-                    <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Passing Marks" placeholderTextColor="#999" keyboardType="numeric" value={newTest.passingMarks} onChangeText={p => setNewTest({ ...newTest, passingMarks: p })} />
+              <ScrollView style={{ flex: 1, padding: 15 }} contentContainerStyle={{ paddingBottom: 50 }}>
+                <View style={[styles.card, darkMode && styles.cardDark]}>
+                  <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 15 }]}>Define New Mock Test</Text>
 
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Target Audience:</Text>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 15 }}>
-                      {[
-                        { label: "All Users", value: "all" },
-                        { label: "Paid (All)", value: "paid" },
-                        { label: "Paid (Batch)", value: "batch" },
-                        { label: "Free Only", value: "free" }
-                      ].map((aud) => (
-                        <TouchableOpacity
-                          key={aud.value}
-                          onPress={() => setNewTest({ ...newTest, targetAudience: aud.value })}
-                          style={{
-                            flex: 1,
-                            paddingVertical: 10,
-                            borderRadius: 6,
-                            backgroundColor: (newTest.targetAudience || "all") === aud.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#ffffff"),
-                            borderWidth: 1,
-                            borderColor: (newTest.targetAudience || "all") === aud.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
-                            alignItems: "center",
-                            minWidth: 70
-                          }}
-                        >
-                          <Text style={{ fontSize: 10, fontWeight: "bold", color: (newTest.targetAudience || "all") === aud.value ? "#fff" : (darkMode ? "#aaa" : "#616161") }}>
-                            {aud.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Test Title:</Text>
+                  <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Test Title" placeholderTextColor="#999" value={newTest.title} onChangeText={t => setNewTest({ ...newTest, title: t })} />
 
-                    {(newTest.targetAudience === "batch") && (
-                      <View style={{ marginBottom: 15 }}>
-                        <Text style={[styles.label, darkMode && styles.labelDark]}>Select Batch:</Text>
-                        <TouchableOpacity
-                          onPress={() => setShowManualTestBatchDropdown(!showManualTestBatchDropdown)}
-                          style={{
-                            flexDirection: "row",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            borderWidth: 1,
-                            borderColor: darkMode ? "#444" : "#ccc",
-                            borderRadius: 8,
-                            padding: 10,
-                            backgroundColor: darkMode ? "#222" : "#fff"
-                          }}
-                        >
-                          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>
-                            {newTest.targetBatch || "Choose a Batch..."}
-                          </Text>
-                          <Ionicons name={showManualTestBatchDropdown ? "chevron-up" : "chevron-down"} size={14} color="#757575" />
-                        </TouchableOpacity>
-                        {showManualTestBatchDropdown && (
-                          <View style={{
-                            borderWidth: 1,
-                            borderColor: darkMode ? "#444" : "#ccc",
-                            borderRadius: 8,
-                            marginTop: 4,
-                            backgroundColor: darkMode ? "#222" : "#fff",
-                            maxHeight: 150,
-                            overflow: "hidden"
-                          }}>
-                            <ScrollView nestedScrollEnabled>
-                              {batches.map((b) => (
-                                <TouchableOpacity
-                                  key={b.id}
-                                  onPress={() => {
-                                    setNewTest({ ...newTest, targetBatch: b.batchName });
-                                    setShowManualTestBatchDropdown(false);
-                                  }}
-                                  style={{
-                                    padding: 10,
-                                    borderBottomWidth: 1,
-                                    borderBottomColor: darkMode ? "#333" : "#f0f0f0"
-                                  }}
-                                >
-                                  <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>{b.batchName} ({b.course})</Text>
-                                </TouchableOpacity>
-                              ))}
-                              {batches.length === 0 && (
-                                <Text style={{ padding: 10, color: "#888", fontSize: 12, textAlign: "center" }}>No batches found</Text>
-                              )}
-                            </ScrollView>
-                          </View>
-                        )}
-                      </View>
-                    )}
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Test Description:</Text>
+                  <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Test Description" placeholderTextColor="#999" value={newTest.description} onChangeText={d => setNewTest({ ...newTest, description: d })} />
 
-                    <DateTimePickerSelect
-                      label="Scheduled Start Time (Mandatory):"
-                      value={newTest.startTime}
-                      onChange={(t: string) => setNewTest({ ...newTest, startTime: t })}
-                      darkMode={darkMode}
-                    />
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Duration (Minutes):</Text>
+                  <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Duration (Minutes)" placeholderTextColor="#999" keyboardType="numeric" value={newTest.duration} onChangeText={du => setNewTest({ ...newTest, duration: du })} />
 
-                    <DateTimePickerSelect
-                      label="Scheduled End Time (Mandatory):"
-                      value={newTest.endTime}
-                      onChange={(t: string) => setNewTest({ ...newTest, endTime: t })}
-                      darkMode={darkMode}
-                    />
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Passing Marks:</Text>
+                  <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Passing Marks" placeholderTextColor="#999" keyboardType="numeric" value={newTest.passingMarks} onChangeText={p => setNewTest({ ...newTest, passingMarks: p })} />
 
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Select Number of Questions:</Text>
-                    <TextInput
-                      style={[styles.input, darkMode && styles.inputDark]}
-                      placeholder="Number of Questions (e.g. 5)"
-                      placeholderTextColor="#999"
-                      keyboardType="numeric"
-                      value={manualNumQuestions}
-                      onChangeText={setManualNumQuestions}
-                    />
-
-                    {Platform.OS === "web" && (
-                      <View style={{ marginBottom: 12 }}>
-                        <Text style={[styles.label, darkMode && styles.labelDark]}>Upload Questions JSON File:</Text>
-                        <input
-                          type="file"
-                          accept=".json"
-                          style={{
-                            padding: "8px",
-                            border: "1px solid #ccc",
-                            borderRadius: "4px",
-                            backgroundColor: "#fff",
-                            cursor: "pointer",
-                            width: "100%",
-                            boxSizing: "border-box"
-                          }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (event) => {
-                                try {
-                                  const text = event.target?.result as string;
-                                  const parsed = JSON.parse(text);
-                                  setManualQuestionsJson(JSON.stringify(parsed, null, 2));
-                                  if (Array.isArray(parsed)) {
-                                    setManualNumQuestions(parsed.length.toString());
-                                  }
-                                  Alert.alert("Success", "JSON file loaded successfully!");
-                                } catch (err: any) {
-                                  Alert.alert("Error", "Invalid JSON: " + err.message);
-                                }
-                              };
-                              reader.readAsText(file);
-                            }
-                          }}
-                        />
-                      </View>
-                    )}
-
-                    <Text style={[styles.label, darkMode && styles.labelDark]}>Paste Questions JSON Array:</Text>
-                    <TextInput
-                      style={[styles.input, { height: 150, textAlignVertical: "top", fontFamily: "monospace", fontSize: 11 }, darkMode && styles.inputDark]}
-                      placeholder={`[\n  {\n    "question": "Question text...",\n    "option a": "Choice 1",\n    "option b": "Choice 2",\n    "option c": "Choice 3",\n    "option d": "Choice 4",\n    "correct option": "B",\n    "explanation": "Why B is correct..."\n  }\n]`}
-                      placeholderTextColor="#999"
-                      multiline
-                      value={manualQuestionsJson}
-                      onChangeText={setManualQuestionsJson}
-                    />
-                    <TouchableOpacity onPress={saveTestDefinition} style={styles.primaryBtn}>
-                      <Text style={styles.primaryBtnTxt}>Create Test Definition</Text>
-                    </TouchableOpacity>
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Target Audience:</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 15 }}>
+                    {[
+                      { label: "All Users", value: "all" },
+                      { label: "Paid (All)", value: "paid" },
+                      { label: "Paid (Batch)", value: "batch" },
+                      { label: "Free Only", value: "free" }
+                    ].map((aud) => (
+                      <TouchableOpacity
+                        key={aud.value}
+                        onPress={() => setNewTest({ ...newTest, targetAudience: aud.value })}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 10,
+                          borderRadius: 6,
+                          backgroundColor: (newTest.targetAudience || "all") === aud.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#ffffff"),
+                          borderWidth: 1,
+                          borderColor: (newTest.targetAudience || "all") === aud.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
+                          alignItems: "center",
+                          minWidth: 70
+                        }}
+                      >
+                        <Text style={{ fontSize: 10, fontWeight: "bold", color: (newTest.targetAudience || "all") === aud.value ? "#fff" : (darkMode ? "#aaa" : "#616161") }}>
+                          {aud.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                </ScrollView>
-              )}
-                
-            </View>
+
+                  {(newTest.targetAudience === "batch") && (
+                    <View style={{ marginBottom: 15 }}>
+                      <Text style={[styles.label, darkMode && styles.labelDark]}>Select Batch:</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowManualTestBatchDropdown(!showManualTestBatchDropdown)}
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          padding: 10,
+                          backgroundColor: darkMode ? "#222" : "#fff"
+                        }}
+                      >
+                        <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>
+                          {newTest.targetBatch || "Choose a Batch..."}
+                        </Text>
+                        <Ionicons name={showManualTestBatchDropdown ? "chevron-up" : "chevron-down"} size={14} color="#757575" />
+                      </TouchableOpacity>
+                      {showManualTestBatchDropdown && (
+                        <View style={{
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          marginTop: 4,
+                          backgroundColor: darkMode ? "#222" : "#fff",
+                          maxHeight: 150,
+                          overflow: "hidden"
+                        }}>
+                          <ScrollView nestedScrollEnabled>
+                            {batches.map((b) => (
+                              <TouchableOpacity
+                                key={b.id}
+                                onPress={() => {
+                                  setNewTest({ ...newTest, targetBatch: b.batchName });
+                                  setShowManualTestBatchDropdown(false);
+                                }}
+                                style={{
+                                  padding: 10,
+                                  borderBottomWidth: 1,
+                                  borderBottomColor: darkMode ? "#333" : "#f0f0f0"
+                                }}
+                              >
+                                <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>{b.batchName} ({b.course})</Text>
+                              </TouchableOpacity>
+                            ))}
+                            {batches.length === 0 && (
+                              <Text style={{ padding: 10, color: "#888", fontSize: 12, textAlign: "center" }}>No batches found</Text>
+                            )}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  <DateTimePickerSelect
+                    label="Scheduled Start Time (Mandatory):"
+                    value={newTest.startTime}
+                    onChange={(t: string) => setNewTest({ ...newTest, startTime: t })}
+                    darkMode={darkMode}
+                  />
+
+                  <DateTimePickerSelect
+                    label="Scheduled End Time (Mandatory):"
+                    value={newTest.endTime}
+                    onChange={(t: string) => setNewTest({ ...newTest, endTime: t })}
+                    darkMode={darkMode}
+                  />
+
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Select Number of Questions:</Text>
+                  <TextInput
+                    style={[styles.input, darkMode && styles.inputDark]}
+                    placeholder="Number of Questions (e.g. 5)"
+                    placeholderTextColor="#999"
+                    keyboardType="numeric"
+                    value={manualNumQuestions}
+                    onChangeText={setManualNumQuestions}
+                  />
+
+                  {Platform.OS === "web" && (
+                    <View style={{ marginBottom: 12 }}>
+                      <Text style={[styles.label, darkMode && styles.labelDark]}>Upload Questions JSON File:</Text>
+                      <input
+                        type="file"
+                        accept=".json"
+                        style={{
+                          padding: "8px",
+                          border: "1px solid #ccc",
+                          borderRadius: "4px",
+                          backgroundColor: "#fff",
+                          cursor: "pointer",
+                          width: "100%",
+                          boxSizing: "border-box"
+                        }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              try {
+                                const text = event.target?.result as string;
+                                const parsed = JSON.parse(text);
+                                setManualQuestionsJson(JSON.stringify(parsed, null, 2));
+                                if (Array.isArray(parsed)) {
+                                  setManualNumQuestions(parsed.length.toString());
+                                }
+                                Alert.alert("Success", "JSON file loaded successfully!");
+                              } catch (err: any) {
+                                Alert.alert("Error", "Invalid JSON: " + err.message);
+                              }
+                            };
+                            reader.readAsText(file);
+                          }
+                        }}
+                      />
+                    </View>
+                  )}
+
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Paste Questions JSON Array:</Text>
+                  <TextInput
+                    style={[styles.input, { height: 150, textAlignVertical: "top", fontFamily: "monospace", fontSize: 11 }, darkMode && styles.inputDark]}
+                    placeholder={`[\n  {\n    "question": "Question text...",\n    "option a": "Choice 1",\n    "option b": "Choice 2",\n    "option c": "Choice 3",\n    "option d": "Choice 4",\n    "correct option": "B",\n    "explanation": "Why B is correct..."\n  }\n]`}
+                    placeholderTextColor="#999"
+                    multiline
+                    value={manualQuestionsJson}
+                    onChangeText={setManualQuestionsJson}
+                  />
+                  <TouchableOpacity onPress={saveTestDefinition} style={styles.primaryBtn}>
+                    <Text style={styles.primaryBtnTxt}>Create Test Definition</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+
           </View>
-        </SafeAreaView>
-      );
-    }
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Render Login
   if (!user) {
@@ -3923,17 +3923,17 @@ export default function App() {
                 </>
               )}
 
-                  {/* Guest Login shortcut */}
-                  <TouchableOpacity
-                    onPress={() => {
-                      setAuthTab("guest");
-                    }}
-                    style={{ marginTop: 18, alignItems: "center", paddingVertical: 8 }}
-                  >
-                    <Text style={{ color: "#c62828", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
-                      Continue as Guest (Browse Free)
-                    </Text>
-                  </TouchableOpacity>
+              {/* Guest Login shortcut */}
+              <TouchableOpacity
+                onPress={() => {
+                  setAuthTab("guest");
+                }}
+                style={{ marginTop: 18, alignItems: "center", paddingVertical: 8 }}
+              >
+                <Text style={{ color: "#c62828", fontSize: 13, fontWeight: "600", textDecorationLine: "underline" }}>
+                  Continue as Guest (Browse Free)
+                </Text>
+              </TouchableOpacity>
               {/* Guest registration / details form */}
               {authTab === "guest" && (
                 <>
@@ -6697,142 +6697,142 @@ export default function App() {
                           </ScrollView>
                         </View>
 
-                          {/* Student Details Modal */}
-                          {selectedDirectoryStudent && (
-                            <Modal
-                              visible={!!selectedDirectoryStudent}
-                              transparent
-                              animationType="fade"
-                              onRequestClose={() => setSelectedDirectoryStudent(null)}
-                            >
-                              <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-                                <View style={{
-                                  width: "100%",
-                                  maxWidth: 500,
-                                  maxHeight: "85%",
-                                  backgroundColor: darkMode ? "rgba(30, 30, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
-                                  borderRadius: 16,
-                                  borderWidth: 1,
-                                  borderColor: darkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)",
-                                  padding: 20,
-                                  shadowColor: "#000",
-                                  shadowOffset: { width: 0, height: 10 },
-                                  shadowOpacity: 0.25,
-                                  shadowRadius: 10,
-                                  elevation: 10,
-                                }}>
-                                  {/* Header with Title and Close Icon */}
-                                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: darkMode ? "#444" : "#eee", paddingBottom: 10 }}>
-                                    <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Candidate Profile Details</Text>
-                                    <TouchableOpacity onPress={() => setSelectedDirectoryStudent(null)} style={{ padding: 4 }}>
-                                      <Ionicons name="close-circle-outline" size={26} color={darkMode ? "#ff8a80" : "#d32f2f"} />
-                                    </TouchableOpacity>
-                                  </View>
+                        {/* Student Details Modal */}
+                        {selectedDirectoryStudent && (
+                          <Modal
+                            visible={!!selectedDirectoryStudent}
+                            transparent
+                            animationType="fade"
+                            onRequestClose={() => setSelectedDirectoryStudent(null)}
+                          >
+                            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                              <View style={{
+                                width: "100%",
+                                maxWidth: 500,
+                                maxHeight: "85%",
+                                backgroundColor: darkMode ? "rgba(30, 30, 30, 0.95)" : "rgba(255, 255, 255, 0.95)",
+                                borderRadius: 16,
+                                borderWidth: 1,
+                                borderColor: darkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.1)",
+                                padding: 20,
+                                shadowColor: "#000",
+                                shadowOffset: { width: 0, height: 10 },
+                                shadowOpacity: 0.25,
+                                shadowRadius: 10,
+                                elevation: 10,
+                              }}>
+                                {/* Header with Title and Close Icon */}
+                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15, borderBottomWidth: 1, borderBottomColor: darkMode ? "#444" : "#eee", paddingBottom: 10 }}>
+                                  <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Candidate Profile Details</Text>
+                                  <TouchableOpacity onPress={() => setSelectedDirectoryStudent(null)} style={{ padding: 4 }}>
+                                    <Ionicons name="close-circle-outline" size={26} color={darkMode ? "#ff8a80" : "#d32f2f"} />
+                                  </TouchableOpacity>
+                                </View>
 
-                                  {/* Scrollable Content */}
-                                  {(() => {
-                                    const s = selectedDirectoryStudent;
-                                    const hasPhoto = !!s.photoBase64;
-                                    const hasPhotoId = !!s.photoIdBase64;
-                                    return (
-                                      <ScrollView showsVerticalScrollIndicator={false}>
-                                        <View style={{ flexDirection: "row", gap: 10, alignItems: "center", marginBottom: 12 }}>
-                                          <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#e0e0e0", justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
-                                            {hasPhoto && s.photoBase64 !== "test" ? (
-                                              <Image source={{ uri: s.photoBase64 }} style={{ width: "100%", height: "100%" }} />
-                                            ) : (
-                                              <Ionicons name="person" size={28} color="#999" />
-                                            )}
-                                          </View>
-                                          <View style={{ flex: 1 }}>
-                                            <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{getStudentName(s)}</Text>
-                                            <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
-                                              <View style={{ backgroundColor: darkMode ? "#c6282820" : "#e0f7fa", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-                                                <Text style={{ color: darkMode ? "#ff8a80" : "#006064", fontSize: 10, fontWeight: "bold" }}>{(s.type || "offline").toUpperCase()}</Text>
-                                              </View>
-                                              <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-                                                <Text style={{ color: darkMode ? "#81c784" : "#2e7d32", fontSize: 10, fontWeight: "bold" }}>{s.batch || "No Batch"}</Text>
-                                              </View>
+                                {/* Scrollable Content */}
+                                {(() => {
+                                  const s = selectedDirectoryStudent;
+                                  const hasPhoto = !!s.photoBase64;
+                                  const hasPhotoId = !!s.photoIdBase64;
+                                  return (
+                                    <ScrollView showsVerticalScrollIndicator={false}>
+                                      <View style={{ flexDirection: "row", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#e0e0e0", justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
+                                          {hasPhoto && s.photoBase64 !== "test" ? (
+                                            <Image source={{ uri: s.photoBase64 }} style={{ width: "100%", height: "100%" }} />
+                                          ) : (
+                                            <Ionicons name="person" size={28} color="#999" />
+                                          )}
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{getStudentName(s)}</Text>
+                                          <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
+                                            <View style={{ backgroundColor: darkMode ? "#c6282820" : "#e0f7fa", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                              <Text style={{ color: darkMode ? "#ff8a80" : "#006064", fontSize: 10, fontWeight: "bold" }}>{(s.type || "offline").toUpperCase()}</Text>
+                                            </View>
+                                            <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                              <Text style={{ color: darkMode ? "#81c784" : "#2e7d32", fontSize: 10, fontWeight: "bold" }}>{s.batch || "No Batch"}</Text>
                                             </View>
                                           </View>
                                         </View>
+                                      </View>
 
-                                        <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Roll Number:</Text> {s.rollNumber || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Course:</Text> {s.course || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Email:</Text> {s.email || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Phone:</Text> {s.phone || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>DOB:</Text> {s.dateOfBirth || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Blood Group:</Text> {s.bloodGroup || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Address:</Text> {s.address || "N/A"}</Text>
-                                          <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Approved Date:</Text> {s.approvedAt ? new Date(s.approvedAt).toLocaleString() : "Pending"}</Text>
-                                        </View>
+                                      <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Roll Number:</Text> {s.rollNumber || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Course:</Text> {s.course || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Email:</Text> {s.email || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Phone:</Text> {s.phone || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>DOB:</Text> {s.dateOfBirth || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Blood Group:</Text> {s.bloodGroup || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Address:</Text> {s.address || "N/A"}</Text>
+                                        <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Approved Date:</Text> {s.approvedAt ? new Date(s.approvedAt).toLocaleString() : "Pending"}</Text>
+                                      </View>
 
-                                        {/* Media Attachments */}
-                                        <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
-                                          <View style={{ flex: 1 }}>
-                                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 4 }}>Passport Photo</Text>
-                                            {hasPhoto ? (
-                                              <TouchableOpacity onPress={() => {
-                                                if (s.photoBase64 === "test") {
-                                                  Alert.alert("Passport Photo (Mock)", "This is a mock placeholder uploaded by the student.");
-                                                } else {
-                                                  setPreviewImageTitle("Passport Photo");
-                                                  setPreviewImageUri(s.photoBase64);
-                                                }
-                                              }} style={{ padding: 8, backgroundColor: darkMode ? "#0288d120" : "#e3f2fd", borderRadius: 4, alignItems: "center" }}>
-                                                <Text style={{ color: "#1976d2", fontSize: 11, fontWeight: "bold" }}>View Image</Text>
-                                              </TouchableOpacity>
-                                            ) : (
-                                              <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending</Text>
-                                            )}
-                                          </View>
-                                          <View style={{ flex: 1 }}>
-                                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 4 }}>Photo ID</Text>
-                                            {hasPhotoId ? (
-                                              <TouchableOpacity onPress={() => {
-                                                if (s.photoIdBase64 === "test") {
-                                                  Alert.alert(`${s.photoIdType || "Photo ID"} (Mock)`, "This is a mock placeholder uploaded by the student.");
-                                                } else {
-                                                  setPreviewImageTitle(s.photoIdType || "Photo ID");
-                                                  setPreviewImageUri(s.photoIdBase64);
-                                                }
-                                              }} style={{ padding: 8, backgroundColor: darkMode ? "#0288d120" : "#e3f2fd", borderRadius: 4, alignItems: "center" }}>
-                                                <Text style={{ color: "#1976d2", fontSize: 11, fontWeight: "bold" }}>View ID</Text>
-                                              </TouchableOpacity>
-                                            ) : (
-                                              <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending</Text>
-                                            )}
-                                          </View>
+                                      {/* Media Attachments */}
+                                      <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 4 }}>Passport Photo</Text>
+                                          {hasPhoto ? (
+                                            <TouchableOpacity onPress={() => {
+                                              if (s.photoBase64 === "test") {
+                                                Alert.alert("Passport Photo (Mock)", "This is a mock placeholder uploaded by the student.");
+                                              } else {
+                                                setPreviewImageTitle("Passport Photo");
+                                                setPreviewImageUri(s.photoBase64);
+                                              }
+                                            }} style={{ padding: 8, backgroundColor: darkMode ? "#0288d120" : "#e3f2fd", borderRadius: 4, alignItems: "center" }}>
+                                              <Text style={{ color: "#1976d2", fontSize: 11, fontWeight: "bold" }}>View Image</Text>
+                                            </TouchableOpacity>
+                                          ) : (
+                                            <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending</Text>
+                                          )}
                                         </View>
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 4 }}>Photo ID</Text>
+                                          {hasPhotoId ? (
+                                            <TouchableOpacity onPress={() => {
+                                              if (s.photoIdBase64 === "test") {
+                                                Alert.alert(`${s.photoIdType || "Photo ID"} (Mock)`, "This is a mock placeholder uploaded by the student.");
+                                              } else {
+                                                setPreviewImageTitle(s.photoIdType || "Photo ID");
+                                                setPreviewImageUri(s.photoIdBase64);
+                                              }
+                                            }} style={{ padding: 8, backgroundColor: darkMode ? "#0288d120" : "#e3f2fd", borderRadius: 4, alignItems: "center" }}>
+                                              <Text style={{ color: "#1976d2", fontSize: 11, fontWeight: "bold" }}>View ID</Text>
+                                            </TouchableOpacity>
+                                          ) : (
+                                            <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending</Text>
+                                          )}
+                                        </View>
+                                      </View>
 
-                                        {/* Action Buttons */}
-                                        <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
-                                          <TouchableOpacity
-                                            onPress={() => { setSelectedDirectoryStudent(null); setEditingStudent(s); setShowStudentForm(true); }}
-                                            style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
-                                          >
-                                            <Ionicons name="create-outline" size={14} color="#ffffff" />
-                                            <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Edit</Text>
-                                          </TouchableOpacity>
-                                          <TouchableOpacity
-                                            onPress={() => {
-                                              deleteStudentRecord(s.id);
-                                              setSelectedDirectoryStudent(null);
-                                            }}
-                                            style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#d32f2f", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
-                                          >
-                                            <Ionicons name="trash-outline" size={14} color="#ffffff" />
-                                            <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Delete</Text>
-                                          </TouchableOpacity>
-                                        </View>
-                                      </ScrollView>
-                                    );
-                                  })()}
-                                </View>
+                                      {/* Action Buttons */}
+                                      <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
+                                        <TouchableOpacity
+                                          onPress={() => { setSelectedDirectoryStudent(null); setEditingStudent(s); setShowStudentForm(true); }}
+                                          style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
+                                        >
+                                          <Ionicons name="create-outline" size={14} color="#ffffff" />
+                                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Edit</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            deleteStudentRecord(s.id);
+                                            setSelectedDirectoryStudent(null);
+                                          }}
+                                          style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#d32f2f", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
+                                        >
+                                          <Ionicons name="trash-outline" size={14} color="#ffffff" />
+                                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Delete</Text>
+                                        </TouchableOpacity>
+                                      </View>
+                                    </ScrollView>
+                                  );
+                                })()}
                               </View>
-                            </Modal>
-                          )}
+                            </View>
+                          </Modal>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -8235,7 +8235,7 @@ export default function App() {
                           <View style={styles.card}>
                             <Text style={styles.sectionTitle}>Select Target Audience</Text>
                             <Text style={{ fontSize: 12, color: "#757575", marginBottom: 10 }}>Credentials will be generated for all users matching the target criteria.</Text>
-                            
+
                             <View style={{ flexDirection: "row", gap: 8, marginBottom: 15 }}>
                               {[
                                 { key: "all", label: "All Users\n(Guest & Paid)" },
@@ -8460,7 +8460,7 @@ export default function App() {
                                           {isBulkGenerating ? "Processing..." : generationMode === "individual" ? "Generate ID Card" : "Generate for Batch"}
                                         </Text>
                                       </TouchableOpacity>
- 
+
                                       {((generationMode === "individual" && selectedIdStudent?.idCardGenerated) || generationMode === "batch") && (
                                         <TouchableOpacity
                                           disabled={isBulkGenerating}
@@ -8628,7 +8628,7 @@ export default function App() {
                                           {isBulkGenerating ? "Processing..." : generationMode === "individual" ? "Generate Hall Ticket" : "Generate for Batch"}
                                         </Text>
                                       </TouchableOpacity>
- 
+
                                       {((generationMode === "individual" && selectedIdStudent?.hallTicketGenerated) || generationMode === "batch") && (
                                         <TouchableOpacity
                                           disabled={isBulkGenerating}
@@ -9174,6 +9174,10 @@ export default function App() {
                   <Ionicons name="help-circle-outline" size={22} color={(lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "#c62828" : darkMode ? "#9e9e9e" : "#757575"} />
                   <Text style={[styles.sidebarTabTxt, (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") && styles.sidebarTabTxtActive, darkMode && styles.sidebarTabTxtDark]}>Quiz</Text>
                 </TouchableOpacity>
+                <TouchableOpacity onPress={() => changeLmsSub("daily-content")} style={[styles.sidebarTab, lmsSub === "daily-content" && styles.sidebarTabActive, lmsSub === "daily-content" && darkMode && styles.sidebarTabActiveDark]}>
+                  <Ionicons name="calendar-outline" size={22} color={lmsSub === "daily-content" ? "#c62828" : darkMode ? "#9e9e9e" : "#757575"} />
+                  <Text style={[styles.sidebarTabTxt, lmsSub === "daily-content" && styles.sidebarTabTxtActive, darkMode && styles.sidebarTabTxtDark]}>Daily Content</Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => changeLmsSub("resources")} style={[styles.sidebarTab, lmsSub === "resources" && styles.sidebarTabActive, lmsSub === "resources" && darkMode && styles.sidebarTabActiveDark]}>
                   <Ionicons name="folder-outline" size={22} color={lmsSub === "resources" ? "#c62828" : darkMode ? "#9e9e9e" : "#757575"} />
                   <Text style={[styles.sidebarTabTxt, lmsSub === "resources" && styles.sidebarTabTxtActive, darkMode && styles.sidebarTabTxtDark]}>Resources</Text>
@@ -9474,6 +9478,15 @@ export default function App() {
                   <View style={{ marginTop: 20, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: darkMode ? "#1e1e1e" : "#f5f5f5" }}>
                     <Text style={{ fontSize: 11, color: darkMode ? "#555" : "#bdbdbd", fontWeight: "700", letterSpacing: 1 }}>COMING SOON</Text>
                   </View>
+                </View>
+              )}
+
+              {/* Daily Content Section (Blank) */}
+              {lmsSub === "daily-content" && (
+                <View style={[styles.card, darkMode && styles.cardDark, { alignItems: "center", paddingVertical: 50 }]}>
+                  <Ionicons name="calendar-outline" size={52} color={darkMode ? "#444" : "#e0e0e0"} />
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: darkMode ? "#555" : "#9e9e9e", marginTop: 16 }}>Daily Content</Text>
+                  <Text style={{ fontSize: 13, color: darkMode ? "#444" : "#bdbdbd", marginTop: 8, textAlign: "center" }}>Daily study materials and updates will appear here.</Text>
                 </View>
               )}
 
