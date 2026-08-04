@@ -3830,14 +3830,35 @@ function MainApp() {
       return;
     }
     // Confirmation alert before final submit
+    const constituencyVal = profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency;
+    const detailsText = 
+      `Name: ${profileForm.name} ${profileForm.initial}\n` +
+      `DOB: ${profileForm.dob}\n` +
+      `Blood Group: ${profileForm.bloodGroup || "—"}\n` +
+      `Address: ${profileForm.address}\n` +
+      `Gender: ${profileForm.gender}\n` +
+      `Community: ${profileForm.community}\n` +
+      `Father's Name: ${profileForm.fatherName}\n` +
+      `Father's Occupation: ${profileForm.occupation}\n` +
+      `Your Occupation: ${profileForm.studentOccupation}\n` +
+      `Alt Phone: ${profileForm.altPhone}\n` +
+      `Email: ${profileForm.email}\n` +
+      `Qualification: ${profileForm.qualification}\n` +
+      `College: ${profileForm.college}\n` +
+      `Referral Source: ${profileForm.referralSource}\n` +
+      `Constituency: ${constituencyVal || "—"}\n` +
+      `Horizontal Reservation: ${profileForm.horizontalReservation || "—"}\n` +
+      `Photo ID: ${profileForm.photoIdType || "—"}\n\n` +
+      `⚠️ WARNING: Review details properly as it cannot be changed once submitted.`;
+
     Alert.alert(
-      "Verify Your Details",
-      "Please ensure all details are correct. Once submitted, this cannot be edited without administrator permission.",
+      "Confirm Submission Details",
+      detailsText,
       [
-        { text:"Go Back & Edit", style:"cancel"},
+        { text: "Go Back & Edit", style: "cancel" },
         {
-          text:"Submit Now",
-          style:"default",
+          text: "Confirm & Submit",
+          style: "default",
           onPress: async () => {
             try {
               await api.post("/auth/login", { username: user.username, password: studentOldPassword });
@@ -3859,15 +3880,15 @@ function MainApp() {
                 username: user.username,
                 ...profileForm,
                 constituency: profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency,
-                passportPhotoBase64: compressedPassport || profileForm.passportPhotoBase64 ||"test",
-                photoIdBase64: compressedPhotoId || profileForm.photoIdBase64 ||"test"
+                passportPhotoBase64: compressedPassport || profileForm.passportPhotoBase64 || "test",
+                photoIdBase64: compressedPhotoId || profileForm.photoIdBase64 || "test"
               }, undefined, 60000);
               // Disable edit permission and mark as submitted after student submission
               if (myStudent?.id) {
                 await api.put(`/erp/student/${myStudent.id}`, { profileEditPermission: false, isProfileSubmitted: true });
               }
-              Alert.alert("Submitted!","Your profile has been submitted for admin review. If anything needs to be changed, please contact the administrator.");
-              setProfileForm({ name:"", initial:"", dob:"", bloodGroup:"", address:"", gender:"", community:"", fatherName:"", occupation:"", studentOccupation:"", altPhone:"", email:"", qualification:"", college:"", referralSource:"", passportPhotoBase64:"", photoIdBase64:"", photoIdType:"", photoIdConfirmed: false, horizontalReservation:"", constituency:"", constituencyOthers:"" });
+              Alert.alert("Submitted Successfully", "Your profile has been submitted successfully for admin review.");
+              setProfileForm({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
               setStudentOldPassword("");
               setStudentNewPassword("");
               setShowValidationErrors(false);
@@ -12820,7 +12841,7 @@ PASTED QUESTION PAPER TEXT:
 
                                   {/* Radio Button Options Container — Disabled after selection and confirmation */}
                                   <View style={{ gap: 8, opacity: profileForm.photoIdConfirmed ? 0.6 : 1 }}>
-                                    {["Aadhar","PAN","Driving Licence","College ID","Voter ID","Passport"].map(t => {
+                                    {["Aadhar","Driving Licence","Voter ID"].map(t => {
                                       const isSelected = profileForm.photoIdType === t;
                                       return (
                                         <TouchableOpacity

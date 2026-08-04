@@ -2173,21 +2173,43 @@ export default function App() {
       Alert.alert("Error", "Name, Date of Birth and Address are required.");
       return;
     }
-    try {
-      await api.post("/erp/profile-request", {
-        studentId: myStudent?.id || user.studentId || user.userId,
-        username: user.username,
-        ...profileForm,
-        passportPhotoBase64: profileForm.passportPhotoBase64 || "test",
-        photoIdBase64: profileForm.photoIdBase64 || "test"
-      });
-      Alert.alert("Success", "Profile completion request submitted! Admin will review and approve soon.");
-      setShowProfileModal(false);
-      loadMyProfileRequest(myStudent?.id || user.studentId || user.userId);
-      loadStudents();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to submit profile.");
-    }
+
+    const detailsText = 
+      `Name: ${profileForm.name}\n` +
+      `DOB: ${profileForm.dob}\n` +
+      `Blood Group: ${profileForm.bloodGroup || "—"}\n` +
+      `Address: ${profileForm.address}\n` +
+      `Photo ID: ${profileForm.photoIdType || "—"}\n\n` +
+      `⚠️ WARNING: Review details properly as it cannot be changed once submitted.`;
+
+    Alert.alert(
+      "Confirm Submission Details",
+      detailsText,
+      [
+        { text: "Go Back & Edit", style: "cancel" },
+        {
+          text: "Confirm & Submit",
+          style: "default",
+          onPress: async () => {
+            try {
+              await api.post("/erp/profile-request", {
+                studentId: myStudent?.id || user.studentId || user.userId,
+                username: user.username,
+                ...profileForm,
+                passportPhotoBase64: profileForm.passportPhotoBase64 || "test",
+                photoIdBase64: profileForm.photoIdBase64 || "test"
+              });
+              Alert.alert("Submitted Successfully", "Your profile has been submitted successfully for admin review.");
+              setShowProfileModal(false);
+              loadMyProfileRequest(myStudent?.id || user.studentId || user.userId);
+              loadStudents();
+            } catch (e: any) {
+              Alert.alert("Error", e.message || "Failed to submit profile.");
+            }
+          }
+        }
+      ]
+    );
   };
 
   const approveProfileRequest = async (id: string) => {
@@ -6933,7 +6955,7 @@ export default function App() {
                           {/* Photo ID Upload */}
                           <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, fontWeight: "bold" }}>🪪 Valid Photo ID *</Text>
                           <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-                            {["Aadhar", "PAN", "Driving Licence"].map(t => (
+                            {["Aadhar", "Driving Licence", "Voter ID"].map(t => (
                               <TouchableOpacity key={t} onPress={() => setProfileForm({ ...profileForm, photoIdType: t })} style={{ flex: 1, padding: 8, borderRadius: 6, borderWidth: 2, borderColor: profileForm.photoIdType === t ? "#1976d2" : "#e0e0e0", backgroundColor: profileForm.photoIdType === t ? "#e3f2fd" : "#f9f9f9", alignItems: "center" }}>
                                 <Text style={{ fontSize: 11, color: profileForm.photoIdType === t ? "#1976d2" : "#757575", fontWeight: profileForm.photoIdType === t ? "bold" : "normal" }}>{t}</Text>
                               </TouchableOpacity>
