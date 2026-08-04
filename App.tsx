@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -12,8 +12,10 @@ import {
   Modal,
   Image,
   ActivityIndicator,
-  useWindowDimensions
+  useWindowDimensions,
+  NativeModules
 } from "react-native";
+import Constants from "expo-constants";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,9 +23,9 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
 // Configure your Host IP address for local network connections
-const DEFAULT_HOST_IP = "192.168.31.18";
-// Timeout in ms for all API calls — 12s gives plenty of room on LAN
-const API_TIMEOUT_MS = 12000;
+const DEFAULT_HOST_IP = "192.168.0.240";
+// Timeout in ms for all API calls — 20s gives plenty of room on mobile Wi-Fi / LAN
+const API_TIMEOUT_MS = 20000;
 
 // Safe cross-platform local storage helper for Guest Demo sessions
 const guestStorage = {
@@ -242,6 +244,10 @@ export default function App() {
   const [hostIp, setHostIp] = useState(DEFAULT_HOST_IP);
   const hostIpRef = useRef(DEFAULT_HOST_IP);
   const [hostIpInput, setHostIpInput] = useState(DEFAULT_HOST_IP);
+
+  useEffect(() => {
+    hostIpRef.current = hostIp;
+  }, [hostIp]);
   const [loginForm, setLoginForm] = useState({ username: "", password: "", role: "student" });
   const [registerForm, setRegisterForm] = useState({ username: "", password: "", name: "", email: "", role: "student" });
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -343,7 +349,7 @@ export default function App() {
   });
   const [pdfBase64, setPdfBase64] = useState("");
   const [akBase64, setAkBase64] = useState("");
-  const [devTab, setDevTab] = useState("collections");
+  const [devTab, setDevTab] = useState("manual-test");
   const [devCollections, setDevCollections] = useState<any[]>([]);
   const [devCollectionSearch, setDevCollectionSearch] = useState("");
   const [devSelectedDoc, setDevSelectedDoc] = useState<any | null>(null);
@@ -362,10 +368,12 @@ export default function App() {
   const [devQueryOp, setDevQueryOp] = useState("");
   const [devQueryResults, setDevQueryResults] = useState<any[]>([]);
   const [isSavingPermissions, setIsSavingPermissions] = useState(false);
+  const [devPageLocks, setDevPageLocks] = useState<Record<string, boolean>>({});
   const [isSendingNotification, setIsSendingNotification] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedQuestions, setExtractedQuestions] = useState<any[]>([]);
-  const [extractMode, setExtractMode] = useState<"auto" | "local" | "ai">("auto");
+  const [extractMode, setExtractMode] = useState<"local" | "ai">("local");
+  const [extractionWarnings, setExtractionWarnings] = useState<{ questionNo: number; issue: string }[]>([]);
   const [extractDraftId, setExtractDraftId] = useState<string | null>(null);
   const [pdfExtractText, setPdfExtractText] = useState("");
   const [genMode, setGenMode] = useState<"file" | "text">("file");
@@ -418,7 +426,35 @@ export default function App() {
   const [guestEmailUnlocked, setGuestEmailUnlocked] = useState(false);
   const [showGuestHallTicketModal, setShowGuestHallTicketModal] = useState(false);
 
-  const getBaseUrl = () => `http://${hostIpRef.current || DEFAULT_HOST_IP}:5000/api`;
+  const getAutoDetectedHostIp = (): string => {
+    try {
+      const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.hostUri || (Constants as any).manifest2?.extra?.expoGo?.developer?.tool;
+      if (hostUri) {
+        return hostUri.split(":")[0];
+      }
+      if (NativeModules.SourceCode?.scriptURL) {
+        const match = NativeModules.SourceCode.scriptURL.match(/^https?:\/\/([^:\/]+)/);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+    } catch (e) {
+      // fallback
+    }
+    return "";
+  };
+
+  const getBaseUrl = () => {
+    if (Platform.OS === "web" && typeof window !== "undefined" && window.location && window.location.hostname) {
+      const hostname = window.location.hostname;
+      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.") || hostname.startsWith("10.") || hostname.startsWith("172.")) {
+        return `http://${hostname}:5000/api`;
+      }
+    }
+    const autoIp = getAutoDetectedHostIp();
+    const targetIp = hostIpRef.current || autoIp || DEFAULT_HOST_IP;
+    return `http://${targetIp}:5000/api`;
+  };
   const extractionAbortRef = useRef<AbortController | null>(null);
 
   const api = useRef({
@@ -528,8 +564,8 @@ export default function App() {
   const [newStaff, setNewStaff] = useState({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin" });
 
   // Permissions Helpers
-  const getPermission = (feature: string): string => {
-    if (user?.role === "developer") return "CRUD";
+  const getPermission = (feature: string): string | string[] => {
+    if (user?.role === "developer" || user?.role === "super_admin") return "CRUD";
     if (!rolePermissions || !user?.role) return "CRUD"; // Default fallback
     const roleKey = user.role;
     return rolePermissions[roleKey]?.[feature] || "CRUD";
@@ -538,6 +574,13 @@ export default function App() {
   const hasPermission = (feature: string, action: "C" | "R" | "U" | "D"): boolean => {
     if (user?.role === "developer" || user?.role === "super_admin") return true;
     const perm = getPermission(feature);
+    if (Array.isArray(perm)) {
+      if (action === "C") return perm.includes("create") || perm.includes("create_only");
+      if (action === "R") return perm.includes("read") || perm.includes("view");
+      if (action === "U") return perm.includes("update") || perm.includes("edit_direct");
+      if (action === "D") return perm.includes("delete") || perm.includes("edit_direct");
+      return false;
+    }
     if (action === "C") return perm.includes("C");
     if (action === "R") return perm.includes("R");
     if (action === "U") return perm.includes("U");
@@ -613,6 +656,7 @@ export default function App() {
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
   const [quizFeedbackQuestions, setQuizFeedbackQuestions] = useState<any[]>([]);
+  const [showAnswers, setShowAnswers] = useState(true);
 
   // Create Quiz Form (LMS Admin)
   const [quizDateInput, setQuizDateInput] = useState(new Date().toISOString().split("T")[0]);
@@ -1062,6 +1106,7 @@ export default function App() {
       loadTodayQuiz();
       loadAllQuizzes();
       loadRolePermissions();
+      api.get("/developer/page-locks").then((res: any) => setDevPageLocks(res?.data || res || {})).catch(() => {});
       if (user.role && ["developer", "super_admin", "admin"].includes(user.role)) {
         loadPendingApprovals();
       }
@@ -1226,7 +1271,8 @@ export default function App() {
       const role = user?.role || "guest";
       const myStudent = getLoggedInStudent(user, students);
       const batch = myStudent?.batch || "";
-      const res = await api.get(`/notification?role=${role}&batch=${batch}`);
+      const studentId = myStudent?.id || user?.studentId || user?.userId || "";
+      const res = await api.get(`/notification?role=${role}&batch=${batch}&studentId=${studentId}`);
       setNotifications(res?.data || res || []);
     } catch (e) {
       console.log("Failed loading notifications:", e);
@@ -1699,7 +1745,7 @@ export default function App() {
     }
   };
 
-  // AI PDF Question Extraction (Admin)
+  // Question Paper Extraction
   const extractQuestionsFromText = async () => {
     if (genMode === "file" && !pdfBase64) {
       Alert.alert("Error", "Please upload a Question Paper Word File (.docx).");
@@ -1710,6 +1756,7 @@ export default function App() {
       return;
     }
     setIsExtracting(true);
+    setExtractionWarnings([]);
     const abortCtrl = new AbortController();
     extractionAbortRef.current = abortCtrl;
     try {
@@ -1720,9 +1767,10 @@ export default function App() {
         filename: genMode === "file" ? pdfFilename : "pasted_text.txt",
         title: newPdfTest.title || "Untitled Test",
         mode: extractMode
-      }, undefined, 180000); // 3 minutes timeout for AI processing
+      }, undefined, 240000); // 4 minutes timeout for AI processing
       if (abortCtrl.signal.aborted) return;
       const data = res.data || res;
+      const warnings = data.warnings || data.data?.warnings || [];
       const normalized = (data.questions || []).map((q: any) => {
         const questionEn = q.questionEn || q.questionText || q.question || "";
         const questionTa = q.questionTa || "";
@@ -1748,10 +1796,10 @@ export default function App() {
           if (flatEn && !optionsObj[k].en) optionsObj[k].en = flatEn;
           if (flatTa && !optionsObj[k].ta) optionsObj[k].ta = flatTa;
         });
-        let correctAnswer = q.correctAnswer || q.correctOption || q.answer || "";
+        let correctAnswer = q.correctAnswer || q.correctOption || q.answer || "A";
         correctAnswer = correctAnswer.toString().trim().toUpperCase();
         if (!["A", "B", "C", "D"].includes(correctAnswer)) {
-          correctAnswer = "A";
+          correctAnswer = "A"; // safe default so test doesn't crash
         }
         return {
           ...q,
@@ -1762,8 +1810,16 @@ export default function App() {
         };
       });
       setExtractedQuestions(normalized);
+      setExtractionWarnings(warnings);
       setExtractDraftId(data.draftId || "");
-      Alert.alert("Extraction Complete!", `Extracted ${data.questionCount || 0} questions successfully.`);
+      if (warnings.length > 0) {
+        Alert.alert(
+          "Extraction Complete with Warnings",
+          `Extracted ${data.questionCount || normalized.length} questions.\n\n${warnings.length} question(s) may need review. Check the yellow warning banner for details.`
+        );
+      } else {
+        Alert.alert("Extraction Complete!", `Extracted ${data.questionCount || normalized.length} questions successfully.`);
+      }
     } catch (e: any) {
       if (abortCtrl.signal.aborted) return; // silently ignore cancelled
       Alert.alert("Extraction Failed", e.message || "Extraction failed.");
@@ -1838,7 +1894,7 @@ export default function App() {
       const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
       setNewPdfTest({ title: "", startTime: startStr, endTime: endStr, marksPerQ: "1", negMarks: "0.33", unattendedMarks: "0", totalMarks: "", targetAudience: "all", targetBatch: "" });
       setTestSub("available");
-      loadTests();
+      setTimeout(() => loadTests(), 1200);
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to create test.");
     }
@@ -1896,10 +1952,18 @@ export default function App() {
       setUser(res);
       setActiveTab("dashboard");
     } catch (e: any) {
-      Alert.alert(
-        "Authentication Failed",
-        `Could not authenticate with server at ${getBaseUrl()}.\n\nError: ${e.message || "Unknown error"}`
-      );
+      let errorMsg = e.message || "Unknown error";
+      const normalizedMsg = String(errorMsg).toUpperCase();
+      if (
+        normalizedMsg.includes("INVALID_EMAIL") ||
+        normalizedMsg.includes("EMAIL_NOT_FOUND") ||
+        normalizedMsg.includes("INVALID_LOGIN_CREDENTIALS") ||
+        normalizedMsg.includes("INVALID_PASSWORD") ||
+        normalizedMsg.includes("INVALID CREDENTIALS")
+      ) {
+        errorMsg = "Invalid username or password";
+      }
+      Alert.alert("Authentication Failed", errorMsg);
     }
   };
 
@@ -2789,29 +2853,77 @@ export default function App() {
     };
 
     const rolesList = [
-      { key: "super_admin", label: "Super Admin", color: "#d32f2f" },
       { key: "admin", label: "Admin", color: "#1976d2" },
       { key: "editor", label: "Editor", color: "#f57c00" },
-      { key: "contributor", label: "Contributor", color: "#388e3c" }
+      { key: "contributor", label: "Contributor", color: "#388e3c" },
+      { key: "staff", label: "Staff", color: "#6a1b9a" },
+      { key: "teacher", label: "Teacher", color: "#00695c" }
+    ];
+
+    // Granular permission bits — per feature
+    // For toggle-capable modules the key includes enable/disable options
+    const allPermissionBits = [
+      { key: "create", label: "Create" },
+      { key: "read", label: "Read" },
+      { key: "update", label: "Update" },
+      { key: "delete", label: "Delete" },
+      { key: "create_on_approval", label: "Create (on approval)" },
+      { key: "read_on_approval", label: "Read (on approval)" },
+      { key: "update_on_approval", label: "Update (on approval)" },
+      { key: "delete_on_approval", label: "Delete (on approval)" }
+    ];
+
+    const togglePermissionBits = [
+      ...allPermissionBits,
+      { key: "enable", label: "Enable" },
+      { key: "disable", label: "Disable" }
     ];
 
     const featuresList = [
-      { key: "students", label: "Student Directory" },
-      { key: "batches", label: "Batches & Courses" },
-      { key: "announcements", label: "Announcements / Notices" },
-      { key: "fees", label: "Tuition Fees / Ledger" },
-      { key: "tests", label: "Mock Tests & Leaderboards" },
-      { key: "quiz", label: "LMS Daily Practice Quiz" },
-      { key: "id-card", label: "ID Card Generation" }
+      { key: "students", label: "Students", bits: allPermissionBits },
+      { key: "admins", label: "Admins / Staff Accounts", bits: allPermissionBits },
+      { key: "id_card", label: "ID / Hall Ticket Generation", bits: allPermissionBits },
+      { key: "batches", label: "Batches", bits: allPermissionBits },
+      { key: "profile_edit_permissions", label: "Profile Edit Permissions", bits: allPermissionBits },
+      { key: "notices", label: "Notices / Announcements", bits: togglePermissionBits },
+      { key: "offline_attendance", label: "Offline Attendance", bits: allPermissionBits },
+      { key: "quiz", label: "Quiz / Daily Practice", bits: togglePermissionBits },
+      { key: "daily_content", label: "Daily Content", bits: togglePermissionBits },
+      { key: "resources", label: "Resources / Study Material", bits: allPermissionBits },
+      { key: "live_classes", label: "Live Classes", bits: togglePermissionBits },
+      { key: "recorded_classes", label: "Recorded Classes", bits: togglePermissionBits },
+      { key: "enquiries", label: "Enquiries", bits: allPermissionBits },
+      { key: "leads", label: "Leads / CRM", bits: allPermissionBits },
+      { key: "campaigns", label: "Campaigns", bits: togglePermissionBits },
+      { key: "feedbacks", label: "Feedbacks", bits: allPermissionBits },
+      { key: "fees", label: "Fees / Ledger", bits: allPermissionBits },
+      { key: "mock_tests", label: "Mock Tests", bits: togglePermissionBits },
+      { key: "leaderboards", label: "Leaderboards", bits: togglePermissionBits },
+      { key: "reports", label: "Reports & Analytics", bits: [{ key: "read", label: "Read" }, { key: "read_on_approval", label: "Read (on approval)" }] },
+      { key: "settings", label: "System Settings", bits: allPermissionBits }
     ];
 
-    const permissionOptions = [
-      { key: "CRUD", label: "Full Access (CRUD)" },
-      { key: "CRU only", label: "Create, Read, Update (CRU)" },
-      { key: "CR only", label: "Create, Read (CR)" },
-      { key: "U only", label: "Update Only (U)" },
-      { key: "Delete but approval required from super admin", label: "Delete with Super Admin Approval" }
-    ];
+    const getFeatureBits = (featureKey: string): string[] => {
+      const feat = featuresList.find(f => f.key === featureKey);
+      return feat ? feat.bits.map(b => b.key) : [];
+    };
+
+    const toggleFeatureBit = (featureKey: string, bitKey: string) => {
+      setRolePermissions((prev: any) => {
+        const rolePerms = prev?.[activePermissionRole] || {};
+        const currentBits: string[] = rolePerms[featureKey] || [];
+        const newBits = currentBits.includes(bitKey)
+          ? currentBits.filter((b: string) => b !== bitKey)
+          : [...currentBits, bitKey];
+        return {
+          ...prev,
+          [activePermissionRole]: {
+            ...rolePerms,
+            [featureKey]: newBits
+          }
+        };
+      });
+    };
 
     const saveRolePermissionsFromDev = async () => {
       setIsSavingPermissions(true);
@@ -2869,801 +2981,150 @@ export default function App() {
           {/* LEFT SIDEBAR NAVIGATION replicating Admin Panel sidebar */}
           <View style={[styles.sidebar, darkMode && styles.sidebarDark]}>
             <TouchableOpacity
-              onPress={() => { setDevTab("explorer"); devLoadCollections(); }}
-              style={[styles.sidebarTab, devTab === "explorer" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
-            >
-              <Ionicons name="folder-open-outline" size={20} color={devTab === "explorer" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
-              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "explorer" && styles.sidebarTabTxtActive]}>Explorer</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => { setDevTab("permissions"); loadRolePermissions(); }}
-              style={[styles.sidebarTab, devTab === "permissions" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
-            >
-              <Ionicons name="key-outline" size={20} color={devTab === "permissions" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
-              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "permissions" && styles.sidebarTabTxtActive]}>Roles</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => { setDevTab("approvals"); loadPendingApprovals(); }}
-              style={[styles.sidebarTab, devTab === "approvals" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
-            >
-              <Ionicons name="checkmark-circle-outline" size={20} color={devTab === "approvals" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
-              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "approvals" && styles.sidebarTabTxtActive]}>
-                Approvals
-                {pendingApprovals.length > 0 && (
-                  <Text style={{ color: "#c62828", fontWeight: "bold" }}> ({pendingApprovals.length})</Text>
-                )}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => { setDevTab("credentials"); loadStudents(); }}
-              style={[styles.sidebarTab, devTab === "credentials" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
-            >
-              <Ionicons name="card-outline" size={20} color={devTab === "credentials" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
-              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "credentials" && styles.sidebarTabTxtActive]}>Credentials</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
               onPress={() => { setDevTab("manual-test"); }}
               style={[styles.sidebarTab, devTab === "manual-test" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
             >
               <Ionicons name="document-text-outline" size={20} color={devTab === "manual-test" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
               <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "manual-test" && styles.sidebarTabTxtActive]}>Manual Test</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => { setDevTab("page-lock"); }}
+              style={[styles.sidebarTab, devTab === "page-lock" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
+            >
+              <Ionicons name="lock-closed-outline" size={20} color={devTab === "page-lock" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
+              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "page-lock" && styles.sidebarTabTxtActive]}>Page Lock</Text>
+            </TouchableOpacity>
           </View>
 
           {/* MAIN WORKING AREA replicating Admin Panel layout */}
-          <View style={[styles.splitContent, darkMode && styles.splitContentDark, { paddingHorizontal: 0, paddingTop: 0 }]}>{/* WORKSPACE 1: DATABASE EXPLORER */}
-            {devTab === "explorer" && (
-              <View style={{ flex: 1, flexDirection: "row" }}>
-                {/* Explorer Col 1: Collections list */}
-                <View style={{ width: 200, backgroundColor: darkMode ? "#1a1a1a" : "#f9f9f9", borderRightWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                  <View style={{ padding: 10, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                    <TouchableOpacity
-                      onPress={devLoadCollections}
-                      style={[styles.primaryBtn, { paddingVertical: 6, marginBottom: 8, height: 32, justifyContent: "center" }]}
-                    >
-                      <Text style={[styles.primaryBtnTxt, { fontSize: 11 }]}>↻ Reload Collections</Text>
-                    </TouchableOpacity>
-                    <TextInput
-                      style={[styles.input, darkMode && styles.inputDark, { marginBottom: 0, height: 32, paddingVertical: 0, fontSize: 11 }]}
-                      placeholder="Filter collections..."
-                      placeholderTextColor={darkMode ? "#757575" : "#9e9e9e"}
-                      value={devCollectionSearch}
-                      onChangeText={setDevCollectionSearch}
-                    />
-                  </View>
-                  <ScrollView style={{ flex: 1 }}>
-                    {filteredCollections.map(col => (
-                      <TouchableOpacity
-                        key={col.name}
-                        onPress={() => {
-                          setDevActiveCollection(col.name);
-                          setDevDocs([]);
-                          setDevSelectedDoc(null);
-                          setDevSelectedDocId(null);
-                          setDevEditMode("view");
-                          setDevSearch("");
-                          devLoadDocs(col.name, 0);
-                        }}
-                        style={{
-                          padding: 10,
-                          borderBottomWidth: 1,
-                          borderColor: darkMode ? "#2a2a2a" : "#eaeaea",
-                          backgroundColor: devActiveCollection === col.name ? (darkMode ? "rgba(239, 154, 154, 0.12)" : "rgba(198, 40, 40, 0.08)") : "transparent"
-                        }}
-                      >
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: COL_COLORS[col.name] || "#757575" }} />
-                          <Text style={{ color: devActiveCollection === col.name ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#e0e0e0" : "#212121"), fontSize: 12, fontWeight: "bold", flex: 1 }} numberOfLines={1}>{col.name}</Text>
-                        </View>
-                        <Text style={{ color: darkMode ? "#757575" : "#9e9e9e", fontSize: 10, marginTop: 2, paddingLeft: 14 }}>{col.count} documents</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-
-                {/* Explorer Col 2: Documents List */}
-                <View style={{ width: 240, backgroundColor: darkMode ? "#121212" : "#ffffff", borderRightWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                  {devActiveCollection ? (
-                    <>
-                      <View style={{ padding: 8, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", gap: 6 }}>
-                        <TextInput
-                          style={[styles.input, darkMode && styles.inputDark, { marginBottom: 0, height: 32, paddingVertical: 0, fontSize: 11 }]}
-                          placeholder="Search document IDs..."
-                          placeholderTextColor={darkMode ? "#757575" : "#9e9e9e"}
-                          value={devSearch}
-                          onChangeText={setDevSearch}
-                          onSubmitEditing={() => devLoadDocs(devActiveCollection, 0)}
-                        />
-                        <View style={{ flexDirection: "row", gap: 4 }}>
-                          <TouchableOpacity onPress={() => { setDevEditMode("create"); setDevNewDocJson("{\n  \n}"); setDevSelectedDoc(null); }} style={{ flex: 1, backgroundColor: "#2e7d32", borderRadius: 5, padding: 6, alignItems: "center" }}>
-                            <Text style={{ color: "#fff", fontSize: 10, fontWeight: "bold" }}>+ New Doc</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => { setDevEditMode("query"); setDevQueryResults([]); }} style={{ flex: 1, backgroundColor: "#1565c0", borderRadius: 5, padding: 6, alignItems: "center" }}>
-                            <Text style={{ color: "#fff", fontSize: 10, fontWeight: "bold" }}>Query Builder</Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
-                          <TouchableOpacity onPress={() => devLoadDocs(devActiveCollection, 0)} style={{ flex: 1, backgroundColor: darkMode ? "#2a2a2a" : "#e0e0e0", borderRadius: 5, padding: 5, alignItems: "center", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                            <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 10 }}>Reload</Text>
-                          </TouchableOpacity>
-                          {devOffset > 0 && (
-                            <TouchableOpacity onPress={() => devLoadDocs(devActiveCollection, Math.max(0, devOffset - devLimit))} style={{ width: 30, backgroundColor: darkMode ? "#2a2a2a" : "#e0e0e0", borderRadius: 5, padding: 5, alignItems: "center", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                              <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 10 }}>◀</Text>
-                            </TouchableOpacity>
-                          )}
-                          {devDocs.length === devLimit && (
-                            <TouchableOpacity onPress={() => devLoadDocs(devActiveCollection, devOffset + devLimit)} style={{ width: 30, backgroundColor: darkMode ? "#2a2a2a" : "#e0e0e0", borderRadius: 5, padding: 5, alignItems: "center", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                              <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 10 }}>▶</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      </View>
-                      {devDocsLoading ? (
-                        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                          <ActivityIndicator size="small" color={darkMode ? "#ef9a9a" : "#c62828"} />
-                          <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, marginTop: 8 }}>Querying Firestore...</Text>
-                        </View>
-                      ) : (
-                        <ScrollView style={{ flex: 1 }}>
-                          {devDocs.map((doc: any) => (
-                            <TouchableOpacity
-                              key={doc._id}
-                              onPress={() => devOpenDoc(doc._id)}
-                              style={{
-                                padding: 8,
-                                borderBottomWidth: 1,
-                                borderColor: darkMode ? "#2a2a2a" : "#eaeaea",
-                                backgroundColor: devSelectedDocId === doc._id ? (darkMode ? "rgba(239, 154, 154, 0.12)" : "rgba(198, 40, 40, 0.08)") : "transparent"
-                              }}
-                            >
-                              <Text style={{ color: devSelectedDocId === doc._id ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#2196f3" : "#4caf50"), fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }} numberOfLines={1}>{doc._id}</Text>
-                              <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 9, marginTop: 4 }} numberOfLines={2}>
-                                {Object.keys(doc).filter(k => k !== "_id").slice(0, 3).map(k => `${k}: ${typeof doc[k] === "object" ? "{...}" : String(doc[k]).slice(0, 18)}`).join(" · ")}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                          {devDocs.length === 0 && (
-                            <View style={{ padding: 20, alignItems: "center" }}>
-                              <Text style={{ color: darkMode ? "#616161" : "#9e9e9e", fontSize: 11 }}>No documents found</Text>
-                            </View>
-                          )}
-                        </ScrollView>
-                      )}
-                    </>
-                  ) : (
-                    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
-                      <Ionicons name="folder-outline" size={28} color={darkMode ? "#3a3a3a" : "#ccc"} />
-                      <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, textAlign: "center", marginTop: 8 }}>Select a collection</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Explorer Col 3: Document Content Area */}
-                <View style={{ flex: 1, backgroundColor: darkMode ? "#1a1a1a" : "#fcfcfc" }}>
-                  {devActiveCollection && (
-                    <View style={{ flexDirection: "row", gap: 6, padding: 8, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", backgroundColor: darkMode ? "#121212" : "#f5f5f5" }}>
-                      {devSelectedDoc && (
-                        <>
-                          <TouchableOpacity onPress={() => setDevEditMode("view")} style={{ backgroundColor: devEditMode === "view" ? (darkMode ? "#2a2a2a" : "#e0e0e0") : "transparent", borderRadius: 5, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                            <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 11 }}>👁 View Content</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => { setDevEditMode("edit"); setDevEditJson(JSON.stringify(devSelectedDoc, null, 2)); }} style={{ backgroundColor: devEditMode === "edit" ? (darkMode ? "#2a2a2a" : "#e0e0e0") : "transparent", borderRadius: 5, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                            <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 11 }}>✏️ Raw Edit JSON</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity onPress={() => devDeleteDoc(devSelectedDocId!)} style={{ backgroundColor: "rgba(198, 40, 40, 0.1)", borderRadius: 5, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "#c62828" }}>
-                            <Text style={{ color: "#c62828", fontSize: 11 }}>🗑 Delete</Text>
-                          </TouchableOpacity>
-                        </>
-                      )}
-                      {devEditMode === "edit" && (
-                        <TouchableOpacity onPress={devSaveDoc} style={{ backgroundColor: "#2e7d32", borderRadius: 5, paddingHorizontal: 12, paddingVertical: 6 }}>
-                          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>💾 Save JSON Changes</Text>
-                        </TouchableOpacity>
-                      )}
-                      {devEditMode === "create" && (
-                        <TouchableOpacity onPress={devCreateDoc} style={{ backgroundColor: "#2e7d32", borderRadius: 5, paddingHorizontal: 12, paddingVertical: 6 }}>
-                          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>➕ Insert Document</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )}
-
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12 }}>
-                    {devEditMode === "view" && devSelectedDoc && (
-                      <View>
-                        <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontFamily: "monospace", fontSize: 12, marginBottom: 12, fontWeight: "700" }}>
-                          {devActiveCollection} / {devSelectedDocId}
-                        </Text>
-                        <View style={{ backgroundColor: darkMode ? "#121212" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", padding: 12 }}>
-                          {Object.entries(devSelectedDoc).map(([k, v]) => (
-                            <View key={k} style={{ marginBottom: 10, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0", paddingBottom: 8 }}>
-                              <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>{k}</Text>
-                              <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 11, fontFamily: "monospace", marginTop: 4, lineHeight: 16 }} selectable>
-                                {typeof v === "object" ? JSON.stringify(v, null, 2) : String(v)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    )}
-
-                    {devEditMode === "edit" && (
-                      <View>
-                        <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12, marginBottom: 8 }}>Edit Raw Document Fields (JSON format):</Text>
-                        <TextInput
-                          multiline
-                          style={{ backgroundColor: darkMode ? "#121212" : "#f8f9fa", color: darkMode ? "#e0e0e0" : "#212121", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc", padding: 12, fontFamily: "monospace", fontSize: 11, minHeight: 400, textAlignVertical: "top" }}
-                          value={devEditJson}
-                          onChangeText={setDevEditJson}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                      </View>
-                    )}
-
-                    {devEditMode === "create" && (
-                      <View>
-                        <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12, marginBottom: 8 }}>Define New Document JSON payload (must be valid JSON):</Text>
-                        <TextInput
-                          multiline
-                          style={{ backgroundColor: darkMode ? "#121212" : "#f8f9fa", color: darkMode ? "#e0e0e0" : "#212121", borderRadius: 8, borderWidth: 1, borderColor: "#2e7d32", padding: 12, fontFamily: "monospace", fontSize: 11, minHeight: 400, textAlignVertical: "top" }}
-                          value={devNewDocJson}
-                          onChangeText={setDevNewDocJson}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                      </View>
-                    )}
-
-                    {devEditMode === "query" && (
-                      <View style={{ gap: 10 }}>
-                        <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontWeight: "bold", fontSize: 14 }}>🔍 Firestore Query Builder</Text>
-                        <TextInput
-                          style={[styles.input, darkMode && styles.inputDark]}
-                          placeholder="Field name (e.g. role)"
-                          placeholderTextColor={darkMode ? "#757575" : "#9e9e9e"}
-                          value={devQueryField}
-                          onChangeText={setDevQueryField}
-                          autoCapitalize="none"
-                        />
-                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                          {["==", "!=", ">", ">=", "<", "<=", "array-contains", "in"].map(op => (
-                            <TouchableOpacity key={op} onPress={() => setDevQueryOp(op)} style={{ backgroundColor: devQueryOp === op ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderRadius: 5, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#ccc" }}>
-                              <Text style={{ color: devQueryOp === op ? "#fff" : (darkMode ? "#e0e0e0" : "#212121"), fontSize: 11, fontFamily: "monospace" }}>{op}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                        <TextInput
-                          style={[styles.input, darkMode && styles.inputDark]}
-                          placeholder='Value (e.g. "admin" or 42)'
-                          placeholderTextColor={darkMode ? "#757575" : "#9e9e9e"}
-                          value={devQueryValue}
-                          onChangeText={setDevQueryValue}
-                          autoCapitalize="none"
-                        />
-                        <TouchableOpacity onPress={devRunQuery} style={[styles.primaryBtn, { backgroundColor: "#1565c0", marginHorizontal: 0 }]}>
-                          <Text style={styles.primaryBtnTxt}>Execute Firestore Query</Text>
-                        </TouchableOpacity>
-
-                        {devQueryResults.length > 0 && (
-                          <View style={{ marginTop: 12 }}>
-                            <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 12, marginBottom: 8, fontWeight: "bold" }}>Query Output ({devQueryResults.length} records):</Text>
-                            {devQueryResults.map((doc: any, i: number) => (
-                              <TouchableOpacity key={i} onPress={() => { setDevSelectedDoc(doc); setDevSelectedDocId(doc._id); setDevEditMode("view"); }}
-                                style={{ backgroundColor: darkMode ? "#121212" : "#ffffff", borderRadius: 6, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                                <Text style={{ color: darkMode ? "#ef9a9a" : "#1565c0", fontSize: 11, fontFamily: "monospace", fontWeight: "bold" }}>{doc._id}</Text>
-                                <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 10, marginTop: 4 }} numberOfLines={2}>
-                                  {Object.keys(doc).filter(k => k !== "_id").slice(0, 4).map(k => `${k}: ${typeof doc[k] === "object" ? "{...}" : String(doc[k]).slice(0, 30)}`).join(" · ")}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    )}
-
-                    {!devSelectedDoc && !devActiveCollection && (
-                      <View style={{ alignItems: "center", justifyContent: "center", paddingTop: 100 }}>
-                        <Ionicons name="terminal-outline" size={48} color={darkMode ? "#3a3a3a" : "#ccc"} />
-                        <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 13, marginTop: 12, fontWeight: "bold" }}>UNISTRIX DATABASE EXPLORER</Text>
-                        <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, marginTop: 4, textAlign: "center" }}>Select a collection from the left panel to browse and query records</Text>
-                      </View>
-                    )}
-                  </ScrollView>
-                </View>
-              </View>
-            )}
-
-            {/* WORKSPACE 2: ROLE PERMISSIONS MATRIX */}
-            {devTab === "permissions" && (
+          <View style={[styles.splitContent, darkMode && styles.splitContentDark, { paddingHorizontal: 0, paddingTop: 0 }]}>
+            {/* WORKSPACE: PAGE LOCK */}
+            {devTab === "page-lock" && (
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15, flexWrap: "wrap", gap: 10 }}>
                   <View style={{ flex: 1, minWidth: 240 }}>
-                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Role Permissions Configurator</Text>
-                    <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>Setup and modify admin role permissions matrix persistently saved to role_permissions collection</Text>
+                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Page Lock Controls</Text>
+                    <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>Instantly lock or unlock individual portals and sub-pages. Changes take effect for all users immediately.</Text>
                   </View>
-                  <TouchableOpacity
-                    disabled={isSavingPermissions}
-                    onPress={saveRolePermissionsFromDev}
-                    style={[styles.primaryBtn, { backgroundColor: "#2e7d32", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 0 }]}
-                  >
-                    <Text style={styles.primaryBtnTxt}>
-                      {isSavingPermissions ? "Saving..." : "💾 Save Permissions Matrix"}
-                    </Text>
-                  </TouchableOpacity>
                 </View>
 
-                {/* Role Tabs styled like Admin Pills */}
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 15, flexWrap: "wrap" }}>
-                  {rolesList.map(r => {
-                    const isSelected = activePermissionRole === r.key;
-                    return (
-                      <TouchableOpacity
-                        key={r.key}
-                        onPress={() => setActivePermissionRole(r.key)}
-                        style={{
-                          paddingHorizontal: 16,
-                          paddingVertical: 8,
-                          borderRadius: 20,
-                          borderWidth: 1.5,
-                          borderColor: isSelected ? r.color : (darkMode ? "#3a3a3a" : "#ccc"),
-                          backgroundColor: isSelected ? (darkMode ? "rgba(239, 154, 154, 0.1)" : "rgba(198, 40, 40, 0.05)") : "transparent"
-                        }}
-                      >
-                        <Text style={{ color: isSelected ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#e0e0e0" : "#212121"), fontWeight: "bold", fontSize: 12 }}>{r.label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                {/* LOCK SECTION BUILDER */}
+                {(() => {
+                  const lockSections = [
+                    {
+                      group: "Full Application",
+                      icon: "globe-outline" as const,
+                      color: "#c62828",
+                      items: [
+                        { key: "lock_full_app", label: "Lock Entire Application", desc: "Locks both admin panel and student portal. Only developer can access." },
+                      ]
+                    },
+                    {
+                      group: "Student Portal",
+                      icon: "phone-portrait-outline" as const,
+                      color: "#1565c0",
+                      items: [
+                        { key: "lock_student_portal", label: "Lock Full Student Portal", desc: "Locks the entire student-facing app. Admin panel remains accessible." },
+                        { key: "lock_student_home", label: "Lock Home / Dashboard", desc: "Shows maintenance screen on student Home tab only." },
+                        { key: "lock_student_courses", label: "Lock Courses Section", desc: "Hides/locks the Courses & Batches sub-portal for students." },
+                        { key: "lock_student_tests", label: "Lock Tests & Quiz", desc: "Locks Mock Tests, Daily Quiz and Free Test sections for students." },
+                        { key: "lock_student_results", label: "Lock Results & Leaderboard", desc: "Prevents students from viewing their results and leaderboards." },
+                        { key: "lock_student_resources", label: "Lock Resources & Study Material", desc: "Locks PDF/video resources for all students." },
+                        { key: "lock_student_live", label: "Lock Live & Recorded Classes", desc: "Disables live and recorded class access for students." },
+                        { key: "lock_student_profile", label: "Lock Profile / Account", desc: "Prevents students from editing their profile." },
+                        { key: "lock_student_fees", label: "Lock Fees & Payments", desc: "Hides the fee ledger and payment section." },
+                      ]
+                    },
+                    {
+                      group: "Admin / ERP Panel",
+                      icon: "desktop-outline" as const,
+                      color: "#2e7d32",
+                      items: [
+                        { key: "lock_admin_panel", label: "Lock Admin Panel", desc: "Prevents all admin/staff from logging in (except developer)." },
+                        { key: "lock_admin_students", label: "Lock Student Management", desc: "Locks the Students section in ERP." },
+                        { key: "lock_admin_fees", label: "Lock Fees & Ledger (Admin)", desc: "Locks the Fees section in ERP for admin/staff." },
+                        { key: "lock_admin_reports", label: "Lock Reports & Analytics", desc: "Hides the analytics and reporting module from admin." },
+                        { key: "lock_admin_campaigns", label: "Lock Campaigns & CRM", desc: "Disables campaigns and lead management for admin." },
+                      ]
+                    },
+                    {
+                      group: "Web Portal",
+                      icon: "browsers-outline" as const,
+                      color: "#6a1b9a",
+                      items: [
+                        { key: "lock_web_portal", label: "Lock Entire Web Portal", desc: "Shows maintenance page on the public web portal." },
+                        { key: "lock_web_login", label: "Lock Web Login / Signup", desc: "Prevents new logins/signups via web portal." },
+                      ]
+                    },
+                  ];
 
-                {/* Permissions Grid Container */}
-                <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", padding: 15 }}>
-                  <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 13, fontWeight: "bold", marginBottom: 15 }}>
-                    Configure permissions for: {rolesList.find(r => r.key === activePermissionRole)?.label}
-                  </Text>
+                  return lockSections.map(section => (
+                    <View key={section.group} style={{ marginBottom: 20, backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 10, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e8e8e8", overflow: "hidden" }}>
+                      {/* Section Header */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderBottomWidth: 1, borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0", backgroundColor: darkMode ? "#1a1a1a" : "#fafafa" }}>
+                        <Ionicons name={section.icon} size={18} color={section.color} />
+                        <Text style={{ fontWeight: "bold", fontSize: 13, color: section.color }}>{section.group}</Text>
+                      </View>
 
-                  <View style={{ gap: 20 }}>
-                    {featuresList.map(f => {
-                      const currentRolePerms = rolePermissions?.[activePermissionRole] || {};
-                      const activeVal = currentRolePerms[f.key] || "CRUD";
-                      return (
-                        <View key={f.key} style={{ paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
-                          <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>{f.label}</Text>
-                          <View style={{ gap: 6 }}>
-                            {permissionOptions.map(opt => {
-                              const isSelected = activeVal === opt.key;
-                              return (
-                                <TouchableOpacity
-                                  key={opt.key}
-                                  onPress={() => updateFeaturePermissionFromDev(f.key, opt.key)}
-                                  style={{
-                                    flexDirection: "row",
-                                    alignItems: "center",
-                                    padding: 10,
-                                    borderRadius: 6,
-                                    borderWidth: 1,
-                                    borderColor: isSelected ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#3a3a3a" : "#e0e0e0"),
-                                    backgroundColor: isSelected ? (darkMode ? "rgba(239, 154, 154, 0.1)" : "rgba(198, 40, 40, 0.05)") : (darkMode ? "#121212" : "#ffffff")
-                                  }}
-                                >
-                                  <View style={{
-                                    width: 16,
-                                    height: 16,
-                                    borderRadius: 8,
-                                    borderWidth: 2,
-                                    borderColor: isSelected ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#757575" : "#bdbdbd"),
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    marginRight: 10
-                                  }}>
-                                    {isSelected && (
-                                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: darkMode ? "#ef9a9a" : "#c62828" }} />
-                                    )}
-                                  </View>
-                                  <Text style={{ fontSize: 12, color: isSelected ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#e0e0e0" : "#212121"), fontWeight: isSelected ? "bold" : "normal" }}>
-                                    {opt.label}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
+                      {/* Lock Items */}
+                      {section.items.map((item, idx) => (
+                        <View key={item.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: idx < section.items.length - 1 ? 1 : 0, borderBottomColor: darkMode ? "#2a2a2a" : "#f4f4f4" }}>
+                          <View style={{ flex: 1, marginRight: 12 }}>
+                            <Text style={{ fontSize: 13, fontWeight: "600", color: darkMode ? "#e0e0e0" : "#212121", marginBottom: 2 }}>{item.label}</Text>
+                            <Text style={{ fontSize: 11, color: darkMode ? "#757575" : "#9e9e9e" }}>{item.desc}</Text>
                           </View>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                const currentVal = (devPageLocks as any)?.[item.key] || false;
+                                const newVal = !currentVal;
+                                setDevPageLocks((prev: any) => ({ ...prev, [item.key]: newVal }));
+                                await api.put("/developer/page-locks", { key: item.key, locked: newVal });
+                              } catch (e: any) {
+                                Alert.alert("Error", e.message || "Failed to update lock.");
+                                // Revert
+                                setDevPageLocks((prev: any) => ({ ...prev, [item.key]: (prev as any)?.[item.key] }));
+                              }
+                            }}
+                            style={{
+                              width: 52,
+                              height: 28,
+                              borderRadius: 14,
+                              backgroundColor: (devPageLocks as any)?.[item.key] ? "#c62828" : (darkMode ? "#2a2a2a" : "#e0e0e0"),
+                              justifyContent: "center",
+                              paddingHorizontal: 3,
+                              alignItems: (devPageLocks as any)?.[item.key] ? "flex-end" : "flex-start",
+                            }}
+                          >
+                            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 2, elevation: 2 }} />
+                          </TouchableOpacity>
                         </View>
-                      );
-                    })}
-                  </View>
-                </View>
+                      ))}
+                    </View>
+                  ));
+                })()}
+
+                {/* Refresh Locks Button */}
+                <TouchableOpacity
+                  onPress={async () => {
+                    try {
+                      const res = await api.get("/developer/page-locks");
+                      setDevPageLocks(res?.data || res || {});
+                    } catch (e: any) {
+                      Alert.alert("Error", e.message || "Failed to reload lock states.");
+                    }
+                  }}
+                  style={[styles.primaryBtn, { backgroundColor: "#1565c0", marginTop: 4 }]}
+                >
+                  <Text style={styles.primaryBtnTxt}>↻ Refresh Lock States</Text>
+                </TouchableOpacity>
+
+                <View style={{ height: 40 }} />
               </ScrollView>
             )}
 
-            {/* WORKSPACE 3: DELETE APPROVALS */}
-            {devTab === "approvals" && (
-              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Pending Delete Approvals Manager</Text>
-                    <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>Review and approve deletion requests submitted by Editors / Contributors</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={loadPendingApprovals}
-                    style={[styles.primaryBtn, { backgroundColor: "#1565c0", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 0 }]}
-                  >
-                    <Text style={styles.primaryBtnTxt}>↻ Refresh Requests</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", overflow: "hidden" }}>
-                  <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>COLLECTION / FEATURE</Text>
-                    <Text style={{ flex: 2.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>DOCUMENT ID</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>REQUESTED BY</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>DATE REQUESTED</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold", textAlign: "center" }}>ACTIONS</Text>
-                  </View>
-
-                  {pendingApprovals.length === 0 ? (
-                    <View style={{ padding: 40, alignItems: "center" }}>
-                      <Ionicons name="checkmark-circle-outline" size={32} color="#2e7d32" />
-                      <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12, marginTop: 8, fontWeight: "bold" }}>All requests cleared!</Text>
-                      <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, marginTop: 2 }}>No pending deletion requests need approval.</Text>
-                    </View>
-                  ) : (
-                    pendingApprovals.map((item, idx) => (
-                      <View key={item._id} style={{ flexDirection: "row", paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: idx === pendingApprovals.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0", alignItems: "center" }}>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12, textTransform: "capitalize", fontWeight: "600" }}>{item.feature}</Text>
-                        <Text style={{ flex: 2.5, color: "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>{item.docId}</Text>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12 }} numberOfLines={1}>{item.requestedBy}</Text>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "N/A"}</Text>
-                        <View style={{ flex: 1.5, flexDirection: "row", justifyContent: "center", gap: 6 }}>
-                          <TouchableOpacity
-                            onPress={() => handleApproveDelete(item, loadPendingApprovals)}
-                            style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#2e7d32", borderRadius: 4 }}
-                          >
-                            <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => handleRejectDelete(item, loadPendingApprovals)}
-                            style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#c62828", borderRadius: 4 }}
-                          >
-                            <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ))
-                  )}
-                </View>
-              </ScrollView>
-            )}
-
-            {/* WORKSPACE 4: CREDENTIALS PREVIEW WORKSPACE */}
-            {devTab === "credentials" && (
-              <View style={{ flex: 1, flexDirection: "row" }}>
-
-                {/* Student Selector */}
-                <View style={{ width: 220, backgroundColor: darkMode ? "#1a1a1a" : "#f9f9f9", borderRightWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                  <View style={{ padding: 10, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                    <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 11, fontWeight: "bold", marginBottom: 6 }}>SELECT CANDIDATE</Text>
-                    <TouchableOpacity
-                      onPress={loadStudents}
-                      style={[styles.primaryBtn, { paddingVertical: 6, marginBottom: 0, height: 32, justifyContent: "center" }]}
-                    >
-                      <Text style={[styles.primaryBtnTxt, { fontSize: 11 }]}>↻ Reload Students</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <ScrollView style={{ flex: 1 }}>
-                    {students.map((st: any) => {
-                      const isSelected = selectedIdStudent?.id === st.id;
-                      return (
-                        <TouchableOpacity
-                          key={st.id}
-                          onPress={() => setSelectedIdStudent(st)}
-                          style={{
-                            padding: 10,
-                            borderBottomWidth: 1,
-                            borderColor: darkMode ? "#2a2a2a" : "#eaeaea",
-                            backgroundColor: isSelected ? (darkMode ? "rgba(239, 154, 154, 0.12)" : "rgba(198, 40, 40, 0.08)") : "transparent"
-                          }}
-                        >
-                          <Text style={{ color: isSelected ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#e0e0e0" : "#212121"), fontSize: 12, fontWeight: "bold" }} numberOfLines={1}>
-                            {st.firstName} {st.lastName}
-                          </Text>
-                          <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 9, marginTop: 2 }}>Roll: {st.rollNumber}</Text>
-                          <View style={{ flexDirection: "row", gap: 4, marginTop: 4 }}>
-                            {st.idCardGenerated && (
-                              <View style={{ backgroundColor: "#2e7d32", borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-                                <Text style={{ color: "#fff", fontSize: 7, fontWeight: "bold" }}>ID CARD</Text>
-                              </View>
-                            )}
-                            {st.hallTicketGenerated && (
-                              <View style={{ backgroundColor: "#1565c0", borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 }}>
-                                <Text style={{ color: "#fff", fontSize: 7, fontWeight: "bold" }}>TICKET</Text>
-                              </View>
-                            )}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-
-                {/* Template customization playground */}
-                <View style={{ flex: 1, backgroundColor: darkMode ? "#121212" : "#ffffff" }}>
-                  {selectedIdStudent ? (
-                    <View style={{ flex: 1 }}>
-                      {/* Top subtabs */}
-                      <View style={{ flexDirection: "row", borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5" }}>
-                        <TouchableOpacity
-                          onPress={() => setCardSubTab("idcard")}
-                          style={{
-                            paddingVertical: 12,
-                            paddingHorizontal: 20,
-                            borderBottomWidth: 2,
-                            borderColor: cardSubTab === "idcard" ? (darkMode ? "#ef9a9a" : "#c62828") : "transparent"
-                          }}
-                        >
-                          <Text style={{ color: cardSubTab === "idcard" ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#9e9e9e" : "#757575"), fontWeight: "bold", fontSize: 12 }}>🪪 ID Card Template</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => setCardSubTab("hallticket")}
-                          style={{
-                            paddingVertical: 12,
-                            paddingHorizontal: 20,
-                            borderBottomWidth: 2,
-                            borderColor: cardSubTab === "hallticket" ? (darkMode ? "#ef9a9a" : "#c62828") : "transparent"
-                          }}
-                        >
-                          <Text style={{ color: cardSubTab === "hallticket" ? (darkMode ? "#ef9a9a" : "#c62828") : (darkMode ? "#9e9e9e" : "#757575"), fontWeight: "bold", fontSize: 12 }}>🎫 Hall Ticket Template</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 15 }}>
-                        {cardSubTab === "idcard" && (
-                          <View style={{ flexDirection: isMobile ? "column" : "row", flexWrap: "wrap", gap: 16 }}>
-                            {/* Editor Form */}
-                            <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, minWidth: isMobile ? undefined : 260, gap: 12 }}>
-                              <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark]}>Customize ID Card Metadata</Text>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>EXPIRY DATE</Text>
-                                <TextInput
-                                  value={idCardExpiry}
-                                  onChangeText={setIdCardExpiry}
-                                  style={[styles.input, darkMode && styles.inputDark]}
-                                  placeholder="e.g. 31/12/2026"
-                                  placeholderTextColor={darkMode ? "#666" : "#999"}
-                                />
-                              </View>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>DESIGNATION / SUBTITLE</Text>
-                                <TextInput
-                                  value={idCardRole}
-                                  onChangeText={setIdCardRole}
-                                  style={[styles.input, darkMode && styles.inputDark]}
-                                  placeholder="e.g. IAS CANDIDATE"
-                                  placeholderTextColor={darkMode ? "#666" : "#999"}
-                                />
-                              </View>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 6 }]}>ACCENT DESIGN THEME</Text>
-                                <View style={{ flexDirection: "row", gap: 8 }}>
-                                  {["#c62828", "#1565c0", "#2e7d32", "#37474f", "#e65100"].map(c => (
-                                    <TouchableOpacity
-                                      key={c}
-                                      onPress={() => setIdCardTheme(c)}
-                                      style={{
-                                        width: 28,
-                                        height: 28,
-                                        borderRadius: 14,
-                                        backgroundColor: c,
-                                        borderWidth: idCardTheme === c ? 2.5 : 0,
-                                        borderColor: darkMode ? "#ffffff" : "#000000"
-                                      }}
-                                    />
-                                  ))}
-                                </View>
-                              </View>
-
-                              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                                <TouchableOpacity
-                                  onPress={async () => {
-                                    try {
-                                      await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                        idCardGenerated: true,
-                                        idCardExpiry,
-                                        idCardRole,
-                                        idCardTheme
-                                      });
-                                      Alert.alert("Success", "ID Card generated!");
-                                      setSelectedIdStudent({
-                                        ...selectedIdStudent,
-                                        idCardGenerated: true,
-                                        idCardExpiry,
-                                        idCardRole,
-                                        idCardTheme
-                                      });
-                                      loadStudents();
-                                    } catch (e: any) {
-                                      Alert.alert("Error", e.message || "Failed to generate ID Card");
-                                    }
-                                  }}
-                                  style={{ flex: 1, backgroundColor: "#2e7d32", borderRadius: 6, paddingVertical: 10, alignItems: "center" }}
-                                >
-                                  <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Generate ID Card</Text>
-                                </TouchableOpacity>
-
-                                {selectedIdStudent.idCardGenerated && (
-                                  <TouchableOpacity
-                                    onPress={async () => {
-                                      try {
-                                        await api.put(`/erp/student/${selectedIdStudent.id}`, { idCardGenerated: false });
-                                        Alert.alert("Success", "ID Card status revoked.");
-                                        setSelectedIdStudent({ ...selectedIdStudent, idCardGenerated: false });
-                                        loadStudents();
-                                      } catch (e: any) {
-                                        Alert.alert("Error", e.message || "Failed to revoke ID Card");
-                                      }
-                                    }}
-                                    style={{ flex: 1, backgroundColor: "#c62828", borderRadius: 6, paddingVertical: 10, alignItems: "center" }}
-                                  >
-                                    <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Revoke ID Card</Text>
-                                  </TouchableOpacity>
-                                )}
-                              </View>
-                            </View>
-
-                            {/* Preview */}
-                            <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, minWidth: isMobile ? undefined : 260, backgroundColor: darkMode ? "#1a1a1a" : "#ffffff", padding: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                              <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#757575", marginBottom: 10 }}>LIVE VIEW PREVIEW</Text>
-                              <View style={{ width: "100%", justifyContent: "center", alignItems: "center", paddingVertical: 10 }}>
-                                {renderIDCard(selectedIdStudent, idCardTheme, idCardRole, idCardExpiry)}
-                              </View>
-                            </View>
-                          </View>
-                        )}
-
-                        {cardSubTab === "hallticket" && (
-                          <View style={{ flexDirection: isMobile ? "column" : "row", flexWrap: "wrap", gap: 16 }}>
-                            {/* Editor Form */}
-                            <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, minWidth: isMobile ? undefined : 260, gap: 10 }}>
-                              <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark]}>Customize Hall Ticket Schedules</Text>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>EXAMINATION TITLE</Text>
-                                <TextInput
-                                  value={hallTicketExamName}
-                                  onChangeText={setHallTicketExamName}
-                                  style={[styles.input, darkMode && styles.inputDark]}
-                                  placeholder="e.g. UPSC Prelims Mock"
-                                  placeholderTextColor={darkMode ? "#666" : "#999"}
-                                />
-                              </View>
-
-                              <View style={{ flexDirection: "row", gap: 8 }}>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>EXAM DATE</Text>
-                                  <TextInput
-                                    value={hallTicketExamDate}
-                                    onChangeText={setHallTicketExamDate}
-                                    style={[styles.input, darkMode && styles.inputDark]}
-                                    placeholder="e.g. 24/05/2026"
-                                    placeholderTextColor={darkMode ? "#666" : "#999"}
-                                  />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>EXAM TIME</Text>
-                                  <TextInput
-                                    value={hallTicketTime}
-                                    onChangeText={setHallTicketTime}
-                                    style={[styles.input, darkMode && styles.inputDark]}
-                                    placeholder="e.g. 09:30 AM"
-                                    placeholderTextColor={darkMode ? "#666" : "#999"}
-                                  />
-                                </View>
-                              </View>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>EXAMINATION VENUE</Text>
-                                <TextInput
-                                  value={hallTicketVenue}
-                                  onChangeText={setHallTicketVenue}
-                                  style={[styles.input, darkMode && styles.inputDark]}
-                                  placeholder="Venue Address"
-                                  placeholderTextColor={darkMode ? "#666" : "#999"}
-                                />
-                              </View>
-
-                              <View>
-                                <Text style={[styles.label, darkMode && styles.labelDark, { fontSize: 10, fontWeight: "bold", marginBottom: 4 }]}>CANDIDATE INSTRUCTIONS</Text>
-                                <TextInput
-                                  multiline
-                                  numberOfLines={3}
-                                  value={hallTicketInstructions}
-                                  onChangeText={setHallTicketInstructions}
-                                  style={[styles.input, darkMode && styles.inputDark, { height: 70, textAlignVertical: "top", fontSize: 11 }]}
-                                  placeholder="Instructions list..."
-                                  placeholderTextColor={darkMode ? "#666" : "#999"}
-                                />
-                              </View>
-
-                              <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                                <TouchableOpacity
-                                  onPress={async () => {
-                                    try {
-                                      await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                        hallTicketGenerated: true,
-                                        hallTicketExamName,
-                                        hallTicketExamDate,
-                                        hallTicketVenue,
-                                        hallTicketTime,
-                                        hallTicketInstructions
-                                      });
-                                      Alert.alert("Success", "Hall Ticket generated!");
-                                      setSelectedIdStudent({
-                                        ...selectedIdStudent,
-                                        hallTicketGenerated: true,
-                                        hallTicketExamName,
-                                        hallTicketExamDate,
-                                        hallTicketVenue,
-                                        hallTicketTime,
-                                        hallTicketInstructions
-                                      });
-                                      loadStudents();
-                                    } catch (e: any) {
-                                      Alert.alert("Error", e.message || "Failed to generate Hall Ticket");
-                                    }
-                                  }}
-                                  style={{ flex: 1, backgroundColor: "#2e7d32", borderRadius: 6, paddingVertical: 10, alignItems: "center" }}
-                                >
-                                  <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Generate Hall Ticket</Text>
-                                </TouchableOpacity>
-
-                                {selectedIdStudent.hallTicketGenerated && (
-                                  <TouchableOpacity
-                                    onPress={async () => {
-                                      try {
-                                        await api.put(`/erp/student/${selectedIdStudent.id}`, { hallTicketGenerated: false });
-                                        Alert.alert("Success", "Hall Ticket status revoked.");
-                                        setSelectedIdStudent({ ...selectedIdStudent, hallTicketGenerated: false });
-                                        loadStudents();
-                                      } catch (e: any) {
-                                        Alert.alert("Error", e.message || "Failed to revoke Hall Ticket");
-                                      }
-                                    }}
-                                    style={{ flex: 1, backgroundColor: "#c62828", borderRadius: 6, paddingVertical: 10, alignItems: "center" }}
-                                  >
-                                    <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 12 }}>Revoke Hall Ticket</Text>
-                                  </TouchableOpacity>
-                                )}
-                              </View>
-                            </View>
-
-                            {/* Preview */}
-                            <View style={{ flex: isMobile ? undefined : 1, width: isMobile ? "100%" : undefined, minWidth: isMobile ? undefined : 260, backgroundColor: darkMode ? "#1a1a1a" : "#ffffff", padding: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                              <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#757575", marginBottom: 10 }}>LIVE VIEW PREVIEW</Text>
-                              <View style={{ width: "100%", justifyContent: "center", alignItems: "center", paddingVertical: 10 }}>
-                                {renderHallTicket(selectedIdStudent, hallTicketExamName, hallTicketExamDate, hallTicketTime, hallTicketVenue, hallTicketInstructions)}
-                              </View>
-                            </View>
-                          </View>
-                        )}
-                      </ScrollView>
-                    </View>
-                  ) : (
-                    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 20 }}>
-                      <Ionicons name="card-outline" size={48} color={darkMode ? "#3a3a3a" : "#ccc"} />
-                      <Text style={{ color: darkMode ? "#ef9a9a" : "#c62828", fontSize: 13, marginTop: 12, fontWeight: "bold" }}>CREDENTIALS & ADMIT CARDS PLAYGROUND</Text>
-                      <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, marginTop: 4, textAlign: "center" }}>Select a student from the left list to test customizing their ID cards or Hall tickets</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            )}
-
+            {/* WORKSPACE: MANUAL TEST */}
             {devTab === "manual-test" && (
               <ScrollView style={{ flex: 1, padding: 15 }} contentContainerStyle={{ paddingBottom: 50 }}>
                 <View style={[styles.card, darkMode && styles.cardDark]}>
@@ -3862,11 +3323,8 @@ export default function App() {
             <View style={styles.authCard}>
               <View style={{ alignItems: "center", marginBottom: 18 }}>
                 <Image source={require("./assets/logo.png")} style={{ width: 80, height: 80, borderRadius: 40, marginBottom: 12, borderWidth: 1, borderColor: "#eee" }} />
-                <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", width: "100%", position: "relative" }}>
+                <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", width: "100%" }}>
                   <Text style={styles.authTitle}>NERMAI IAS ACADEMY</Text>
-                  <TouchableOpacity onPress={() => setShowIpConfig(!showIpConfig)} style={{ position: "absolute", right: 0 }}>
-                    <Ionicons name="settings-outline" size={22} color="#c62828" />
-                  </TouchableOpacity>
                 </View>
                 <Text style={styles.authSubtitle}>Integrated Learning Platform</Text>
               </View>{showIpConfig && (
@@ -3908,18 +3366,6 @@ export default function App() {
                   <TouchableOpacity onPress={() => handleAuth()} style={styles.primaryBtn}>
                     <Text style={styles.primaryBtnTxt}>LOG IN</Text>
                   </TouchableOpacity>
-
-                  <View style={{ marginTop: 25, borderTopWidth: 1, borderColor: "#e0e0e0", paddingTop: 15 }}>
-                    <Text style={{ textAlign: "center", fontSize: 12, color: "#757575", marginBottom: 10 }}>Quick Login Demos:</Text>
-                    <View style={{ flexDirection: "row", gap: 10 }}>
-                      <TouchableOpacity onPress={() => { setAuthTab("login"); setUsername("student"); setPassword("student"); handleAuth("student", "student", true); }} style={styles.demoBtn}>
-                        <Text style={styles.demoBtnTxt}>Student Demo</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => { setAuthTab("login"); setUsername("admin"); setPassword("admin"); handleAuth("admin", "admin", true); }} style={styles.demoBtn}>
-                        <Text style={styles.demoBtnTxt}>Admin Demo</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
                 </>
               )}
 
@@ -4405,7 +3851,7 @@ export default function App() {
               {admissionSubmitted ? (
                 <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50" }]}>
                   <Text style={{ fontSize: 16, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Application Submitted!</Text>
-                  <Text style={{ color: "#555", textAlign: "center", marginTop: 8, fontSize: 13 }}>Our team will contact you shortly at {user.phone}</Text>
+                  <Text style={{ color: "#555", textAlign: "center", marginTop: 8, fontSize: 13 }}>Our team will contact you shortly at {admissionForm.phone}</Text>
                 </View>
               ) : showAdmissionForm ? (
                 <View style={styles.card}>
@@ -4432,7 +3878,7 @@ export default function App() {
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user.name, phone: user.phone, email: user.email, city: "", preferredCourse: "UPSC GS" }); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
+                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city: "", preferredCourse: "UPSC GS" }); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
                   <Text style={[styles.primaryBtnTxt, { fontSize: 16 }]}>Register Nermai IAS Academy</Text>
                 </TouchableOpacity>
               )}
@@ -4669,28 +4115,48 @@ export default function App() {
               )}
 
               <View style={{ gap: 10 }}>
-                {attemptQuestions[currentQIdx].options?.map((opt: string, oIdx: number) => {
-                  const selected = selectedAnswers[attemptQuestions[currentQIdx].id] === opt;
-                  const optTa = attemptQuestions[currentQIdx].optionsTa?.[oIdx];
-                  return (
-                    <TouchableOpacity
-                      key={oIdx}
-                      onPress={() => selectAnswer(opt)}
-                      style={[styles.modalOptionBtn, selected && styles.modalOptionBtnSelected, { minHeight: 48, paddingVertical: 8 }]}
-                    >
-                      <View style={{ flexDirection: "column" }}>
-                        <Text style={{ color: selected ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 14 }}>
-                          {String.fromCharCode(65 + oIdx)}. {opt}
-                        </Text>
-                        {optTa ? (
-                          <Text style={{ color: selected ? "#e0f2f1" : "#546e7a", fontSize: 13, marginTop: 2, fontStyle: "italic" }}>
-                            {optTa}
+                {(() => {
+                  const q = attemptQuestions[currentQIdx];
+                  const rawOpts = Array.isArray(q.options) 
+                    ? q.options 
+                    : (q.options && typeof q.options === "object"
+                      ? [q.options.A?.en || q.options.A || "", q.options.B?.en || q.options.B || "", q.options.C?.en || q.options.C || "", q.options.D?.en || q.options.D || ""]
+                      : []);
+                  
+                  const opts = rawOpts.map((o: any, idx: number) => {
+                    let val = String(o || "").trim();
+                    const rawTa = Array.isArray(q.optionsTa) ? q.optionsTa[idx] : (q.options && typeof q.options === "object" ? (q.options[["A", "B", "C", "D"][idx]]?.ta || "") : "");
+                    const valTa = String(rawTa || "").trim();
+                    if (!val && valTa) val = valTa;
+                    const letter = ["A", "B", "C", "D"][idx];
+                    return val || `Option ${letter}`;
+                  });
+
+                  return opts.map((opt: string, oIdx: number) => {
+                    const selected = selectedAnswers[q.id] === opt;
+                    const rawTa = Array.isArray(q.optionsTa) ? q.optionsTa[oIdx] : (q.options && typeof q.options === "object" ? (q.options[["A", "B", "C", "D"][oIdx]]?.ta || "") : "");
+                    let optTa = String(rawTa || "").trim();
+                    if (!optTa && opt) optTa = opt;
+                    return (
+                      <TouchableOpacity
+                        key={oIdx}
+                        onPress={() => selectAnswer(opt)}
+                        style={[styles.modalOptionBtn, selected && styles.modalOptionBtnSelected, { minHeight: 48, paddingVertical: 8 }]}
+                      >
+                        <View style={{ flexDirection: "column" }}>
+                          <Text style={{ color: selected ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 14 }}>
+                            {String.fromCharCode(65 + oIdx)}. {opt}
                           </Text>
-                        ) : null}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                          {optTa ? (
+                            <Text style={{ color: selected ? "#e0f2f1" : "#546e7a", fontSize: 13, marginTop: 2, fontStyle: "italic" }}>
+                              {optTa}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  });
+                })()}
               </View>
             </ScrollView>
 
@@ -4772,7 +4238,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        <View style={{ backgroundColor: "#e8f5e9", padding: 15, borderBottomWidth: 1, borderColor: "#c8e6c9" }}>
+        <View style={{ backgroundColor: "#e8f5e9", padding: 15, borderBottomWidth: 1, borderColor: "#c8e6c9", gap: 10 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1b5e20" }}>
               Score: {obtainedMarks} / {totalMarks}
@@ -4781,6 +4247,24 @@ export default function App() {
               <Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 11 }}>
                 {String(status).toUpperCase()} ({Math.round(percentage)}%)
               </Text>
+            </View>
+          </View>
+
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: "bold", color: "#555" }}>Mode:</Text>
+            <View style={{ flexDirection: "row", borderRadius: 20, overflow: "hidden", borderWidth: 1.5, borderColor: "#2e7d32", backgroundColor: "#fff" }}>
+              <TouchableOpacity
+                onPress={() => setShowAnswers(true)}
+                style={{ paddingHorizontal: 16, paddingVertical: 6, backgroundColor: showAnswers ? "#2e7d32" : "transparent" }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "bold", color: showAnswers ? "#fff" : "#2e7d32" }}>With Answers</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowAnswers(false)}
+                style={{ paddingHorizontal: 16, paddingVertical: 6, backgroundColor: !showAnswers ? "#2e7d32" : "transparent" }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "bold", color: !showAnswers ? "#fff" : "#2e7d32" }}>Without Answers</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -4794,6 +4278,8 @@ export default function App() {
             reviewData.questions.map((q: any, idx: number) => {
               const isCorrect = q.isCorrect;
               const isSkipped = q.selectedAnswer === null || q.selectedAnswer === undefined || q.selectedAnswer === "";
+              const showGreenBorder = showAnswers && isCorrect && !isSkipped;
+              const showRedBorder = showAnswers && !isCorrect && !isSkipped;
 
               return (
                 <View key={idx} style={{
@@ -4801,8 +4287,8 @@ export default function App() {
                   padding: 15,
                   borderRadius: 12,
                   borderWidth: 1,
-                  borderColor: isSkipped ? "#e0e0e0" : isCorrect ? "#c8e6c9" : "#ffcdd2",
-                  backgroundColor: isSkipped ? "#fafafa" : isCorrect ? "#f1f8e9" : "#ffebee"
+                  borderColor: isSkipped ? "#e0e0e0" : showGreenBorder ? "#c8e6c9" : showRedBorder ? "#ffcdd2" : "#e0e0e0",
+                  backgroundColor: isSkipped ? "#fafafa" : showGreenBorder ? "#f1f8e9" : showRedBorder ? "#ffebee" : "#fafafa"
                 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>
@@ -4812,10 +4298,10 @@ export default function App() {
                       paddingHorizontal: 8,
                       paddingVertical: 3,
                       borderRadius: 8,
-                      backgroundColor: isSkipped ? "#9e9e9e" : isCorrect ? "#2e7d32" : "#c62828"
+                      backgroundColor: isSkipped ? "#9e9e9e" : (showAnswers ? (isCorrect ? "#2e7d32" : "#c62828") : "#1565c0")
                     }}>
                       <Text style={{ color: "#ffffff", fontSize: 10, fontWeight: "bold" }}>
-                        {isSkipped ? "Unattempted (0)" : isCorrect ? `Correct (+${q.marks || 1})` : `Incorrect (-${q.negativeMarks || 0.25})`}
+                        {isSkipped ? "Unattempted" : (showAnswers ? (isCorrect ? `Correct (+${q.marks || 1})` : `Incorrect (-${q.negativeMarks || 0.25})`) : "Attempted")}
                       </Text>
                     </View>
                   </View>
@@ -4840,14 +4326,22 @@ export default function App() {
                       let bgC = "#ffffff";
                       let textC = "#212121";
 
-                      if (isCorrectOption) {
-                        borderC = "#2e7d32";
-                        bgC = "#e8f5e9";
-                        textC = "#2e7d32";
-                      } else if (isSelected) {
-                        borderC = "#c62828";
-                        bgC = "#ffebee";
-                        textC = "#c62828";
+                      if (showAnswers) {
+                        if (isCorrectOption) {
+                          borderC = "#2e7d32";
+                          bgC = "#e8f5e9";
+                          textC = "#2e7d32";
+                        } else if (isSelected) {
+                          borderC = "#c62828";
+                          bgC = "#ffebee";
+                          textC = "#c62828";
+                        }
+                      } else {
+                        if (isSelected) {
+                          borderC = "#1565c0";
+                          bgC = darkMode ? "#0d1e35" : "#e3f2fd";
+                          textC = "#1565c0";
+                        }
                       }
 
                       return (
@@ -4864,19 +4358,19 @@ export default function App() {
                             {letter}.
                           </Text>
                           <View style={{ flex: 1, flexDirection: "column" }}>
-                            <Text style={{ color: textC, fontWeight: isCorrectOption || isSelected ? "bold" : "normal", fontSize: 14 }}>
+                            <Text style={{ color: textC, fontWeight: (showAnswers && isCorrectOption) || isSelected ? "bold" : "normal", fontSize: 14 }}>
                               {opt}
                             </Text>
                             {optTa ? (
-                              <Text style={{ color: isCorrectOption ? "#2e7d32" : isSelected ? "#c62828" : "#546e7a", fontSize: 13, marginTop: 2, fontStyle: "italic" }}>
+                              <Text style={{ color: (showAnswers && isCorrectOption) ? "#2e7d32" : isSelected ? "#c62828" : "#546e7a", fontSize: 13, marginTop: 2, fontStyle: "italic" }}>
                                 {optTa}
                               </Text>
                             ) : null}
                           </View>
-                          {isCorrectOption && (
+                          {showAnswers && isCorrectOption && (
                             <Ionicons name="checkmark-circle" size={16} color="#2e7d32" />
                           )}
-                          {isSelected && !isCorrectOption && (
+                          {showAnswers && isSelected && !isCorrectOption && (
                             <Ionicons name="close-circle" size={16} color="#c62828" />
                           )}
                         </View>
@@ -4884,7 +4378,7 @@ export default function App() {
                     })}
                   </View>
 
-                  {q.explanation && (
+                  {showAnswers && q.explanation && (
                     <View style={{ marginTop: 8, padding: 10, backgroundColor: "#fffde7", borderRadius: 8, borderLeftWidth: 3, borderLeftColor: "#fbc02d" }}>
                       <Text style={{ fontWeight: "bold", fontSize: 11, color: "#f57f17", marginBottom: 2 }}>Explanation:</Text>
                       <Text style={{ fontSize: 12, color: "#5d4037" }}>{q.explanation}</Text>
@@ -5195,12 +4689,35 @@ export default function App() {
               {/* Notifications Center for Users */}
               <View style={{ marginTop: 10 }}>
                 <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>🔔 System Alerts & Notifications</Text>
-                {notifications.length === 0 ? (
-                  <View style={[styles.card, { padding: 15, alignItems: "center" }]}>
-                    <Text style={styles.emptyText}>No notifications received yet.</Text>
-                  </View>
-                ) : (
-                  notifications.map(notif => {
+                {(() => {
+                  const activeNotifications = notifications.filter((notif: any) => {
+                    const myStudent = getLoggedInStudent(user, students);
+                    const studentId = myStudent?.id || user?.studentId || user?.userId || "";
+                    const myName = myStudent ? getStudentName(myStudent) : "";
+                    
+                    if (notif.targetStudentId) {
+                      return notif.targetStudentId === studentId;
+                    }
+                    
+                    // Fallback name check for individual notifications
+                    const isIndividual = notif.title?.includes("Fee Payment Alert - ") || notif.message?.includes("Dear ");
+                    if (isIndividual) {
+                      if (!myName) return false;
+                      return notif.title?.includes(myName) || notif.message?.includes(myName);
+                    }
+                    
+                    return true;
+                  });
+
+                  if (activeNotifications.length === 0) {
+                    return (
+                      <View style={[styles.card, { padding: 15, alignItems: "center" }]}>
+                        <Text style={styles.emptyText}>No notifications received yet.</Text>
+                      </View>
+                    );
+                  }
+
+                  return activeNotifications.map(notif => {
                     const formattedDate = notif.createdAt ? new Date(notif.createdAt).toLocaleDateString() : "";
                     return (
                       <View key={notif.id} style={[styles.card, { marginBottom: 12, borderLeftWidth: 4, borderLeftColor: "#1565c0", backgroundColor: darkMode ? "#1a2c3d" : "#e3f2fd" }]}>
@@ -5215,8 +4732,8 @@ export default function App() {
                         </Text>
                       </View>
                     );
-                  })
-                )}
+                  });
+                })()}
               </View>
 
 
@@ -5371,42 +4888,33 @@ export default function App() {
                   />
 
                   <Text style={[styles.label, darkMode && styles.labelDark]}>Extraction Mode:</Text>
+                  {/* 2-mode selector: Local (fast, free) or Gemini AI (accurate) */}
                   <View style={{ flexDirection: "row", marginBottom: 15, borderRadius: 8, backgroundColor: darkMode ? "#222" : "#eee", padding: 4 }}>
-                    <TouchableOpacity
-                      onPress={() => setExtractMode("auto")}
-                      style={{
-                        flex: 1,
-                        paddingVertical: 8,
-                        borderRadius: 6,
-                        backgroundColor: extractMode === "auto" ? (darkMode ? "#333" : "#fff") : "transparent",
-                        alignItems: "center"
-                      }}
-                    >
-                      <Text style={{ fontWeight: "bold", color: extractMode === "auto" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 11 }}>Auto (Recommended)</Text>
-                    </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => setExtractMode("local")}
                       style={{
                         flex: 1,
-                        paddingVertical: 8,
+                        paddingVertical: 10,
                         borderRadius: 6,
                         backgroundColor: extractMode === "local" ? (darkMode ? "#333" : "#fff") : "transparent",
                         alignItems: "center"
                       }}
                     >
-                      <Text style={{ fontWeight: "bold", color: extractMode === "local" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 11 }}>Local-Only (Free)</Text>
+                      <Text style={{ fontWeight: "bold", color: extractMode === "local" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 12 }}>Local (Fast)</Text>
+                      <Text style={{ color: darkMode ? "#777" : "#999", fontSize: 10, marginTop: 2 }}>Instant, free, no internet</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => setExtractMode("ai")}
                       style={{
                         flex: 1,
-                        paddingVertical: 8,
+                        paddingVertical: 10,
                         borderRadius: 6,
                         backgroundColor: extractMode === "ai" ? (darkMode ? "#333" : "#fff") : "transparent",
                         alignItems: "center"
                       }}
                     >
-                      <Text style={{ fontWeight: "bold", color: extractMode === "ai" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 11 }}>AI-Only (Groq)</Text>
+                      <Text style={{ fontWeight: "bold", color: extractMode === "ai" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 12 }}>Gemini AI</Text>
+                      <Text style={{ color: darkMode ? "#777" : "#999", fontSize: 10, marginTop: 2 }}>Highly accurate, bilingual</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -5684,10 +5192,8 @@ export default function App() {
                         {isExtracting
                           ? "Extracting Questions..."
                           : extractMode === "local"
-                            ? "Extract Questions (Local Regex)"
-                            : extractMode === "ai"
-                              ? "Extract Questions (Groq AI)"
-                              : "Extract Questions (Auto Mode)"}
+                            ? "Extract Questions (Local)"
+                            : "Extract Questions (Gemini AI)"}
                       </Text>
                     </TouchableOpacity>
                     {isExtracting && (
@@ -5702,6 +5208,17 @@ export default function App() {
                 {extractedQuestions.length > 0 && (
                   <View style={[styles.card, darkMode && styles.cardDark]}>
                     <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark]}>Extracted Questions Workspace</Text>
+
+                    {/* Extraction Warnings Banner */}
+                    {extractionWarnings.length > 0 && (
+                      <View style={{ backgroundColor: "#fff3e0", borderLeftWidth: 4, borderLeftColor: "#f57c00", borderRadius: 8, padding: 12, marginBottom: 14 }}>
+                        <Text style={{ fontWeight: "bold", color: "#e65100", fontSize: 13, marginBottom: 6 }}>⚠ {extractionWarnings.length} Question(s) Need Review</Text>
+                        <Text style={{ color: "#bf360c", fontSize: 11, marginBottom: 8 }}>The following questions may be incomplete or improperly extracted. Please review and edit them before creating the test. The test will still be created as-is — marks are credited to all students for any question with issues.</Text>
+                        {extractionWarnings.map((w, i) => (
+                          <Text key={i} style={{ color: "#6d4c41", fontSize: 11, marginBottom: 2 }}>• Q{w.questionNo}: {w.issue}</Text>
+                        ))}
+                      </View>
+                    )}
 
                     {/* Settings Panel */}
                     <View style={{ backgroundColor: darkMode ? "#222" : "#f9f9f9", padding: 15, borderRadius: 12, marginBottom: 15, borderLeftWidth: 4, borderLeftColor: "#2e7d32" }}>
@@ -6705,7 +6222,7 @@ export default function App() {
                             animationType="fade"
                             onRequestClose={() => setSelectedDirectoryStudent(null)}
                           >
-                            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20, zIndex: 1000 }}>
                               <View style={{
                                 width: "100%",
                                 maxWidth: 500,
@@ -6854,7 +6371,7 @@ export default function App() {
                   return (
                     <View style={{ gap: 15 }}>
                       {/* Create/Edit Form */}
-                      <View style={styles.card}>
+                      <View style={[styles.card, { zIndex: 10, position: "relative" }]}>
                         <Text style={styles.sectionTitle}>
                           {editingNoticeId ? "✏️ Edit Notice & Notification" : "📝 Create New Notice & Notification"}
                         </Text>
@@ -7660,27 +7177,54 @@ export default function App() {
 
                 {erpSub === "permissions" && (user.role === "super_admin" || user.role === "developer") && (() => {
                   const roles = [
-                    { key: "super_admin", label: "Super Admin" },
-                    { key: "admin", label: "Admin" },
-                    { key: "editor", label: "Editor" },
-                    { key: "contributor", label: "Contributor" }
-                  ];
-                  const features = [
-                    { key: "students", label: "Student Directory" },
-                    { key: "batches", label: "Batches & Courses" },
-                    { key: "announcements", label: "Announcements / Notices" },
-                    { key: "fees", label: "Tuition Fees / Ledger" },
-                    { key: "tests", label: "Mock Tests & Leaderboards" },
-                    { key: "quiz", label: "LMS Daily Practice Quiz" },
-                    { key: "id-card", label: "ID Card Generation" }
+                    { key: "admin", label: "Admin", color: "#1976d2" },
+                    { key: "editor", label: "Editor", color: "#f57c00" },
+                    { key: "contributor", label: "Contributor", color: "#388e3c" },
+                    { key: "staff", label: "Staff", color: "#6a1b9a" },
+                    { key: "teacher", label: "Teacher", color: "#00695c" }
                   ];
 
-                  const permissionOptions = [
-                    { key: "CRUD", label: "Full Access (CRUD)" },
-                    { key: "CRU only", label: "Create, Read, Update (CRU)" },
-                    { key: "CR only", label: "Create, Read (CR)" },
-                    { key: "U only", label: "Update Only (U)" },
-                    { key: "Delete but approval required from super admin", label: "Delete with Super Admin Approval" }
+                  const allBits = [
+                    { key: "create", label: "Create" },
+                    { key: "read", label: "Read" },
+                    { key: "update", label: "Update" },
+                    { key: "delete", label: "Delete" },
+                    { key: "create_only", label: "Create Only" },
+                    { key: "edit_on_approval", label: "Edit on Approval" },
+                    { key: "create_on_approval", label: "Create (approval)" },
+                    { key: "read_on_approval", label: "Read (approval)" },
+                    { key: "update_on_approval", label: "Update (approval)" },
+                    { key: "delete_on_approval", label: "Delete (approval)" }
+                  ];
+
+                  const toggleBits = [
+                    ...allBits,
+                    { key: "enable", label: "Enable" },
+                    { key: "disable", label: "Disable" }
+                  ];
+
+                  const features: { key: string; label: string; bits: { key: string; label: string }[] }[] = [
+                    { key: "students", label: "Students", bits: allBits },
+                    { key: "admins", label: "Admins / Staff Accounts", bits: allBits },
+                    { key: "id_card", label: "ID / Hall Ticket Generation", bits: allBits },
+                    { key: "batches", label: "Batches", bits: allBits },
+                    { key: "profile_edit_permissions", label: "Profile Edit Permissions", bits: allBits },
+                    { key: "notices", label: "Notices / Announcements", bits: toggleBits },
+                    { key: "offline_attendance", label: "Offline Attendance", bits: allBits },
+                    { key: "quiz", label: "Quiz / Daily Practice", bits: toggleBits },
+                    { key: "daily_content", label: "Daily Content", bits: toggleBits },
+                    { key: "resources", label: "Resources / Study Material", bits: allBits },
+                    { key: "live_classes", label: "Live Classes", bits: toggleBits },
+                    { key: "recorded_classes", label: "Recorded Classes", bits: toggleBits },
+                    { key: "enquiries", label: "Enquiries", bits: allBits },
+                    { key: "leads", label: "Leads / CRM", bits: allBits },
+                    { key: "campaigns", label: "Campaigns", bits: toggleBits },
+                    { key: "feedbacks", label: "Feedbacks", bits: allBits },
+                    { key: "fees", label: "Fees / Ledger", bits: allBits },
+                    { key: "mock_tests", label: "Mock Tests", bits: toggleBits },
+                    { key: "leaderboards", label: "Leaderboards", bits: toggleBits },
+                    { key: "reports", label: "Reports & Analytics", bits: [{ key: "read", label: "Read" }, { key: "read_on_approval", label: "Read (approval)" }] },
+                    { key: "settings", label: "System Settings", bits: allBits }
                   ];
 
                   const saveRolePermissions = async () => {
@@ -7697,26 +7241,32 @@ export default function App() {
                     }
                   };
 
-                  const updateFeaturePermission = (featureKey: string, optionKey: string) => {
-                    setRolePermissions((prev: any) => ({
-                      ...prev,
-                      [activePermissionRole]: {
-                        ...(prev?.[activePermissionRole] || {}),
-                        [featureKey]: optionKey
-                      }
-                    }));
+                  const toggleBit = (featureKey: string, bitKey: string) => {
+                    setRolePermissions((prev: any) => {
+                      const rolePerms = prev?.[activePermissionRole] || {};
+                      const currentBits: string[] = Array.isArray(rolePerms[featureKey]) ? rolePerms[featureKey] : [];
+                      const newBits = currentBits.includes(bitKey)
+                        ? currentBits.filter((b: string) => b !== bitKey)
+                        : [...currentBits, bitKey];
+                      return { ...prev, [activePermissionRole]: { ...rolePerms, [featureKey]: newBits } };
+                    });
                   };
 
                   const currentRolePermissions = rolePermissions?.[activePermissionRole] || {};
+                  const selectedRole = roles.find(r => r.key === activePermissionRole);
 
                   return (
                     <View style={{ gap: 15 }}>
+                      {/* Header */}
                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-                        <Text style={styles.sectionTitle}>Role Permissions Manager</Text>
+                        <View>
+                          <Text style={styles.sectionTitle}>Role Permissions Manager</Text>
+                          <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Super Admin has full access to all modules by default and is not listed here.</Text>
+                        </View>
                         <TouchableOpacity
-                          disabled={isSavingPermissions}
+                          disabled={isSavingPermissions || !activePermissionRole}
                           onPress={saveRolePermissions}
-                          style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center", backgroundColor: "#2e7d32" }]}
+                          style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center", backgroundColor: isSavingPermissions ? "#a5d6a7" : "#2e7d32", opacity: !activePermissionRole ? 0.4 : 1 }]}
                         >
                           <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
                             {isSavingPermissions ? "Saving..." : "💾 Save Changes"}
@@ -7724,7 +7274,7 @@ export default function App() {
                         </TouchableOpacity>
                       </View>
 
-                      {/* Role Selector Tabs */}
+                      {/* Role Selector */}
                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                         {roles.map(r => {
                           const isSelected = activePermissionRole === r.key;
@@ -7737,73 +7287,80 @@ export default function App() {
                                 paddingVertical: 8,
                                 borderRadius: 8,
                                 borderWidth: 1.5,
-                                borderColor: isSelected ? "#c62828" : "#e0e0e0",
-                                backgroundColor: isSelected ? "#ffebee" : "#ffffff",
-                                alignItems: "center"
+                                borderColor: isSelected ? r.color : "#e0e0e0",
+                                backgroundColor: isSelected ? r.color + "18" : "#ffffff"
                               }}
                             >
-                              <Text style={{ color: isSelected ? "#c62828" : "#616161", fontWeight: "bold", fontSize: 12 }}>{r.label}</Text>
+                              <Text style={{ color: isSelected ? r.color : "#616161", fontWeight: "bold", fontSize: 12 }}>{r.label}</Text>
                             </TouchableOpacity>
                           );
                         })}
                       </View>
 
-                      {/* Features List */}
-                      <View style={styles.card}>
-                        <Text style={[styles.sectionTitle, { fontSize: 14, marginBottom: 12 }]}>Configure Access for: {roles.find(r => r.key === activePermissionRole)?.label}</Text>
-
-                        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
-                          <View style={{ gap: 16 }}>
-                            {features.map(f => {
-                              const activeVal = currentRolePermissions[f.key] || "CRUD";
-                              return (
-                                <View key={f.key} style={{ paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#eeeeee" }}>
-                                  <Text style={{ fontSize: 13, fontWeight: "bold", color: "#212121", marginBottom: 6 }}>{f.label}</Text>
-
-                                  <View style={{ gap: 6 }}>
-                                    {permissionOptions.map(opt => {
-                                      const isSelected = activeVal === opt.key;
-                                      return (
-                                        <TouchableOpacity
-                                          key={opt.key}
-                                          onPress={() => updateFeaturePermission(f.key, opt.key)}
-                                          style={{
-                                            flexDirection: "row",
-                                            alignItems: "center",
-                                            padding: 10,
-                                            borderRadius: 6,
-                                            borderWidth: 1.5,
-                                            borderColor: isSelected ? "#c62828" : "#e0e0e0",
-                                            backgroundColor: isSelected ? "#ffebee" : "#f9f9f9"
-                                          }}
-                                        >
-                                          <View style={{
-                                            width: 16,
-                                            height: 16,
-                                            borderRadius: 8,
-                                            borderWidth: 2,
-                                            borderColor: isSelected ? "#c62828" : "#bdbdbd",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            marginRight: 8
-                                          }}>
-                                            {isSelected && (
-                                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#c62828" }} />
-                                            )}
-                                          </View>
-                                          <Text style={{ fontSize: 11, color: isSelected ? "#b71c1c" : "#616161", fontWeight: isSelected ? "bold" : "normal" }}>
-                                            {opt.label}
-                                          </Text>
-                                        </TouchableOpacity>
-                                      );
-                                    })}
-                                  </View>
-                                </View>
-                              );
-                            })}
+                      {!activePermissionRole ? (
+                        <View style={[styles.card, { alignItems: "center", paddingVertical: 32 }]}>
+                          <Ionicons name="finger-print-outline" size={40} color="#bdbdbd" />
+                          <Text style={{ color: "#9e9e9e", marginTop: 10, fontSize: 13 }}>Select a role above to configure its permissions</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.card}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: selectedRole?.color || "#9e9e9e" }} />
+                            <Text style={[styles.sectionTitle, { fontSize: 14, marginBottom: 0 }]}>Permissions for: {selectedRole?.label}</Text>
                           </View>
-                        </ScrollView>
-                      </View>
+
+                          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 520 }}>
+                            <View style={{ gap: 20 }}>
+                              {features.map(f => {
+                                const activeBits: string[] = Array.isArray(currentRolePermissions[f.key]) ? currentRolePermissions[f.key] : [];
+                                return (
+                                  <View key={f.key} style={{ paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" }}>
+                                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#212121", marginBottom: 8 }}>{f.label}</Text>
+                                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                                      {f.bits.map(bit => {
+                                        const isChecked = activeBits.includes(bit.key);
+                                        const isToggleType = bit.key === "enable" || bit.key === "disable";
+                                        const chipColor = isToggleType ? "#00695c" : "#c62828";
+                                        return (
+                                          <TouchableOpacity
+                                            key={bit.key}
+                                            onPress={() => toggleBit(f.key, bit.key)}
+                                            style={{
+                                              flexDirection: "row",
+                                              alignItems: "center",
+                                              paddingHorizontal: 10,
+                                              paddingVertical: 6,
+                                              borderRadius: 20,
+                                              borderWidth: 1.5,
+                                              borderColor: isChecked ? chipColor : "#e0e0e0",
+                                              backgroundColor: isChecked ? chipColor + "15" : "#fafafa"
+                                            }}
+                                          >
+                                            <View style={{
+                                              width: 14,
+                                              height: 14,
+                                              borderRadius: 3,
+                                              borderWidth: 2,
+                                              borderColor: isChecked ? chipColor : "#bdbdbd",
+                                              backgroundColor: isChecked ? chipColor : "transparent",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              marginRight: 5
+                                            }}>
+                                              {isChecked && <Text style={{ color: "#fff", fontSize: 8, fontWeight: "bold" }}>✓</Text>}
+                                            </View>
+                                            <Text style={{ fontSize: 11, color: isChecked ? chipColor : "#757575", fontWeight: isChecked ? "600" : "normal" }}>{bit.label}</Text>
+                                          </TouchableOpacity>
+                                        );
+                                      })}
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                        </View>
+                      )}
                     </View>
                   );
                 })()}
@@ -9313,30 +8870,62 @@ export default function App() {
                         <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", marginBottom: 6 }}>Quiz Completed!</Text>
                         <Text style={{ fontSize: 20, color: "#c62828", fontWeight: "bold" }}>Score: {quizScore} / {todayQuiz.questions.length}</Text>
                         <View style={{ width: "100%", marginTop: 20, gap: 15 }}>
-                          <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontWeight: "bold", fontSize: 14 }}>Answers Review</Text>
+                          {/* Toggle button row */}
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontWeight: "bold", fontSize: 14 }}>Answers Review</Text>
+                            <View style={{ flexDirection: "row", borderRadius: 20, overflow: "hidden", borderWidth: 1.5, borderColor: "#c62828" }}>
+                              <TouchableOpacity
+                                onPress={() => setShowAnswers(true)}
+                                style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: showAnswers ? "#c62828" : "transparent" }}
+                              >
+                                <Text style={{ fontSize: 11, fontWeight: "bold", color: showAnswers ? "#fff" : "#c62828" }}>With Answers</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => setShowAnswers(false)}
+                                style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: !showAnswers ? "#c62828" : "transparent" }}
+                              >
+                                <Text style={{ fontSize: 11, fontWeight: "bold", color: !showAnswers ? "#fff" : "#c62828" }}>Without Answers</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          {!showAnswers && (
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: darkMode ? "#1a2740" : "#e3f2fd", borderRadius: 8 }}>
+                              <Ionicons name="bulb-outline" size={14} color="#1565c0" />
+                              <Text style={{ fontSize: 11, color: "#1565c0", flex: 1 }}>Reviewing without answers — try to recall each answer on your own for better retention!</Text>
+                            </View>
+                          )}
                           {quizFeedbackQuestions.map((q, idx) => (
                             <View key={idx} style={{ padding: 12, backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9", borderRadius: 8, borderLeftWidth: 4, borderLeftColor: "#c62828" }}>
                               <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontWeight: "700", fontSize: 14, marginBottom: 8 }}>{idx + 1}. {q.questionText}</Text>
                               <View style={{ gap: 8, marginVertical: 6 }}>
                                 {q.options.map((opt: string, oIdx: number) => {
-                                  const isCorrect = oIdx === q.correctOptionIndex;
+                                  const isCorrect = showAnswers && oIdx === q.correctOptionIndex;
                                   const isUserChoice = oIdx === q.userAnswer;
-                                  const pct = q.optionPercentages ? q.optionPercentages[oIdx] : 0;
+                                  const isWrong = showAnswers && isUserChoice && oIdx !== q.correctOptionIndex;
+                                  const pct = showAnswers && q.optionPercentages ? q.optionPercentages[oIdx] : null;
                                   return (
-                                    <View key={oIdx} style={{ borderWidth: 1.5, borderColor: isCorrect ? "#2e7d32" : isUserChoice && !isCorrect ? "#c62828" : darkMode ? "#333" : "#e0e0e0", borderRadius: 6, padding: 8, backgroundColor: isCorrect ? "#e8f5e9" : isUserChoice && !isCorrect ? "#ffebee" : darkMode ? "#1e1e1e" : "#ffffff" }}>
-                                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                                        <Text style={{ fontSize: 12, color: isCorrect ? "#2e7d32" : isUserChoice && !isCorrect ? "#c62828" : darkMode ? "#e0e0e0" : "#212121", fontWeight: (isCorrect || isUserChoice) ? "bold" : "normal", flex: 1 }}>
+                                    <View key={oIdx} style={{ borderWidth: 1.5, borderColor: isCorrect ? "#2e7d32" : isWrong ? "#c62828" : isUserChoice ? "#1565c0" : darkMode ? "#333" : "#e0e0e0", borderRadius: 6, padding: 8, backgroundColor: isCorrect ? "#e8f5e9" : isWrong ? "#ffebee" : isUserChoice ? (darkMode ? "#0d1e35" : "#e3f2fd") : darkMode ? "#1e1e1e" : "#ffffff" }}>
+                                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: pct !== null ? 4 : 0 }}>
+                                        <Text style={{ fontSize: 12, color: isCorrect ? "#2e7d32" : isWrong ? "#c62828" : isUserChoice ? "#1565c0" : darkMode ? "#e0e0e0" : "#212121", fontWeight: (isCorrect || isUserChoice) ? "bold" : "normal", flex: 1 }}>
                                           {opt}
+                                          {showAnswers && isCorrect && " ✓"}
                                         </Text>
-                                        <Text style={{ fontSize: 11, color: "#757575", fontWeight: "bold" }}>{pct}%</Text>
+                                        {pct !== null && <Text style={{ fontSize: 11, color: "#757575", fontWeight: "bold" }}>{pct}%</Text>}
                                       </View>
-                                      <View style={{ height: 4, backgroundColor: darkMode ? "#333" : "#eeeeee", borderRadius: 2 }}>
-                                        <View style={{ width: `${pct}%`, height: "100%", backgroundColor: isCorrect ? "#2e7d32" : isUserChoice && !isCorrect ? "#c62828" : "#bdbdbd", borderRadius: 2 }} />
-                                      </View>
+                                      {pct !== null && (
+                                        <View style={{ height: 4, backgroundColor: darkMode ? "#333" : "#eeeeee", borderRadius: 2 }}>
+                                          <View style={{ width: `${pct}%`, height: "100%", backgroundColor: isCorrect ? "#2e7d32" : isWrong ? "#c62828" : "#bdbdbd", borderRadius: 2 }} />
+                                        </View>
+                                      )}
                                     </View>
                                   );
                                 })}
                               </View>
+                              {showAnswers && q.explanation ? (
+                                <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0" }}>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161", fontStyle: "italic" }}>Explanation: {q.explanation}</Text>
+                                </View>
+                              ) : null}
                             </View>
                           ))}
                         </View>
@@ -10303,7 +9892,7 @@ export default function App() {
         animationType="fade"
         onRequestClose={() => setPreviewImageUri(null)}
       >
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center" }}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", zIndex: 2000 }}>
           <View style={{ width: "90%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, overflow: "hidden", padding: 16 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121" }}>{previewImageTitle}</Text>
