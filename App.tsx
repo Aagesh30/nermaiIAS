@@ -291,7 +291,8 @@ export default function App() {
   const [guestEmail, setGuestEmail] = useState("");
   const [showAdmissionForm, setShowAdmissionForm] = useState(false);
   const [admissionSubmitted, setAdmissionSubmitted] = useState(false);
-  const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "UPSC GS" });
+  const [submittingAdmission, setSubmittingAdmission] = useState(false);
+  const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "UPSC GS", preferredMode: "" });
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", content: "", priority: "normal", targetDashboard: "all", targetBatch: "" });
   const [newStudent, setNewStudent] = useState({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "offline", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "" });
   const [editingStudent, setEditingStudent] = useState<any | null>(null);
@@ -1669,6 +1670,15 @@ export default function App() {
       Alert.alert("Required", "Name and Phone are required.");
       return;
     }
+    if (!admissionForm.preferredCourse) {
+      Alert.alert("Required", "Please select your preferred course.");
+      return;
+    }
+    if (!admissionForm.preferredMode) {
+      Alert.alert("Required", "Please select your preferred mode of education.");
+      return;
+    }
+    setSubmittingAdmission(true);
     try {
       await api.post("/crm/admission", {
         ...admissionForm,
@@ -1676,9 +1686,11 @@ export default function App() {
       });
       setAdmissionSubmitted(true);
       setShowAdmissionForm(false);
-      Alert.alert("Application Submitted!", "Your admission application has been submitted. We'll contact you soon.");
+      Alert.alert("Submitted Successfully", "Your admission application has been submitted successfully!");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to submit application.");
+    } finally {
+      setSubmittingAdmission(false);
     }
   };
 
@@ -2093,6 +2105,12 @@ export default function App() {
       Alert.alert("Error", "Please select a batch.");
       return;
     }
+    const total = Number(newStudent.totalFees) || 0;
+    const paid = Number(newStudent.feesPaid) || 0;
+    if (paid > total) {
+      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      return;
+    }
     try {
       await api.post("/erp/student", { ...newStudent, createdBy: user.name });
       Alert.alert("Success", "Student registered successfully! They can now log in to complete their profile.");
@@ -2251,6 +2269,12 @@ export default function App() {
 
   const updateStudentRecord = async () => {
     if (!editingStudent) return;
+    const total = Number(editingStudent.totalFees) || 0;
+    const paid = Number(editingStudent.feesPaid) || 0;
+    if (paid > total) {
+      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      return;
+    }
     try {
       await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
       Alert.alert("Success", "Student record updated!");
@@ -3871,36 +3895,138 @@ export default function App() {
 
               {/* Admission CTA */}
               {admissionSubmitted ? (
-                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50" }]}>
-                  <Text style={{ fontSize: 16, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Application Submitted!</Text>
-                  <Text style={{ color: "#555", textAlign: "center", marginTop: 8, fontSize: 13 }}>Our team will contact you shortly at {admissionForm.phone}</Text>
+                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50", borderWidth: 2, alignItems: "center", paddingVertical: 30 }]}>
+                  <Ionicons name="checkmark-circle" size={40} color="#2e7d32" style={{ alignSelf: "center", marginBottom: 8 }} />
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Submitted Successfully</Text>
+                  <Text style={{ color: "#4caf50", textAlign: "center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
+                    Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
+                  </Text>
                 </View>
               ) : showAdmissionForm ? (
                 <View style={styles.card}>
                   <Text style={styles.sectionTitle}>Admission Application</Text>
-                  <TextInput style={styles.input} placeholder="Full Name *" placeholderTextColor="#999" value={admissionForm.name} onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })} />
-                  <TextInput style={styles.input} placeholder="Phone Number *" placeholderTextColor="#999" value={admissionForm.phone} onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })} keyboardType="phone-pad" />
-                  <TextInput style={styles.input} placeholder="Email (Optional)" placeholderTextColor="#999" value={admissionForm.email} onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })} keyboardType="email-address" />
-                  <TextInput style={styles.input} placeholder="City" placeholderTextColor="#999" value={admissionForm.city} onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })} />
-                  <Text style={styles.label}>Preferred Course:</Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 15 }}>
-                    {["UPSC GS", "TNPSC Group 1", "TNPSC Group 2", "LDC", "SSC", "Other"].map(c => (
-                      <TouchableOpacity key={c} onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })} style={[styles.roleBtn, admissionForm.preferredCourse === c && styles.roleBtnActive]}>
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive]}>{c}</Text>
+
+                  {/* Personal Info */}
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10, marginTop: 10 }}>PERSONAL INFORMATION</Text>
+
+                  <Text style={styles.label}>Full Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your full name"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.name}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
+                  />
+
+                  <Text style={styles.label}>Phone Number *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your mobile number"
+                    placeholderTextColor="#bbb"
+                    keyboardType="phone-pad"
+                    value={admissionForm.phone}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                  />
+
+                  <Text style={styles.label}>Email (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email address"
+                    placeholderTextColor="#bbb"
+                    keyboardType="email-address"
+                    value={admissionForm.email}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
+                  />
+
+                  <Text style={styles.label}>City</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your city"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.city}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
+                  />
+
+                  <View style={{ height: 1, backgroundColor: "#f0f0f0", marginVertical: 16 }} />
+
+                  {/* Course Preference */}
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10 }}>COURSE PREFERENCE</Text>
+
+                  <Text style={styles.label}>Preferred Course *</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    {[
+                      "UPSC Civil Services",
+                      "TNPSC Group 1",
+                      "TNPSC Group 2",
+                      "LDC / UDC / VAO",
+                      "SSC / PC / SI",
+                      "Banking / RRB",
+                      "Puducherry Exam",
+                      "Others"
+                    ].map(c => (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })}
+                        style={[
+                          styles.roleBtn,
+                          admissionForm.preferredCourse === c && styles.roleBtnActive,
+                          { borderRadius: 20 }
+                        ]}
+                      >
+                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 11 }]}>
+                          {c}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+
+                  <Text style={styles.label}>Preferred Mode of Education *</Text>
+                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
+                    {[
+                      { label: "Offline", value: "offline" },
+                      { label: "Online", value: "online" },
+                      { label: "Recorded", value: "recorded" }
+                    ].map(mode => (
+                      <TouchableOpacity
+                        key={mode.value}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.value })}
+                        style={[
+                          {
+                            flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center", borderWidth: 2,
+                            borderColor: admissionForm.preferredMode === mode.value ? "#c62828" : "#e0e0e0",
+                            backgroundColor: admissionForm.preferredMode === mode.value ? "#fff5f5" : "#fafafa"
+                          }
+                        ]}
+                      >
+                        <Text style={[
+                          { fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
+                          { color: admissionForm.preferredMode === mode.value ? "#c62828" : "#757575" }
+                        ]}>
+                          {mode.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
                       <Text style={styles.outlineBtnTxt}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleGuestAdmission} style={[styles.primaryBtn, { flex: 1 }]}>
-                      <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                    <TouchableOpacity 
+                      disabled={submittingAdmission}
+                      onPress={handleGuestAdmission} 
+                      style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
+                    >
+                      {submittingAdmission ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city: "", preferredCourse: "UPSC GS" }); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
+                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city: "", preferredCourse: "", preferredMode: "" }); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
                   <Text style={[styles.primaryBtnTxt, { fontSize: 16 }]}>Register Nermai IAS Academy</Text>
                 </TouchableOpacity>
               )}
@@ -3996,34 +4122,133 @@ export default function App() {
               <Text style={styles.sectionTitle}>Registration & Contact</Text>
 
               {admissionSubmitted ? (
-                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50" }]}>
+                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50", borderWidth: 2, alignItems: "center", paddingVertical: 30 }]}>
                   <Ionicons name="checkmark-circle" size={40} color="#2e7d32" style={{ alignSelf: "center", marginBottom: 8 }} />
-                  <Text style={{ fontSize: 16, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Application Submitted!</Text>
-                  <Text style={{ color: "#555", textAlign: "center", marginTop: 8, fontSize: 13 }}>
-                    Our team will contact you shortly.
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Submitted Successfully</Text>
+                  <Text style={{ color: "#4caf50", textAlign: "center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
+                    Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
                   </Text>
                 </View>
               ) : showAdmissionForm ? (
                 <View style={styles.card}>
                   <Text style={styles.sectionTitle}>Admission Application</Text>
-                  <TextInput style={styles.input} placeholder="Full Name *" placeholderTextColor="#999" value={admissionForm.name} onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })} />
-                  <TextInput style={styles.input} placeholder="Phone Number *" placeholderTextColor="#999" value={admissionForm.phone} onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })} keyboardType="phone-pad" />
-                  <TextInput style={styles.input} placeholder="Email (Optional)" placeholderTextColor="#999" value={admissionForm.email} onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })} keyboardType="email-address" />
-                  <TextInput style={styles.input} placeholder="City" placeholderTextColor="#999" value={admissionForm.city} onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })} />
-                  <Text style={styles.label}>Preferred Course:</Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 15 }}>
-                    {["UPSC GS", "TNPSC Group 1", "TNPSC Group 2", "LDC", "SSC", "Other"].map(c => (
-                      <TouchableOpacity key={c} onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })} style={[styles.roleBtn, admissionForm.preferredCourse === c && styles.roleBtnActive]}>
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive]}>{c}</Text>
+
+                  {/* Personal Info */}
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10, marginTop: 10 }}>PERSONAL INFORMATION</Text>
+
+                  <Text style={styles.label}>Full Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your full name"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.name}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
+                  />
+
+                  <Text style={styles.label}>Phone Number *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your mobile number"
+                    placeholderTextColor="#bbb"
+                    keyboardType="phone-pad"
+                    value={admissionForm.phone}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                  />
+
+                  <Text style={styles.label}>Email (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email address"
+                    placeholderTextColor="#bbb"
+                    keyboardType="email-address"
+                    value={admissionForm.email}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
+                  />
+
+                  <Text style={styles.label}>City</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your city"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.city}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
+                  />
+
+                  <View style={{ height: 1, backgroundColor: "#f0f0f0", marginVertical: 16 }} />
+
+                  {/* Course Preference */}
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10 }}>COURSE PREFERENCE</Text>
+
+                  <Text style={styles.label}>Preferred Course *</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    {[
+                      "UPSC Civil Services",
+                      "TNPSC Group 1",
+                      "TNPSC Group 2",
+                      "LDC / UDC / VAO",
+                      "SSC / PC / SI",
+                      "Banking / RRB",
+                      "Puducherry Exam",
+                      "Others"
+                    ].map(c => (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })}
+                        style={[
+                          styles.roleBtn,
+                          admissionForm.preferredCourse === c && styles.roleBtnActive,
+                          { borderRadius: 20 }
+                        ]}
+                      >
+                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 11 }]}>
+                          {c}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+
+                  <Text style={styles.label}>Preferred Mode of Education *</Text>
+                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
+                    {[
+                      { label: "Offline", value: "offline" },
+                      { label: "Online", value: "online" },
+                      { label: "Recorded", value: "recorded" }
+                    ].map(mode => (
+                      <TouchableOpacity
+                        key={mode.value}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.value })}
+                        style={[
+                          {
+                            flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center", borderWidth: 2,
+                            borderColor: admissionForm.preferredMode === mode.value ? "#c62828" : "#e0e0e0",
+                            backgroundColor: admissionForm.preferredMode === mode.value ? "#fff5f5" : "#fafafa"
+                          }
+                        ]}
+                      >
+                        <Text style={[
+                          { fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
+                          { color: admissionForm.preferredMode === mode.value ? "#c62828" : "#757575" }
+                        ]}>
+                          {mode.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
                       <Text style={styles.outlineBtnTxt}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleGuestAdmission} style={[styles.primaryBtn, { flex: 1 }]}>
-                      <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                    <TouchableOpacity 
+                      disabled={submittingAdmission}
+                      onPress={handleGuestAdmission} 
+                      style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
+                    >
+                      {submittingAdmission ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -4052,18 +4277,6 @@ export default function App() {
                 </View>
               </View>
 
-              <View style={styles.card}>
-                <Text style={{ fontWeight: "bold", fontSize: 13, color: "#1a237e", marginBottom: 8 }}>Already a registered student?</Text>
-                <TouchableOpacity
-                  onPress={async () => {
-                    await guestStorage.disableAutoLogin();
-                    setUser(null);
-                  }}
-                  style={[styles.outlineBtn]}
-                >
-                  <Text style={styles.outlineBtnTxt}>Go to Login Page</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
@@ -5882,7 +6095,7 @@ export default function App() {
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>📞 Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: p })} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad" />
 
                             {/* Batch & Course */}
                             <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 10, fontSize: 13 }}>📚 Batch & Course</Text>
@@ -6048,7 +6261,7 @@ export default function App() {
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight: "bold", color: "#757575", marginBottom: 6, fontSize: 13 }}>📞 Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: p })} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad" />
 
                             <TouchableOpacity onPress={createStudentRecord} style={[styles.primaryBtn, { marginTop: 10 }]}>
                               <Text style={styles.primaryBtnTxt}>✅ Create Student Account</Text>
@@ -9885,6 +10098,12 @@ export default function App() {
 
                 <TouchableOpacity
                   onPress={async () => {
+                    const tot = Number(feeEditStudent.totalFees) || 0;
+                    const paid = Number(feeEditStudent.feesPaid) || 0;
+                    if (paid > tot) {
+                      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+                      return;
+                    }
                     try {
                       await api.put(`/erp/student/${feeEditStudent.id}`, {
                         totalFees: feeEditStudent.totalFees,

@@ -540,6 +540,7 @@ function MainApp() {
   const [guestEmail, setGuestEmail] = useState("");
   const [showAdmissionForm, setShowAdmissionForm] = useState(false);
   const [admissionSubmitted, setAdmissionSubmitted] = useState(false);
+  const [submittingAdmission, setSubmittingAdmission] = useState(false);
   const [admissionForm, setAdmissionForm] = useState({ name:"", phone:"", email:"", city:"", preferredCourse:"", preferredMode:""});
   const [newAnnouncement, setNewAnnouncement] = useState({ title:"", content:"", priority:"normal", targetDashboard:"all", targetBatch:""});
   const [newStudent, setNewStudent] = useState({ loginUsername:"", loginPassword:"", batch:"", course:"", type:"", totalFees:"", feesPaid:"", joiningDate:"", firstName:"", lastName:"", email:"", phone:"", rollNumber:"", admissionNumber:"", dob:"", attendedDays:"", totalDays:"", modeOfPayment:"", transactionId:"", courseDuration:""});
@@ -1323,6 +1324,18 @@ function MainApp() {
 
   // Test Feedback Modal & list states
   const [testFeedbackModal, setTestFeedbackModal] = useState({ visible: false, testId:"", testTitle:"", rating: 5, comments:""});
+
+  // ── EXAM SECURITY & UX ENHANCEMENTS ──────────────────────────────────────
+  // Tracks which question indices the student has actually visited (explored)
+  const [exploredQuestions, setExploredQuestions] = useState<Set<number>>(new Set());
+  // Waiting room: the scheduled test the student clicked into
+  const [waitingRoomTest, setWaitingRoomTest] = useState<any | null>(null);
+  // Countdown seconds until waiting-room test starts
+  const [waitingRoomTimeLeft, setWaitingRoomTimeLeft] = useState<number>(0);
+  // In-exam instructions modal visibility
+  const [showInstructions, setShowInstructions] = useState(false);
+  // Ref that counts how many times the student hid the tab during an exam
+  const tabLeaveCountRef = useRef<number>(0);
   const [testFeedbacks, setTestFeedbacks] = useState<any[]>([]);
   const [loadingTestFeedbacks, setLoadingTestFeedbacks] = useState(false);
   const [manualQuestionsJson, setManualQuestionsJson] = useState("");
@@ -1993,6 +2006,104 @@ function MainApp() {
     const clockTick = setInterval(() => setNowTick(Date.now()), 30000);
     return () => clearInterval(clockTick);
   }, []);
+
+  // Waiting room countdown timer — ticks every second when a student is in the waiting room
+  useEffect(() => {
+    if (!waitingRoomTest) return;
+    const tick = () => {
+      const startMs = parseTestTimeMs(waitingRoomTest.startTime);
+      const remaining = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
+      setWaitingRoomTimeLeft(remaining);
+      if (remaining <= 0) {
+        // Test has started — close waiting room and show the test card live
+        setWaitingRoomTest(null);
+        setNowTick(Date.now()); // force live-test list refresh
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [waitingRoomTest]);
+
+  // Anti-malpractice: block screenshots, clipboard, context menu during active exam
+  useEffect(() => {
+    if (!activeAttempt || Platform.OS !== "web") return;
+
+    // Block keyboard shortcuts used for screenshot/copy/inspect
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const blocked = [
+        e.key === "PrintScreen",
+        e.key === "F12",
+        (e.ctrlKey || e.metaKey) && ["c", "C", "x", "X", "p", "P", "s", "S", "u", "U", "a", "A"].includes(e.key),
+        (e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "I", "j", "J", "c", "C"].includes(e.key),
+      ];
+      if (blocked.some(Boolean)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    // Block right-click context menu
+    const handleContextMenu = (e: MouseEvent) => { e.preventDefault(); };
+
+    // Block copy/cut/paste events so content can't be clipboard-transferred
+    const handleCopy = (e: ClipboardEvent) => { e.preventDefault(); };
+    const handleCut  = (e: ClipboardEvent) => { e.preventDefault(); };
+
+    // Apply CSS that causes most software screen-recorders to capture black
+    const styleEl = document.createElement("style");
+    styleEl.id = "exam-security-css";
+    styleEl.textContent = `
+      .exam-protected {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+      /* Canvas-based isolation causes OBS/browser-extension recorders to see black */
+      .exam-protected-root {
+        isolation: isolate;
+        mix-blend-mode: normal;
+        will-change: transform;
+      }
+    `;
+    document.head.appendChild(styleEl);
+
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("contextmenu", handleContextMenu, true);
+    document.addEventListener("copy", handleCopy, true);
+    document.addEventListener("cut",  handleCut,  true);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("contextmenu", handleContextMenu, true);
+      document.removeEventListener("copy", handleCopy, true);
+      document.removeEventListener("cut",  handleCut,  true);
+      const el = document.getElementById("exam-security-css");
+      if (el) el.remove();
+    };
+  }, [activeAttempt]);
+
+  // Tab-leave tracker: counts how many times the student hides the tab during an exam
+  useEffect(() => {
+    if (!activeAttempt || Platform.OS !== "web") return;
+    tabLeaveCountRef.current = 0;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "hidden") {
+        tabLeaveCountRef.current += 1;
+        // Notify backend so the count persists in attempt document
+        try {
+          await api.post(
+            `/test-portal/examination/focus-event/${activeAttempt.attemptId}`,
+            { event: "blur", tabLeaveCount: tabLeaveCountRef.current },
+            { "user-id": user?.userId || "" }
+          );
+        } catch (_) { /* non-critical, ignore network errors */ }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [activeAttempt]);
 
   // Auto-sync student profile, ID Card, Hall Ticket, and Edit Permissions without requiring re-login
   useEffect(() => {
@@ -3138,6 +3249,7 @@ function MainApp() {
       Alert.alert("Required","Please select your preferred mode of education.");
       return;
     }
+    setSubmittingAdmission(true);
     try {
       await api.post("/crm/admission", {
         ...admissionForm,
@@ -3146,9 +3258,11 @@ function MainApp() {
       });
       setAdmissionSubmitted(true);
       setShowAdmissionForm(false);
-      Alert.alert("Application Submitted!","Your admission enquiry has been received. Our team will contact you shortly.");
+      Alert.alert("Submitted Successfully","Your admission application has been submitted successfully!");
     } catch (e: any) {
       Alert.alert("Error", e.message ||"Failed to submit application.");
+    } finally {
+      setSubmittingAdmission(false);
     }
   };
 
@@ -3659,6 +3773,12 @@ function MainApp() {
       Alert.alert("Error","Please select a batch.");
       return;
     }
+    const total = Number(newStudent.totalFees) || 0;
+    const paid = Number(newStudent.feesPaid) || 0;
+    if (paid > total) {
+      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      return;
+    }
     try {
       await api.post("/erp/student", { ...newStudent, profileEditPermission: true, isProfileSubmitted: false, createdBy: user.name });
       Alert.alert("Success","Student registered successfully! They can now log in to complete their profile.");
@@ -3953,6 +4073,12 @@ function MainApp() {
 
   const updateStudentRecord = async () => {
     if (!editingStudent) return;
+    const total = Number(editingStudent.totalFees) || 0;
+    const paid = Number(editingStudent.feesPaid) || 0;
+    if (paid > total) {
+      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      return;
+    }
     try {
       await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
       Alert.alert("Success","Student record updated!");
@@ -4532,6 +4658,9 @@ function MainApp() {
         }
         setAttemptQuestions(qList);
         setCurrentQIdx(0);
+        // Reset explored questions — mark Q1 as explored since it's auto-opened
+        setExploredQuestions(new Set([0]));
+        tabLeaveCountRef.current = 0;
 
         // Load progress & merge with local answers draft
         const progressRes = await api.get(`/test-portal/examination/progress/${statusInfo.attemptId}`, { "user-id": user.userId });
@@ -4569,6 +4698,9 @@ function MainApp() {
       setAttemptQuestions(qRes || []);
       setCurrentQIdx(0);
       setSelectedAnswers({});
+      // Reset explored questions — mark Q1 as explored since it's auto-opened
+      setExploredQuestions(new Set([0]));
+      tabLeaveCountRef.current = 0;
 
       examLocalStorage.saveDraft(attemptData.attemptId, { attempt: attemptData, questions: qRes || [], answers: {} });
     } catch (e: any) {
@@ -7581,36 +7713,140 @@ function MainApp() {
 
               {/* Admission CTA */}
               {admissionSubmitted ? (
-                <View style={[styles.card, { backgroundColor:"#e8f5e9", borderColor:"#4caf50"}]}>
-                  <Text style={{ fontSize: 16, fontWeight:"bold", color:"#2e7d32", textAlign:"center"}}>Application Submitted!</Text>
-                  <Text style={{ color:"#555", textAlign:"center", marginTop: 8, fontSize: 13 }}>Our team will contact you shortly at {user.phone}</Text>
+                <View style={[styles.card, { backgroundColor:"#e8f5e9", borderColor:"#4caf50", borderWidth: 2, alignItems:"center", paddingVertical: 30 }]}>
+                  <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor:"#c8e6c9", alignItems:"center", justifyContent:"center", marginBottom: 14 }}>
+                    <Ionicons name="checkmark-circle"size={50} color="#2e7d32"/>
+                  </View>
+                  <Text style={{ fontSize: 18, fontWeight:"bold", color:"#2e7d32", textAlign:"center"}}>Submitted Successfully</Text>
+                  <Text style={{ color:"#4caf50", textAlign:"center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
+                    Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
+                  </Text>
                 </View>
               ) : showAdmissionForm ? (
                 <View style={styles.card}>
                   <Text style={styles.sectionTitle}>Admission Application</Text>
-                  <TextInput style={styles.input} placeholder="Full Name *"placeholderTextColor="#999"value={admissionForm.name} onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })} />
-                  <TextInput style={styles.input} placeholder="Phone Number *"placeholderTextColor="#999"value={admissionForm.phone} onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })} keyboardType="phone-pad"/>
-                  <TextInput style={styles.input} placeholder="Email (Optional)"placeholderTextColor="#999"value={admissionForm.email} onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })} keyboardType="email-address"/>
-                  <TextInput style={styles.input} placeholder="City"placeholderTextColor="#999"value={admissionForm.city} onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })} />
-                  <Text style={styles.label}>Preferred Course:</Text>
-                  <View style={{ flexDirection:"row", flexWrap:"wrap", gap: 8, marginBottom: 15 }}>
-                    {["UPSC GS","TNPSC Group 1","TNPSC Group 2","LDC","SSC","Other"].map(c => (
-                      <TouchableOpacity key={c} onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })} style={[styles.roleBtn, admissionForm.preferredCourse === c && styles.roleBtnActive]}>
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive]}>{c}</Text>
+
+                  {/* Personal Info */}
+                  <Text style={{ fontSize: 11, fontWeight:"800", color:"#757575", letterSpacing: 1, marginBottom: 10, marginTop: 10 }}>PERSONAL INFORMATION</Text>
+
+                  <Text style={styles.label}>Full Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your full name"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.name}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
+                  />
+
+                  <Text style={styles.label}>Phone Number *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your mobile number"
+                    placeholderTextColor="#bbb"
+                    keyboardType="phone-pad"
+                    value={admissionForm.phone}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                  />
+
+                  <Text style={styles.label}>Email (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email address"
+                    placeholderTextColor="#bbb"
+                    keyboardType="email-address"
+                    value={admissionForm.email}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
+                  />
+
+                  <Text style={styles.label}>City</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your city"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.city}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
+                  />
+
+                  <View style={{ height: 1, backgroundColor:"#f0f0f0", marginVertical: 16 }} />
+
+                  {/* Course Preference */}
+                  <Text style={{ fontSize: 11, fontWeight:"800", color:"#757575", letterSpacing: 1, marginBottom: 10 }}>COURSE PREFERENCE</Text>
+
+                  <Text style={styles.label}>Preferred Course *</Text>
+                  <View style={{ flexDirection:"row", flexWrap:"wrap", gap: 8, marginBottom: 16 }}>
+                    {[
+                      "UPSC Civil Services",
+                      "TNPSC Group 1",
+                      "TNPSC Group 2",
+                      "LDC / UDC / VAO",
+                      "SSC / PC / SI",
+                      "Banking / RRB",
+                      "Puducherry Exam",
+                      "Others"
+                    ].map(c => (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })}
+                        style={[
+                          styles.roleBtn,
+                          admissionForm.preferredCourse === c && styles.roleBtnActive,
+                          { borderRadius: 20 }
+                        ]}
+                      >
+                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 11 }]}>
+                          {c}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+
+                  <Text style={styles.label}>Preferred Mode of Education *</Text>
+                  <View style={{ flexDirection:"row", gap: 10, marginBottom: 20 }}>
+                    {[
+                      { label:"Offline", value:"offline"},
+                      { label:"Online", value:"online"},
+                      { label:"Recorded", value:"recorded"}
+                    ].map(mode => (
+                      <TouchableOpacity
+                        key={mode.value}
+                        onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.value })}
+                        style={[
+                          {
+                            flex: 1, borderRadius: 12, paddingVertical: 14, alignItems:"center", borderWidth: 2,
+                            borderColor: admissionForm.preferredMode === mode.value ?"#c62828":"#e0e0e0",
+                            backgroundColor: admissionForm.preferredMode === mode.value ?"#fff5f5":"#fafafa"
+                          }
+                        ]}
+                      >
+                        <Text style={[
+                          { fontSize: 12, fontWeight:"700", textTransform:"capitalize"},
+                          { color: admissionForm.preferredMode === mode.value ?"#c62828":"#757575"}
+                        ]}>
+                          {mode.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   <View style={{ flexDirection:"row", gap: 10 }}>
                     <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
                       <Text style={styles.outlineBtnTxt}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleGuestAdmission} style={[styles.primaryBtn, { flex: 1 }]}>
-                      <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                    <TouchableOpacity 
+                      disabled={submittingAdmission}
+                      onPress={handleGuestAdmission} 
+                      style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
+                    >
+                      {submittingAdmission ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Text style={styles.primaryBtnTxt}>Submit Application</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
-                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user.name, phone: user.phone, email: user.email, city:"", preferredCourse:"", preferredMode:""}); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
+                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city:"", preferredCourse:"", preferredMode:""}); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
                   <Text style={[styles.primaryBtnTxt, { fontSize: 16 }]}>Register Nermai IAS Academy</Text>
                 </TouchableOpacity>
               )}
@@ -7722,7 +7958,7 @@ function MainApp() {
                   <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor:"#c8e6c9", alignItems:"center", justifyContent:"center", marginBottom: 14 }}>
                     <Ionicons name="checkmark-circle"size={50} color="#2e7d32"/>
                   </View>
-                  <Text style={{ fontSize: 18, fontWeight:"bold", color:"#2e7d32", textAlign:"center"}}>Application Submitted!</Text>
+                  <Text style={{ fontSize: 18, fontWeight:"bold", color:"#2e7d32", textAlign:"center"}}>Submitted Successfully</Text>
                   <Text style={{ color:"#4caf50", textAlign:"center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
                     Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
                   </Text>
@@ -7764,6 +8000,25 @@ function MainApp() {
                     keyboardType="phone-pad"
                     value={admissionForm.phone}
                     onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                  />
+
+                  <Text style={styles.label}>Email (Optional)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email address"
+                    placeholderTextColor="#bbb"
+                    keyboardType="email-address"
+                    value={admissionForm.email}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
+                  />
+
+                  <Text style={styles.label}>City</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your city"
+                    placeholderTextColor="#bbb"
+                    value={admissionForm.city}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
                   />
 
                   <View style={{ height: 1, backgroundColor:"#f0f0f0", marginVertical: 16 }} />
@@ -7817,14 +8072,11 @@ function MainApp() {
                           }
                         ]}
                       >
-                        <Text style={{ fontSize: 18, marginBottom: 4 }}>
-                          {mode.value ==="offline"?"": mode.value ==="online"?"":""}
-                        </Text>
                         <Text style={[
                           { fontSize: 12, fontWeight:"700", textTransform:"capitalize"},
                           { color: admissionForm.preferredMode === mode.value ?"#c62828":"#757575"}
                         ]}>
-                          {mode.value.charAt(0).toUpperCase() + mode.value.slice(1)}
+                          {mode.label}
                         </Text>
                       </TouchableOpacity>
                     ))}
@@ -7832,11 +8084,18 @@ function MainApp() {
 
                   {/* Submit */}
                   <TouchableOpacity
+                    disabled={submittingAdmission}
                     onPress={handleGuestAdmission}
-                    style={[styles.primaryBtn, { paddingVertical: 16, borderRadius: 14, backgroundColor:"#c62828"}]}
+                    style={[styles.primaryBtn, { paddingVertical: 16, borderRadius: 14, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
                   >
-                    <Ionicons name="send-outline"size={18} color="#fff"style={{ marginRight: 8 }} />
-                    <Text style={[styles.primaryBtnTxt, { fontSize: 15 }]}>Submit Application</Text>
+                    {submittingAdmission ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <>
+                        <Ionicons name="send-outline"size={18} color="#fff"style={{ marginRight: 8 }} />
+                        <Text style={[styles.primaryBtnTxt, { fontSize: 15 }]}>Submit Application</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
 
                   <Text style={{ fontSize: 10, color:"#9e9e9e", textAlign:"center", marginTop: 10 }}>
@@ -7867,18 +8126,6 @@ function MainApp() {
                 </View>
               </View>
 
-              <View style={styles.card}>
-                <Text style={{ fontWeight:"bold", fontSize: 13, color:"#1a237e", marginBottom: 8 }}>Already a registered student?</Text>
-                <TouchableOpacity
-                  onPress={async () => {
-                    await guestStorage.disableAutoLogin();
-                    setUser(null);
-                  }}
-                  style={[styles.outlineBtn]}
-                >
-                  <Text style={styles.outlineBtnTxt}>Go to Login Page</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
@@ -7972,44 +8219,222 @@ function MainApp() {
 
   // Render main screen
 
+  // ── WAITING ROOM (before scheduled test starts) ─────────────────────────
+  if (waitingRoomTest) {
+    const wh = Math.floor(waitingRoomTimeLeft / 3600);
+    const wm = Math.floor((waitingRoomTimeLeft % 3600) / 60);
+    const ws = waitingRoomTimeLeft % 60;
+    const countdownStr = `${String(wh).padStart(2, "0")}:${String(wm).padStart(2, "0")}:${String(ws).padStart(2, "0")}`;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#1a1a2e" }}>
+        <StatusBar style="light" />
+        {/* Header */}
+        <View style={{ backgroundColor: "#c62828", padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }} numberOfLines={1}>{waitingRoomTest.title}</Text>
+            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11, marginTop: 2 }}>⏳ Waiting Room — Test hasn't started yet</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setWaitingRoomTest(null)}
+            style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, padding: 8, marginLeft: 12 }}
+          >
+            <Ionicons name="close" size={20} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          {/* Countdown */}
+          <View style={{ alignItems: "center", marginVertical: 32 }}>
+            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginBottom: 12 }}>TEST STARTS IN</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[{ val: wh, label: "HRS" }, { val: wm, label: "MIN" }, { val: ws, label: "SEC" }].map(({ val, label }) => (
+                <View key={label} style={{ alignItems: "center" }}>
+                  <View style={{ backgroundColor: "#c62828", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12, minWidth: 68, alignItems: "center" }}>
+                    <Text style={{ color: "#ffffff", fontSize: 40, fontWeight: "900", fontVariant: ["tabular-nums"] }}>{String(val).padStart(2, "0")}</Text>
+                  </View>
+                  <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginTop: 6, letterSpacing: 1 }}>{label}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, marginTop: 18 }}>
+              Starts: {new Date(parseTestTimeMs(waitingRoomTest.startTime)).toLocaleString()}
+            </Text>
+          </View>
+
+          {/* Color Legend Card */}
+          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18, marginBottom: 16 }}>
+            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📊 QUESTION NAVIGATOR — COLOR GUIDE</Text>
+            {[
+              { color: "#c62828", label: "Current Question", desc: "The question currently displayed" },
+              { color: "#2e7d32", label: "Answered", desc: "You selected an answer for this question" },
+              { color: "#f57c00", label: "Visited — No Answer", desc: "You viewed it but didn't select an answer" },
+              { color: "#e0e0e0", label: "Not Visited", desc: "You haven't opened this question yet" },
+            ].map(item => (
+              <View key={item.color} style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: item.color, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)" }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 13 }}>{item.label}</Text>
+                  <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>{item.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Instructions Card */}
+          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18 }}>
+            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT INSTRUCTIONS</Text>
+            {[
+              { icon: "🚫", text: "Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to the admin." },
+              { icon: "🚫", text: "Screen recording, screenshots, and PrintScreen shortcuts are blocked during the exam." },
+              { icon: "🚫", text: "Right-click, Copy, and Cut operations are disabled — text cannot be extracted from the exam." },
+              { icon: "✅", text: "You MUST visit ALL questions before the Submit button becomes available." },
+              { icon: "⏰", text: "The exam auto-submits when the timer reaches 00:00. Ensure you click Submit before time runs out." },
+              { icon: "💾", text: "Your answers are saved automatically in real-time — no manual save needed." },
+              { icon: "📶", text: "Stay on a stable internet connection for the entire duration of the test." },
+            ].map((item, i) => (
+              <View key={i} style={{ flexDirection: "row", marginBottom: 10, gap: 10 }}>
+                <Text style={{ fontSize: 16 }}>{item.icon}</Text>
+                <Text style={{ flex: 1, color: "rgba(255,255,255,0.8)", fontSize: 12, lineHeight: 18 }}>{item.text}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={{ marginTop: 24, backgroundColor: "rgba(198,40,40,0.15)", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "rgba(198,40,40,0.4)" }}>
+            <Text style={{ color: "#ffcdd2", fontSize: 12, textAlign: "center", lineHeight: 18, fontWeight: "600" }}>
+              ✨ The exam will start automatically when the countdown reaches 00:00:00.{"\n"}Stay on this page!
+            </Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (activeAttempt) {
+    const allExplored = exploredQuestions.size >= attemptQuestions.length;
+
+    // Helper to navigate and mark explored
+    const navigateTo = (idx: number) => {
+      setCurrentQIdx(idx);
+      setExploredQuestions(prev => { const s = new Set(prev); s.add(idx); return s; });
+    };
+
     return (
       <SafeAreaView style={[styles.modalContainer, { flex: 1, backgroundColor:"#ffffff"}]}>
         <StatusBar style="light"/>
-        <View style={[styles.header, { backgroundColor:"#c62828"}]}>
-          <Text style={styles.headerTitle}>{activeAttempt.title ||"Examination in Progress"}</Text>
-          <Text style={{ color:"#ffffff", fontWeight:"bold", fontSize: 18 }}>
-            {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2,"0")}
-          </Text>
+
+        {/* ── EXAM HEADER ─────────────────────────────────── */}
+        <View style={[styles.header, { backgroundColor:"#c62828", flexDirection:"row", alignItems:"center", justifyContent:"space-between", paddingHorizontal: 16 }]}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={[styles.headerTitle, { fontSize: 13 }]} numberOfLines={1}>{activeAttempt.title || "Examination in Progress"}</Text>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            {/* Instructions button */}
+            <TouchableOpacity
+              onPress={() => setShowInstructions(true)}
+              style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}
+            >
+              <Ionicons name="information-circle-outline" size={16} color="#ffffff" />
+              <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 11 }}>Info</Text>
+            </TouchableOpacity>
+            {/* Countdown timer */}
+            <View style={{ backgroundColor: "rgba(0,0,0,0.2)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+              <Text style={{ color: timeLeft <= 300 ? "#ffcdd2" : "#ffffff", fontWeight:"bold", fontSize: 16 }}>
+                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2,"0")}
+              </Text>
+            </View>
+          </View>
         </View>
+
+        {/* ── INSTRUCTIONS MODAL ──────────────────────────── */}
+        <Modal transparent animationType="fade" visible={showInstructions} onRequestClose={() => setShowInstructions(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: "#ffffff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 480 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <Text style={{ fontSize: 16, fontWeight: "900", color: "#c62828" }}>📋 Exam Instructions</Text>
+                <TouchableOpacity onPress={() => setShowInstructions(false)}>
+                  <Ionicons name="close-circle" size={26} color="#c62828" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Color Legend */}
+              <Text style={{ fontWeight: "800", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>QUESTION NAVIGATOR LEGEND</Text>
+              {[
+                { color: "#c62828", label: "Current Question", desc: "The question you are currently viewing" },
+                { color: "#2e7d32", label: "Answered", desc: "You have selected an answer" },
+                { color: "#f57c00", label: "Visited — No Answer", desc: "You viewed this but didn't answer" },
+                { color: "#e0e0e0", label: "Not Visited", desc: "You haven't opened this question yet" },
+              ].map(item => (
+                <View key={item.color} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10, gap: 12 }}>
+                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: item.color }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: "700", fontSize: 13, color: "#212121" }}>{item.label}</Text>
+                    <Text style={{ fontSize: 11, color: "#757575" }}>{item.desc}</Text>
+                  </View>
+                </View>
+              ))}
+
+              <View style={{ height: 1, backgroundColor: "#e0e0e0", marginVertical: 14 }} />
+
+              {/* General rules */}
+              <Text style={{ fontWeight: "800", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>GENERAL RULES</Text>
+              {[
+                "🚫 Do NOT switch tabs or minimize the browser during the test — each tab-switch is recorded.",
+                "🚫 Screenshot & screen-recording shortcuts are disabled.",
+                "🚫 Right-click, copy, and cut operations are blocked.",
+                "✅ You must visit ALL questions before the Submit button appears.",
+                "⏰ The exam auto-submits when the timer reaches 00:00.",
+                "💾 Your answers are saved automatically as you go.",
+              ].map((rule, i) => (
+                <Text key={i} style={{ fontSize: 12, color: "#424242", marginBottom: 6, lineHeight: 18 }}>{rule}</Text>
+              ))}
+
+              <TouchableOpacity
+                onPress={() => setShowInstructions(false)}
+                style={{ marginTop: 16, backgroundColor: "#c62828", borderRadius: 10, paddingVertical: 12, alignItems: "center" }}
+              >
+                <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 14 }}>Got it — Back to Exam</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {attemptQuestions[currentQIdx] ? (
           <View style={{ flex: 1, padding: 20, backgroundColor:"#ffffff"}}>
 
             {/* Question Quick Navigation Grid */}
-            <View style={{ marginBottom: 15 }}>
-              <Text style={{ fontSize: 11, fontWeight:"bold", color:"#757575", marginBottom: 6 }}>QUESTIONS NAVIGATOR:</Text>
+            <View style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight:"bold", color:"#757575" }}>QUESTIONS NAVIGATOR:</Text>
+                <Text style={{ fontSize: 10, color: allExplored ? "#2e7d32" : "#f57c00", fontWeight: "700" }}>
+                  {exploredQuestions.size}/{attemptQuestions.length} visited
+                </Text>
+              </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection:"row", maxHeight: 40 }}>
                 {attemptQuestions.map((_, qIdx) => {
                   const isAnswered = selectedAnswers[attemptQuestions[qIdx].id] !== undefined;
-                  const isActive = qIdx === currentQIdx;
+                  const isActive   = qIdx === currentQIdx;
+                  const isExplored = exploredQuestions.has(qIdx);
+                  // Priority: active > answered > explored-not-answered > not-visited
+                  const bgColor = isActive ? "#c62828" : isAnswered ? "#2e7d32" : isExplored ? "#f57c00" : "#f5f5f5";
+                  const borderColor = isActive ? "#c62828" : isAnswered ? "#2e7d32" : isExplored ? "#f57c00" : "#e0e0e0";
+                  const textColor = (isActive || isAnswered || isExplored) ? "#ffffff" : "#212121";
                   return (
                     <TouchableOpacity
                       key={qIdx}
-                      onPress={() => setCurrentQIdx(qIdx)}
+                      onPress={() => navigateTo(qIdx)}
                       style={{
                         width: 32,
                         height: 32,
                         borderRadius: 16,
-                        backgroundColor: isActive ?"#c62828": isAnswered ?"#2e7d32":"#f5f5f5",
+                        backgroundColor: bgColor,
                         justifyContent:"center",
                         alignItems:"center",
                         marginRight: 6,
                         borderWidth: isActive ? 2 : 1,
-                        borderColor: isActive ?"#c62828": isAnswered ?"#2e7d32":"#e0e0e0"
+                        borderColor: borderColor
                       }}
                     >
-                      <Text style={{ color: isActive || isAnswered ?"#ffffff":"#212121", fontWeight:"bold", fontSize: 12 }}>
+                      <Text style={{ color: textColor, fontWeight:"bold", fontSize: 12 }}>
                         {qIdx + 1}
                       </Text>
                     </TouchableOpacity>
@@ -8077,11 +8502,11 @@ function MainApp() {
               </View>
             </ScrollView>
 
-            {/* Navigation inside Modal */}
+            {/* Navigation Row */}
             <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginTop: 15, gap: 10 }}>
               <TouchableOpacity
                 disabled={currentQIdx === 0}
-                onPress={() => setCurrentQIdx(prev => prev - 1)}
+                onPress={() => navigateTo(currentQIdx - 1)}
                 style={{
                   flex: 1,
                   height: 44,
@@ -8097,29 +8522,50 @@ function MainApp() {
                 <Text style={{ color:"#c62828", fontWeight:"bold", fontSize: 13 }}>◀ Previous</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={submitTestAttempt}
-                disabled={submitLoading}
-                style={{
-                  flex: 1.2,
-                  height: 44,
-                  borderRadius: 8,
-                  backgroundColor: submitLoading ? "#e57373" : "#c62828",
-                  justifyContent: "center",
-                  alignItems: "center",
-                  flexDirection: "row",
-                  gap: 6
-                }}
-              >
-                {submitLoading
-                  ? <ActivityIndicator size="small" color="#ffffff" />
-                  : <Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 13 }}>Submit Exam</Text>
-                }
-              </TouchableOpacity>
+              {/* Submit: only shown when all questions are explored */}
+              {allExplored ? (
+                <TouchableOpacity
+                  onPress={submitTestAttempt}
+                  disabled={submitLoading}
+                  style={{
+                    flex: 1.2,
+                    height: 44,
+                    borderRadius: 8,
+                    backgroundColor: submitLoading ? "#e57373" : "#c62828",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    flexDirection: "row",
+                    gap: 6
+                  }}
+                >
+                  {submitLoading
+                    ? <ActivityIndicator size="small" color="#ffffff" />
+                    : <><Ionicons name="checkmark-circle-outline" size={16} color="#ffffff" /><Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 13 }}>Submit Exam</Text></>
+                  }
+                </TouchableOpacity>
+              ) : (
+                <View
+                  style={{
+                    flex: 1.2,
+                    height: 44,
+                    borderRadius: 8,
+                    backgroundColor: "#e0e0e0",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    flexDirection: "row",
+                    gap: 6
+                  }}
+                >
+                  <Ionicons name="eye-outline" size={14} color="#9e9e9e" />
+                  <Text style={{ color: "#9e9e9e", fontWeight: "600", fontSize: 11 }}>
+                    Visit all ({attemptQuestions.length - exploredQuestions.size} left)
+                  </Text>
+                </View>
+              )}
 
               <TouchableOpacity
                 disabled={currentQIdx === attemptQuestions.length - 1}
-                onPress={() => setCurrentQIdx(prev => prev + 1)}
+                onPress={() => navigateTo(currentQIdx + 1)}
                 style={{
                   flex: 1,
                   height: 44,
@@ -8843,18 +9289,17 @@ function MainApp() {
                 </>
               ) : (
                 <>
-                  {user.role === "student" && (() => {
-                    const hasPending = myProfileRequest && myProfileRequest.status === "pending";
+                   {user.role === "student" && (() => {
+                    const myStudent = getLoggedInStudent(user, students);
+                    const rawCount = myStudent?.profileSubmitCount;
+                    const submitCount = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
+                    const isSubmitted = myStudent?.isProfileSubmitted === true || submitCount >= 1;
+
+                    const hasPending = (myProfileRequest && myProfileRequest.status === "pending") || (isSubmitted && (!myProfileRequest || myProfileRequest.status !== "rejected"));
                     const hasRejected = myProfileRequest && myProfileRequest.status === "rejected";
-                    const hasNoRequest = !myProfileRequest;
-                    if (hasNoRequest) {
-                      return (
-                        <TouchableOpacity onPress={() => { changeErpSub("my-profile"); setActiveTab("erp"); }} style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#c62828", backgroundColor: darkMode ? "#3e1c1c" : "#ffebee", cursor: "pointer" }]}>
-                          <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 13 }}>⚠️ ACTION REQUIRED: INCOMPLETE PROFILE</Text>
-                          <Text style={{ color: darkMode ? "#e0e0e0" : "#424242", fontSize: 12, marginTop: 4 }}>Your student profile is incomplete. Please go to the "My Profile" tab to complete your details and upload required documents.</Text>
-                        </TouchableOpacity>
-                      );
-                    } else if (hasRejected) {
+                    const hasNoRequest = !isSubmitted && !myProfileRequest;
+
+                    if (hasRejected) {
                       return (
                         <TouchableOpacity onPress={() => { changeErpSub("my-profile"); setActiveTab("erp"); }} style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#c62828", backgroundColor: darkMode ? "#3e1c1c" : "#ffebee", cursor: "pointer" }]}>
                           <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 13 }}>❌ ACTION REQUIRED: PROFILE REQUEST REJECTED</Text>
@@ -8862,11 +9307,21 @@ function MainApp() {
                         </TouchableOpacity>
                       );
                     } else if (hasPending) {
+                      if (myProfileRequest && myProfileRequest.status === "approved") {
+                        return null;
+                      }
                       return (
                         <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#f57c00", backgroundColor: darkMode ? "#3e2723" : "#fff3e0" }]}>
                           <Text style={{ color: "#f57c00", fontWeight: "bold", fontSize: 13 }}>⏳ PROFILE VERIFICATION PENDING</Text>
                           <Text style={{ color: darkMode ? "#e0e0e0" : "#424242", fontSize: 12, marginTop: 4 }}>Your profile details have been submitted and are currently awaiting administrator verification.</Text>
                         </View>
+                      );
+                    } else if (hasNoRequest) {
+                      return (
+                        <TouchableOpacity onPress={() => { changeErpSub("my-profile"); setActiveTab("erp"); }} style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#c62828", backgroundColor: darkMode ? "#3e1c1c" : "#ffebee", cursor: "pointer" }]}>
+                          <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 13 }}>⚠️ ACTION REQUIRED: INCOMPLETE PROFILE</Text>
+                          <Text style={{ color: darkMode ? "#e0e0e0" : "#424242", fontSize: 12, marginTop: 4 }}>Your student profile is incomplete. Please go to the "My Profile" tab to complete your details and upload required documents.</Text>
+                        </TouchableOpacity>
                       );
                     }
                     return null;
@@ -8882,7 +9337,9 @@ function MainApp() {
                   {(() => {
                     if (user.role !== "student") return null;
                     const myStudent = getLoggedInStudent(user, students);
-                    const isComplete = myStudent?.isProfileSubmitted === true || myProfileRequest?.status ==="approved";
+                    const rawCount = myStudent?.profileSubmitCount;
+                    const submitCount = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
+                    const isComplete = myStudent?.isProfileSubmitted === true || submitCount >= 1 || myProfileRequest?.status === "approved" || myProfileRequest?.status === "pending";
                     if (isComplete) return null;
 
                     return (
@@ -9318,10 +9775,20 @@ function MainApp() {
                             {t.endTime && <Text style={{ fontSize: 11, color:"#757575"}}>Ends: {new Date(t.endTime).toLocaleString()}</Text>}
                           </View>
                           <Text style={styles.noticeMeta}>Duration: {t.durationMinutes} Mins | Passing: {t.passingMarks}</Text>
-                          <TouchableOpacity disabled style={[styles.primaryBtn, { marginTop: 10, backgroundColor:"#bdbdbd"}]}>
-                            <Ionicons name="time-outline"size={15} color="#fff"style={{ marginRight: 6 }} />
-                            <Text style={styles.primaryBtnTxt}>Not Started Yet</Text>
-                          </TouchableOpacity>
+                          {isAdmin ? (
+                            <TouchableOpacity disabled style={[styles.primaryBtn, { marginTop: 10, backgroundColor:"#bdbdbd"}]}>
+                              <Ionicons name="time-outline" size={15} color="#fff" style={{ marginRight: 6 }} />
+                              <Text style={styles.primaryBtnTxt}>Not Started Yet</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity
+                              onPress={() => setWaitingRoomTest(t)}
+                              style={[styles.primaryBtn, { marginTop: 10, backgroundColor:"#f57c00", flexDirection: "row", gap: 6 }]}
+                            >
+                              <Ionicons name="hourglass-outline" size={15} color="#fff" />
+                              <Text style={styles.primaryBtnTxt}>Enter Waiting Room</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
                       ))}
                     </>
@@ -11009,7 +11476,7 @@ PASTED QUESTION PAPER TEXT:
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight:"bold", color:"#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number"placeholderTextColor="#999"value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: p })} keyboardType="phone-pad"/>
+                            <TextInput style={styles.input} placeholder="Phone Number"placeholderTextColor="#999"value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad"/>
 
                             {/* Batch & Course */}
                             <Text style={{ fontWeight:"bold", color:"#0288d1", marginBottom: 6, marginTop: 10, fontSize: 13 }}>Batch & Course</Text>
@@ -11189,7 +11656,7 @@ PASTED QUESTION PAPER TEXT:
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight:"bold", color:"#757575", marginBottom: 6, fontSize: 13 }}>Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number"placeholderTextColor="#999"value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: p })} keyboardType="phone-pad"/>
+                            <TextInput style={styles.input} placeholder="Phone Number"placeholderTextColor="#999"value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad"/>
 
                             {/* Mode of Payment */}
                             <Text style={{ fontWeight:"bold", color:"#c62828", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Mode of Payment</Text>
@@ -14893,6 +15360,7 @@ PASTED QUESTION PAPER TEXT:
                             <View style={styles.tableRow}>
                               <Text style={[styles.th, { flex: 2 }]}>Student Name</Text>
                               <Text style={styles.th}>Score</Text>
+                              {user.role !== "student" && <Text style={styles.th}>Tab Exits</Text>}
                               <Text style={styles.th}>Rank</Text>
                               <Text style={styles.th}>Status</Text>
                             </View>
@@ -14907,6 +15375,11 @@ PASTED QUESTION PAPER TEXT:
                                 <View key={r.id} style={styles.tableRow}>
                                   <Text style={{ flex: 2, color:"#212121", fontSize: 13 }}>{name}</Text>
                                   <Text style={{ color:"#212121", fontSize: 13 }}>{r.obtainedMarks} / {r.totalMarks}</Text>
+                                  {user.role !== "student" && (
+                                    <Text style={{ color: (r.tabLeaveCount || 0) > 0 ? "#c62828" : "#212121", fontWeight: (r.tabLeaveCount || 0) > 0 ? "bold" : "normal", fontSize: 13 }}>
+                                      {r.tabLeaveCount || 0} Exits
+                                    </Text>
+                                  )}
                                   <Text style={{ color:"#212121", fontSize: 13 }}>#{r.rank || 1}</Text>
                                   <Text style={{ color: isPass ?"#2e7d32":"#c62828", fontWeight:"bold", fontSize: 12 }}>
                                     {isPass ?"PASS":"FAIL"}
@@ -16914,7 +17387,7 @@ PASTED QUESTION PAPER TEXT:
                               <View style={{ flexDirection:"row", justifyContent:"space-between", alignItems:"flex-start"}}>
                                 <View style={{ flex: 1 }}>
                                   <Text style={{ fontWeight:"bold", color:"#212121", fontSize: 14 }}>{ad.name}</Text>
-                                  <Text style={{ fontSize: 12, color:"#555", marginTop: 2 }}>{ad.phone}{ad.email ? ` | ${ad.email}` :""}</Text>
+                                  <Text style={{ fontSize: 12, color:"#555", marginTop: 2 }}>{ad.phone}{ad.email ? ` | ${ad.email}` :""}{ad.city ? ` | ${ad.city}` :""}</Text>
                                   <Text style={{ fontSize: 12, color:"#424242", marginTop: 4, fontWeight:"600"}}>{ad.preferredCourse || ad.course ||"-"}</Text>
                                 </View>
                                 <Text style={{ fontSize: 10, color:"#aaa", textAlign:"right"}}>{ad.createdAt ? new Date(ad.createdAt).toLocaleDateString() :""}</Text>
@@ -17812,6 +18285,12 @@ PASTED QUESTION PAPER TEXT:
 
                 <TouchableOpacity
                   onPress={async () => {
+                    const tot = Number(feeEditStudent.totalFees) || 0;
+                    const paid = Number(feeEditStudent.feesPaid) || 0;
+                    if (paid > tot) {
+                      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+                      return;
+                    }
                     try {
                       await api.put(`/erp/student/${feeEditStudent.id}`, {
                         totalFees: feeEditStudent.totalFees,
