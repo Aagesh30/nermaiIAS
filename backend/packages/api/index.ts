@@ -1,0 +1,16 @@
+export { configureApiClient, getApiClient } from './client';
+export * from './services/liveClasses';
+export * from './services/liveAttendance';
+export * from './services/liveComments';
+export { CourseApi, LiveSessionApi, ProviderAccountsApi } from './services/courses';
+export { StudentApi } from './services/students';
+export { ResourceApi } from './services/resources';
+export { BatchApi } from './services/batches';
+export { DashboardApi } from './services/dashboard';
+export { AnnouncementApi } from './services/announcements';
+export { AuthApi } from './services/auth';
+export { AssistantApi } from './services/assistant';
+export { KnowledgeBaseApi } from './services/knowledge-base';
+export { AttendanceApi } from './services/attendance';
+export { AccessRulesApi } from './services/accessRules';
+export { AccessRequestApi } from './services/accessRequests';

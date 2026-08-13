@@ -71,4 +71,14 @@ router.get("/live-count/:testId", examRateLimit, ExaminationController.getLiveVi
  */
 router.get("/study/:testId", examRateLimit, ExaminationController.studyMode);
 
+/**
+ * REPORT WRONG ANSWER / QUESTION ISSUE
+ */
+router.post("/report-question/:testId", ExaminationController.reportQuestion);
+
+/**
+ * GET REPORTS SUMMARY FOR TEST
+ */
+router.get("/reports/:testId", ExaminationController.getQuestionReports);
+
 export default router;

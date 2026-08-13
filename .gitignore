@@ -1,0 +1,14 @@
+node_modules/
+.vscode/
+.expo/
+.firebase/
+*.zip
+*.xlsx
+*.pdf
+temp_zip_extract/
+dist/
+build/
+.env
+.env.local
+.env.*
+service-account.json

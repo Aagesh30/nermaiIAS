@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  Alert as RNAlert,
   Modal,
   Image,
   ActivityIndicator,
@@ -16,6 +16,20 @@ import {
   NativeModules
 } from "react-native";
 import Constants from "expo-constants";
+
+// Custom Alert wrapper — routes to in-app modal on Web, native RNAlert on mobile
+const Alert = {
+  alert: (title: string, message?: string, buttons?: any[], options?: any) => {
+    if (Platform.OS === "web") {
+      // Use the in-app globalShowAlert modal (set up in useEffect below)
+      if (typeof globalShowAlert === "function") {
+        globalShowAlert(title, message, buttons);
+      }
+    } else {
+      RNAlert.alert(title, message, buttons, options);
+    }
+  }
+};
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Ionicons } from "@expo/vector-icons";
@@ -230,11 +244,53 @@ function DateTimePickerSelect({
   );
 }
 
+let globalShowAlert: (title: string, message?: string, buttons?: any[]) => void = () => {};
+if (typeof window !== "undefined") {
+  (window as any).globalShowAlert = () => {};
+} else if (typeof global !== "undefined") {
+  (global as any).globalShowAlert = () => {};
+}
+
 export default function App() {
   const { width: screenWidth } = useWindowDimensions();
   const isMobile = screenWidth < 768;
   const [user, setUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("home");
+  const [customAlert, setCustomAlert] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    buttons: []
+  });
+
+  useEffect(() => {
+    globalShowAlert = (title, message, buttons) => {
+      setCustomAlert({
+        isOpen: true,
+        title,
+        message: message || "",
+        buttons: buttons || []
+      });
+    };
+    if (typeof window !== "undefined") {
+      (window as any).globalShowAlert = globalShowAlert;
+    } else if (typeof global !== "undefined") {
+      (global as any).globalShowAlert = globalShowAlert;
+    }
+  }, []);
+
+  const [isSavingStudent, setIsSavingStudent] = useState(false);
+  const [isSavingAdmin, setIsSavingAdmin] = useState(false);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [isProcessingProfile, setIsProcessingProfile] = useState<string | null>(null);
+  const [isPublishingNotice, setIsPublishingNotice] = useState(false);
+
+
 
 
   const [erpSub, setErpSub] = useState("students");
@@ -249,6 +305,7 @@ export default function App() {
     hostIpRef.current = hostIp;
   }, [hostIp]);
   const [loginForm, setLoginForm] = useState({ username: "", password: "", role: "student" });
+  const [authLoading, setAuthLoading] = useState(false);
   const [registerForm, setRegisterForm] = useState({ username: "", password: "", name: "", email: "", role: "student" });
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [students, setStudents] = useState<any[]>([]);
@@ -285,6 +342,17 @@ export default function App() {
       return false;
     }) || null;
   };
+  const cleanPhone = (val: string) => {
+    let cleaned = String(val || "").replace(/\D/g, "");
+    if (cleaned.startsWith("91") && cleaned.length === 12) {
+      cleaned = cleaned.slice(2);
+    }
+    if (cleaned.startsWith("0") && cleaned.length === 11) {
+      cleaned = cleaned.slice(1);
+    }
+    return cleaned.slice(0, 10);
+  };
+
   const [guestNotifications, setGuestNotifications] = useState<any[]>([]);
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
@@ -1946,6 +2014,8 @@ export default function App() {
       return;
     }
 
+    setAuthLoading(true);
+
     // Developer portal shortcut — handled client-side + validated server-side
     if (u === "developer@unistrix" && p === "Unistrix@24252630") {
       try {
@@ -1955,6 +2025,8 @@ export default function App() {
         setActiveTab("dashboard");
       } catch (e: any) {
         Alert.alert("Dev Login Failed", e.message || "Could not authenticate developer.");
+      } finally {
+        setAuthLoading(false);
       }
       return;
     }
@@ -1976,11 +2048,14 @@ export default function App() {
         errorMsg = "Invalid username or password";
       }
       Alert.alert("Authentication Failed", errorMsg);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
   // Create/Post Functions
   const createNotice = async () => {
+    setIsPublishingNotice(true);
     try {
       await api.post("/announcement", {
         title: newNotice.title,
@@ -1991,11 +2066,13 @@ export default function App() {
         targetDashboard: newNotice.targetDashboard,
         targetBatch: newNotice.targetBatch || null
       });
-      Alert.alert("Success", "Notice published successfully!");
+      Alert.alert("Success", "Notice published successfully.");
       setNewNotice({ title: "", content: "", priority: "normal", publishedAt: "", targetDashboard: "all", targetBatch: "" });
       loadAnnouncements();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to publish announcement.");
+    } finally {
+      setIsPublishingNotice(false);
     }
   };
 
@@ -2033,6 +2110,7 @@ export default function App() {
       Alert.alert("Error", "Please fill in all fields.");
       return;
     }
+    setIsPublishingNotice(true);
     try {
       await api.put(`/announcement/${editingNoticeId}`, {
         title: editingNotice.title,
@@ -2041,11 +2119,13 @@ export default function App() {
         publishedAt: new Date(editingNotice.publishedAt).toISOString(),
         updatedBy: user?.name || "admin"
       });
-      Alert.alert("Success", "Notice updated successfully!");
+      Alert.alert("Success", "Notice updated successfully.");
       setEditingNoticeId(null);
       loadAnnouncements();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to update notice.");
+    } finally {
+      setIsPublishingNotice(false);
     }
   };
 
@@ -2097,27 +2177,34 @@ export default function App() {
   };
 
   const createStudentRecord = async () => {
-    if (!newStudent.loginUsername || !newStudent.loginPassword) {
-      Alert.alert("Error", "Username (Roll Number) and Password are required.");
-      return;
-    }
-    if (!newStudent.batch) {
-      Alert.alert("Error", "Please select a batch.");
+    if (
+      !newStudent.loginUsername ||
+      !newStudent.loginPassword ||
+      !newStudent.batch ||
+      !newStudent.type ||
+      !newStudent.totalFees ||
+      !newStudent.feesPaid ||
+      !newStudent.joiningDate
+    ) {
+      Alert.alert("Error", "All fields are required");
       return;
     }
     const total = Number(newStudent.totalFees) || 0;
     const paid = Number(newStudent.feesPaid) || 0;
     if (paid > total) {
-      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
+    setIsSavingStudent(true);
     try {
       await api.post("/erp/student", { ...newStudent, createdBy: user.name });
-      Alert.alert("Success", "Student registered successfully! They can now log in to complete their profile.");
+      Alert.alert("Success", "Student created successfully.");
       setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "offline", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "" });
       loadStudents();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save student profile.");
+    } finally {
+      setIsSavingStudent(false);
     }
   };
 
@@ -2126,13 +2213,16 @@ export default function App() {
       Alert.alert("Error", "Batch name and course are required.");
       return;
     }
+    setIsSavingBatch(true);
     try {
       await api.post("/erp/batch", { ...newBatch, createdBy: user.name });
-      Alert.alert("Success", "Batch created successfully!");
+      Alert.alert("Success", "Batch created successfully.");
       setNewBatch({ batchName: "", course: "", description: "" });
       loadBatches();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to create batch.");
+    } finally {
+      setIsSavingBatch(false);
     }
   };
 
@@ -2231,24 +2321,30 @@ export default function App() {
   };
 
   const approveProfileRequest = async (id: string) => {
+    setIsProcessingProfile(id);
     try {
       await api.put(`/erp/profile-request/${id}/approve`, { reviewedBy: user.name });
-      Alert.alert("Success", "Profile approved and student record updated!");
+      Alert.alert("Success", "Profile request approved successfully.");
       loadProfileRequests();
       loadStudents();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to approve.");
+    } finally {
+      setIsProcessingProfile(null);
     }
   };
 
   const rejectProfileRequest = async (id: string, reason: string) => {
+    setIsProcessingProfile(id);
     try {
       await api.put(`/erp/profile-request/${id}/reject`, { reviewedBy: user.name, rejectionReason: reason });
-      Alert.alert("Done", "Profile request rejected.");
+      Alert.alert("Success", "Profile request rejected successfully.");
       loadProfileRequests();
       loadStudents();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to reject.");
+    } finally {
+      setIsProcessingProfile(null);
     }
   };
 
@@ -2257,22 +2353,36 @@ export default function App() {
       Alert.alert("Permission Denied", "You do not have permission to create admin accounts.");
       return;
     }
+    setIsSavingAdmin(true);
     try {
       await api.post("/erp/staff", { ...newStaff, createdBy: user.name });
-      Alert.alert("Success", "Admin record saved!");
+      Alert.alert("Success", "Admin record saved successfully.");
       setNewStaff({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin" });
       loadStaff();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save admin record.");
+    } finally {
+      setIsSavingAdmin(false);
     }
   };
 
   const updateStudentRecord = async () => {
     if (!editingStudent) return;
+    if (
+      !editingStudent.loginUsername ||
+      !editingStudent.batch ||
+      !editingStudent.type ||
+      !editingStudent.totalFees ||
+      !editingStudent.feesPaid ||
+      !editingStudent.joiningDate
+    ) {
+      Alert.alert("Error", "All fields are required");
+      return;
+    }
     const total = Number(editingStudent.totalFees) || 0;
     const paid = Number(editingStudent.feesPaid) || 0;
     if (paid > total) {
-      Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
+      Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
     try {
@@ -3409,8 +3519,11 @@ export default function App() {
                   <TextInput style={styles.input} placeholder="Username" placeholderTextColor="#999" value={username} onChangeText={setUsername} autoCapitalize="none" />
                   <TextInput style={styles.input} placeholder="Password" placeholderTextColor="#999" value={password} onChangeText={setPassword} secureTextEntry />
 
-                  <TouchableOpacity onPress={() => handleAuth()} style={styles.primaryBtn}>
-                    <Text style={styles.primaryBtnTxt}>LOG IN</Text>
+                  <TouchableOpacity onPress={() => !authLoading && handleAuth()} disabled={authLoading} style={[styles.primaryBtn, { opacity: authLoading ? 0.8 : 1, flexDirection: "row", justifyContent: "center", alignItems: "center" }]}>
+                    {authLoading ? (
+                      <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                    ) : null}
+                    <Text style={styles.primaryBtnTxt}>{authLoading ? "SIGNING IN..." : "LOG IN"}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -3443,7 +3556,8 @@ export default function App() {
                     placeholderTextColor="#999"
                     keyboardType="phone-pad"
                     value={guestPhone}
-                    onChangeText={setGuestPhone}
+                    onChangeText={v => setGuestPhone(cleanPhone(v))}
+                    maxLength={10}
                   />
                   <TextInput
                     style={styles.input}
@@ -3925,7 +4039,8 @@ export default function App() {
                     placeholderTextColor="#bbb"
                     keyboardType="phone-pad"
                     value={admissionForm.phone}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: cleanPhone(v) })}
+                    maxLength={10}
                   />
 
                   <Text style={styles.label}>Email (Optional)</Text>
@@ -4152,7 +4267,8 @@ export default function App() {
                     placeholderTextColor="#bbb"
                     keyboardType="phone-pad"
                     value={admissionForm.phone}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: v })}
+                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: cleanPhone(v) })}
+                    maxLength={10}
                   />
 
                   <Text style={styles.label}>Email (Optional)</Text>
@@ -6095,7 +6211,7 @@ export default function App() {
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>📞 Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
 
                             {/* Batch & Course */}
                             <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 10, fontSize: 13 }}>📚 Batch & Course</Text>
@@ -6261,10 +6377,18 @@ export default function App() {
 
                             {/* Contact Details */}
                             <Text style={{ fontWeight: "bold", color: "#757575", marginBottom: 6, fontSize: 13 }}>📞 Contact Details</Text>
-                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: p.slice(0, 10) })} maxLength={10} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
 
-                            <TouchableOpacity onPress={createStudentRecord} style={[styles.primaryBtn, { marginTop: 10 }]}>
-                              <Text style={styles.primaryBtnTxt}>✅ Create Student Account</Text>
+                            <TouchableOpacity 
+                              onPress={createStudentRecord} 
+                              style={[styles.primaryBtn, { marginTop: 10 }]}
+                              disabled={isSavingStudent}
+                            >
+                              {isSavingStudent ? (
+                                <ActivityIndicator color="#ffffff" size="small" />
+                              ) : (
+                                <Text style={styles.primaryBtnTxt}>✅ Create Student Account</Text>
+                              )}
                             </TouchableOpacity>
                           </>
                         )}
@@ -6854,10 +6978,15 @@ export default function App() {
                           <TouchableOpacity
                             onPress={editingNoticeId ? saveEditedNotice : createNotice}
                             style={[styles.primaryBtn, { flex: 2 }]}
+                            disabled={isPublishingNotice}
                           >
-                            <Text style={styles.primaryBtnTxt}>
-                              {editingNoticeId ? "Save Changes" : "Publish Notice & Notification"}
-                            </Text>
+                            {isPublishingNotice ? (
+                              <ActivityIndicator color="#ffffff" size="small" />
+                            ) : (
+                              <Text style={styles.primaryBtnTxt}>
+                                {editingNoticeId ? "Save Changes" : "Publish Notice & Notification"}
+                              </Text>
+                            )}
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -6950,8 +7079,16 @@ export default function App() {
                       <TextInput style={styles.input} placeholder="Batch Name (e.g. Batch 43)" placeholderTextColor="#999" value={newBatch.batchName} onChangeText={v => setNewBatch({ ...newBatch, batchName: v })} />
                       <TextInput style={styles.input} placeholder="Course (e.g. LDC / UPSC GS / TNPSC)" placeholderTextColor="#999" value={newBatch.course} onChangeText={v => setNewBatch({ ...newBatch, course: v })} />
                       <TextInput style={styles.input} placeholder="Description (optional)" placeholderTextColor="#999" value={newBatch.description} onChangeText={v => setNewBatch({ ...newBatch, description: v })} />
-                      <TouchableOpacity onPress={createBatch} style={styles.primaryBtn}>
-                        <Text style={styles.primaryBtnTxt}>Save Batch</Text>
+                      <TouchableOpacity 
+                        onPress={createBatch} 
+                        style={styles.primaryBtn}
+                        disabled={isSavingBatch}
+                      >
+                        {isSavingBatch ? (
+                          <ActivityIndicator color="#ffffff" size="small" />
+                        ) : (
+                          <Text style={styles.primaryBtnTxt}>Save Batch</Text>
+                        )}
                       </TouchableOpacity>
                     </View>
 
@@ -7016,11 +7153,27 @@ export default function App() {
                               </View>
                             ) : null}
                             <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
-                              <TouchableOpacity onPress={() => approveProfileRequest(r.id)} style={{ flex: 1, backgroundColor: "#4caf50", borderRadius: 8, padding: 10, alignItems: "center" }}>
-                                <Text style={{ color: "#fff", fontWeight: "bold" }}>✅ Approve</Text>
+                              <TouchableOpacity 
+                                onPress={() => approveProfileRequest(r.id)} 
+                                style={{ flex: 1, backgroundColor: "#4caf50", borderRadius: 8, padding: 10, alignItems: "center" }}
+                                disabled={isProcessingProfile === r.id}
+                              >
+                                {isProcessingProfile === r.id ? (
+                                  <ActivityIndicator color="#ffffff" size="small" />
+                                ) : (
+                                  <Text style={{ color: "#fff", fontWeight: "bold" }}>✅ Approve</Text>
+                                )}
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => rejectProfileRequest(r.id, "Please resubmit with correct documents.")} style={{ flex: 1, backgroundColor: "#c62828", borderRadius: 8, padding: 10, alignItems: "center" }}>
-                                <Text style={{ color: "#fff", fontWeight: "bold" }}>❌ Reject</Text>
+                              <TouchableOpacity 
+                                onPress={() => rejectProfileRequest(r.id, "Please resubmit with correct documents.")} 
+                                style={{ flex: 1, backgroundColor: "#c62828", borderRadius: 8, padding: 10, alignItems: "center" }}
+                                disabled={isProcessingProfile === r.id}
+                              >
+                                {isProcessingProfile === r.id ? (
+                                  <ActivityIndicator color="#ffffff" size="small" />
+                                ) : (
+                                  <Text style={{ color: "#fff", fontWeight: "bold" }}>❌ Reject</Text>
+                                )}
                               </TouchableOpacity>
                             </View>
                             <Text style={{ color: "#bbb", fontSize: 11, marginTop: 6 }}>Submitted: {r.submittedAt ? new Date(r.submittedAt).toLocaleString() : "—"}</Text>
@@ -7296,7 +7449,7 @@ export default function App() {
                             <TextInput style={styles.input} placeholder="Designation" placeholderTextColor="#999" value={editingStaff.designation} onChangeText={d => setEditingStaff({ ...editingStaff, designation: d })} />
                             <TextInput style={styles.input} placeholder="Department" placeholderTextColor="#999" value={editingStaff.department} onChangeText={dp => setEditingStaff({ ...editingStaff, department: dp })} />
                             <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#999" value={editingStaff.email} onChangeText={e => setEditingStaff({ ...editingStaff, email: e })} keyboardType="email-address" />
-                            <TextInput style={styles.input} placeholder="Phone" placeholderTextColor="#999" value={editingStaff.phone} onChangeText={p => setEditingStaff({ ...editingStaff, phone: p })} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone" placeholderTextColor="#999" value={editingStaff.phone} onChangeText={p => setEditingStaff({ ...editingStaff, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
                             <TextInput style={styles.input} placeholder="Login Username" placeholderTextColor="#999" value={editingStaff.loginUsername} onChangeText={u => setEditingStaff({ ...editingStaff, loginUsername: u })} />
                             <TextInput style={styles.input} placeholder="Login Password (leave empty to keep current)" secureTextEntry placeholderTextColor="#999" value={editingStaff.loginPassword || ""} onChangeText={pw => setEditingStaff({ ...editingStaff, loginPassword: pw })} />
 
@@ -7346,13 +7499,21 @@ export default function App() {
                             <TextInput style={styles.input} placeholder="Designation" placeholderTextColor="#999" value={newStaff.designation} onChangeText={d => setNewStaff({ ...newStaff, designation: d })} />
                             <TextInput style={styles.input} placeholder="Department" placeholderTextColor="#999" value={newStaff.department} onChangeText={dp => setNewStaff({ ...newStaff, department: dp })} />
                             <TextInput style={styles.input} placeholder="Email" placeholderTextColor="#999" value={newStaff.email} onChangeText={e => setNewStaff({ ...newStaff, email: e })} keyboardType="email-address" />
-                            <TextInput style={styles.input} placeholder="Phone" placeholderTextColor="#999" value={newStaff.phone} onChangeText={p => setNewStaff({ ...newStaff, phone: p })} keyboardType="phone-pad" />
+                            <TextInput style={styles.input} placeholder="Phone" placeholderTextColor="#999" value={newStaff.phone} onChangeText={p => setNewStaff({ ...newStaff, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
                             <TextInput style={styles.input} placeholder="Login Username *" placeholderTextColor="#999" value={newStaff.loginUsername} onChangeText={u => setNewStaff({ ...newStaff, loginUsername: u })} />
                             <TextInput style={styles.input} placeholder="Login Password *" secureTextEntry placeholderTextColor="#999" value={newStaff.loginPassword} onChangeText={pw => setNewStaff({ ...newStaff, loginPassword: pw })} />
 
-                            <TouchableOpacity onPress={createStaffRecord} style={styles.primaryBtn}>
-                              <Text style={styles.primaryBtnTxt}>Add Admin Record</Text>
-                            </TouchableOpacity>
+                            <TouchableOpacity 
+                               onPress={createStaffRecord} 
+                               style={styles.primaryBtn}
+                               disabled={isSavingAdmin}
+                             >
+                               {isSavingAdmin ? (
+                                 <ActivityIndicator color="#ffffff" size="small" />
+                               ) : (
+                                 <Text style={styles.primaryBtnTxt}>Add Admin Record</Text>
+                               )}
+                             </TouchableOpacity>
                           </>
                         )}
                       </View>
@@ -10152,6 +10313,59 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* Custom Alert Modal Container */}
+      {customAlert.isOpen && (
+        <Modal visible={true} transparent animationType="fade" onRequestClose={() => setCustomAlert(prev => ({ ...prev, isOpen: false }))}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center", padding: 20, zIndex: 99999 }}>
+            <View style={[styles.card, darkMode && styles.cardDark, { width: "100%", maxWidth: 440, padding: 24, borderRadius: 16, borderTopWidth: 5, borderTopColor: customAlert.title.toLowerCase().includes("success") ? "#2e7d32" : (customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "#c62828" : "#1976d2"), elevation: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: customAlert.title.toLowerCase().includes("success") ? "#e8f5e9" : (customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "#ffebee" : "#e3f2fd"), alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name={customAlert.title.toLowerCase().includes("success") ? "checkmark-circle-outline" : (customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "alert-circle-outline" : "information-circle-outline")} size={24} color={customAlert.title.toLowerCase().includes("success") ? "#2e7d32" : (customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "#c62828" : "#1976d2")} />
+                </View>
+                <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#ffffff" : "#212121", flex: 1 }}>
+                  {customAlert.title}
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 14, color: darkMode ? "#b0bec5" : "#616161", lineHeight: 22, marginBottom: 24 }}>
+                {customAlert.message}
+              </Text>
+
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12 }}>
+                {customAlert.buttons && customAlert.buttons.length > 0 ? (
+                  customAlert.buttons.map((btn, index) => {
+                    const isCancel = btn.style === "cancel" || (btn.text && btn.text.toLowerCase() === "cancel");
+                    return (
+                      <TouchableOpacity
+                        key={index}
+                        onPress={() => {
+                          setCustomAlert(prev => ({ ...prev, isOpen: false }));
+                          if (btn.onPress) btn.onPress();
+                        }}
+                        style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: isCancel ? (darkMode ? "#333333" : "#f5f5f5") : (customAlert.title.toLowerCase().includes("success") ? "#2e7d32" : customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "#c62828" : "#1976d2"), borderWidth: isCancel ? 1 : 0, borderColor: darkMode ? "#444" : "#e0e0e0" }}
+                      >
+                        <Text style={{ fontWeight: "600", fontSize: 14, color: isCancel ? (darkMode ? "#e0e0e0" : "#616161") : "#ffffff" }}>
+                          {btn.text}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => setCustomAlert(prev => ({ ...prev, isOpen: false }))}
+                    style={{ paddingVertical: 10, paddingHorizontal: 22, borderRadius: 8, backgroundColor: customAlert.title.toLowerCase().includes("success") ? "#2e7d32" : (customAlert.title.toLowerCase().includes("error") || customAlert.title.toLowerCase().includes("required") || customAlert.title.toLowerCase().includes("validation") ? "#c62828" : "#1976d2") }}
+                  >
+                    <Text style={{ fontWeight: "700", fontSize: 14, color: "#ffffff" }}>
+                      OK
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }

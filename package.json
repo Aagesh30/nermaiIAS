@@ -1,0 +1,39 @@
+{
+  "name": "nermai_ias_academy",
+  "version": "1.0.0",
+  "description": "Integrated NERMAI IAS Academy Platform",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "concurrently \"npm run web\" \"cd backend && npm run start\"",
+    "start": "cd web_portal && npx expo start --web",
+    "web": "cd web_portal && npx expo start --web",
+    "build:web": "npm --prefix web_portal run build",
+    "deploy": "npm run build:web && firebase deploy",
+    "android": "cd web_portal && npx expo start --android",
+    "ios": "cd web_portal && npx expo start --ios"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~4.0.1",
+    "@expo/vector-icons": "^14.1.0",
+    "expo": "~54.0.35",
+    "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~19.0.23",
+    "expo-image-manipulator": "~14.0.8",
+    "expo-image-picker": "~17.0.11",
+    "expo-print": "~15.0.8",
+    "expo-sharing": "~14.0.8",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-web": "^0.21.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "concurrently": "^10.0.3",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}

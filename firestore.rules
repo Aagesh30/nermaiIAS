@@ -1,0 +1,257 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ───────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.role in ['super_admin', 'admin', 'staff', 'teacher'];
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.role == 'super_admin';
+    }
+
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ─── Original Main Project Rules (Folder 1) ───────────────────────────────────
+    
+    // announcements
+    match /announcements/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin(); // Allow admins to write announcements
+    }
+
+    // students
+    match /students/{docId} {
+      allow read: if isSelf(docId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // users
+    match /users/{docId} {
+      allow read: if isSelf(docId) || isAdmin();
+      allow write: if isSelf(docId) || isAdmin();
+    }
+
+    // deleted_students
+    match /deleted_students/{docId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // fees
+    match /fees/{docId} {
+      allow read: if isSelf(docId) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // profile_requests
+    match /profile_requests/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAuthenticated();
+    }
+
+    // leads / CRM
+    match /leads/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // feedbacks
+    match /feedbacks/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // notifications
+    match /notifications/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // daily_quiz
+    match /daily_quiz/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // ─── LMS / Sub-project Rules (Folder 2 Merged) ───────────────────────────────
+    
+    // tenants
+    match /tenants/{tenantId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // provider_accounts
+    match /provider_accounts/{accountId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // batches
+    match /batches/{batchId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // batch_memberships
+    match /batch_memberships/{membershipId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // courses
+    match /courses/{courseId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // enrollments
+    match /enrollments/{enrollmentId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // subjects
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // topics
+    match /topics/{topicId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // classes
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // live_sessions
+    match /live_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Actions flow through APIs
+
+      match /participants/{participantId} {
+        allow read: if isSignedIn();
+        allow write: if false;
+      }
+
+      match /activity_feed/{feedId} {
+        allow read: if isSignedIn();
+        allow write: if false;
+      }
+
+      match /logs/{logId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // videos
+    match /videos/{videoId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // resources
+    match /resources/{resourceId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // watch_history
+    match /watch_history/{watchId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // tests
+    match /tests/{testId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // questions
+    match /questions/{questionId} {
+      allow read: if false; // Block client-side reads to prevent answers exposure
+      allow write: if isAdmin();
+    }
+
+    // attempts
+    match /attempts/{attemptId} {
+      allow read: if isAdmin() || isSelf(resource.data.studentId);
+      allow write: if false;
+    }
+
+    // attempt_answers
+    match /attempt_answers/{answerId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // question_translations
+    match /question_translations/{translationId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // test_targets
+    match /test_targets/{targetId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // daily_quizzes
+    match /daily_quizzes/{dailyQuizId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // user_devices
+    match /user_devices/{deviceId} {
+      allow read: if isAdmin() || isSelf(resource.data.userId);
+      allow write: if isSelf(resource.data.userId) || isAdmin();
+    }
+
+    // conversations
+    match /conversations/{conversationId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // messages
+    match /messages/{messageId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // support_tickets
+    match /support_tickets/{ticketId} {
+      allow read: if isAdmin() || isSelf(resource.data.studentId);
+      allow write: if isSignedIn();
+    }
+
+    // ─── CATCH-ALL: Deny everything else ────────────────────
+    match /{document=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@nermai/live-core",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@nermai/api": "*",
+    "@nermai/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

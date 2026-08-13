@@ -1,0 +1,6 @@
+{
+  "name": "@nermai/shared-live",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {}
+}

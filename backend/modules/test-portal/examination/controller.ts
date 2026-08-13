@@ -5,8 +5,8 @@ import { testQuestionsCache, testDetailsCache, attemptCache } from "../../../sha
 
 if (!admin.apps.length) {
     admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || "nermai-academy-backend",
-        databaseURL: process.env.FIREBASE_DATABASE_URL || "https://nermai-academy-backend-default-rtdb.firebaseio.com"
+        projectId: process.env.FIREBASE_PROJECT_ID || "nermaiiasacademy-519c8",
+        databaseURL: process.env.FIREBASE_DATABASE_URL || "https://nermaiiasacademy-519c8-default-rtdb.firebaseio.com"
     });
 }
 
@@ -27,15 +27,20 @@ export class ExaminationController {
     }
 
     private static getStudentId(req: Request): string {
-        const studentId = req.body?.studentId || req.query?.studentId || (req as any).user?.userId || (req as any).user?.uid || req.headers["x-student-id"] || req.headers["user-id"];
-        if (!studentId) {
-            throw new Error("Student ID is required");
+        if (!req.user) {
+            throw new Error("Authentication required");
         }
-        return String(studentId);
+        const { role, userId, studentId } = req.user;
+        if (role === "admin" || role === "super_admin" || role === "staff") {
+            const target = req.body?.studentId || req.query?.studentId || req.params?.studentId || studentId || userId;
+            return String(target);
+        }
+        // For students, ALWAYS use their verified auth identity from JWT/Firebase claims
+        return String(studentId || userId);
     }
 
     private static async handleAutoSubmit(attemptId: string) {
-        attemptCache.delete(attemptId); // Clear cache before writing to DB
+        attemptCache.delete(`attempt_${attemptId}`); // Clear cache before writing to DB
         const attemptRef = db.collection("student_attempts").doc(attemptId);
         await attemptRef.update({
             status: "submitted",
@@ -68,9 +73,10 @@ export class ExaminationController {
         ExaminationController.startingSet.add(lockKey);
 
         try {
-            // Block admin/staff — they can only monitor tests
-            const role = req.headers["user-role"] as string || req.body?.role || "";
-            if (role === "admin" || role === "staff") {
+            // Block admin/staff — they can only monitor tests.
+            // SECURITY: Use req.user.role (verified by JWT middleware), NOT req.headers["user-role"] (client-controlled).
+            const role = req.user!.role;
+            if (role === "admin" || role === "staff" || role === "super_admin") {
                 return res.status(403).json({
                     success: false,
                     message: "Admins and staff cannot take tests. Use the Admin panel to monitor live results."
@@ -293,16 +299,20 @@ export class ExaminationController {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Find last answered question if any
-            const answersSnapshot = await db.collection("student_answers")
-                .where("attemptId", "==", attemptId)
-                .orderBy("savedAt", "desc")
-                .limit(1)
-                .get();
-
+            // Find last answered question: use simple where (no orderBy) to avoid
+            // requiring a composite Firestore index while it is still building.
+            // The frontend fetches the full answer list via /progress anyway.
             let lastAnsweredQuestionId = null;
-            if (!answersSnapshot.empty) {
-                lastAnsweredQuestionId = answersSnapshot.docs[0].data().questionId;
+            try {
+                const answersSnapshot = await db.collection("student_answers")
+                    .where("attemptId", "==", attemptId)
+                    .limit(1)
+                    .get();
+                if (!answersSnapshot.empty) {
+                    lastAnsweredQuestionId = answersSnapshot.docs[0].data().questionId;
+                }
+            } catch (_) {
+                // Non-critical — frontend will recover progress via /progress endpoint
             }
 
             return res.status(200).json({
@@ -454,9 +464,14 @@ export class ExaminationController {
                     // EXTREMELY IMPORTANT: Never send correct answers, correct options or explanations to the client
                     const {
                         correctAnswer,
+                        correctOption,
                         correctOptions,
                         answer,
+                        answerKey,
                         explanation,
+                        explanationTa,
+                        solution,
+                        solutionTa,
                         isDeleted,
                         createdAt,
                         updatedAt,
@@ -532,7 +547,7 @@ export class ExaminationController {
                 });
             }
 
-            if (attempt.isSubmitted || attempt.status === "submitted") {
+            if (attempt.isSubmitted || attempt.status === "submitted" || attempt.status === "evaluated") {
                 return res.status(400).json({
                     success: false,
                     message: "Cannot save answer for a submitted test"
@@ -622,10 +637,11 @@ export class ExaminationController {
                 });
             }
 
-            if (attempt.isSubmitted || attempt.status === "submitted") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Cannot auto-save for a submitted test"
+            if (attempt.isSubmitted || attempt.status === "submitted" || attempt.status === "evaluated") {
+                return res.status(200).json({
+                    success: true,
+                    message: "Cannot auto-save for a submitted test",
+                    data: { countSaved: 0 }
                 });
             }
 
@@ -778,10 +794,15 @@ export class ExaminationController {
                 });
             }
 
-            if (attempt.isSubmitted || attempt.status === "submitted") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Test is already submitted"
+            if (attempt.isSubmitted || attempt.status === "submitted" || attempt.status === "evaluated") {
+                return res.status(200).json({
+                    success: true,
+                    message: "Test is already submitted",
+                    data: {
+                        attemptId,
+                        status: attempt.status || "submitted",
+                        submittedAt: attempt.submittedAt || new Date().toISOString()
+                    }
                 });
             }
 
@@ -1160,4 +1181,71 @@ export class ExaminationController {
             });
         }
     }
+
+    /**
+     * REPORT QUESTION (Student/Admin)
+     * POST /report-question/:testId
+     * Body: { qIndex: number }
+     */
+    static async reportQuestion(req: Request, res: Response) {
+        try {
+            const { testId } = req.params;
+            const { qIndex } = req.body;
+
+            if (qIndex === undefined || qIndex === null) {
+                return res.status(400).json({
+                    success: false,
+                    message: "qIndex is required"
+                });
+            }
+
+            const qKey = `Q.N ${Number(qIndex) + 1}`;
+            const reportRef = db.collection("question_reports").doc(testId);
+
+            await reportRef.set({
+                reports: {
+                    [qKey]: admin.firestore.FieldValue.increment(1)
+                }
+            }, { merge: true });
+
+            const updatedDoc = await reportRef.get();
+            const reportsData = updatedDoc.data()?.reports || {};
+
+            return res.status(200).json({
+                success: true,
+                message: "Question reported successfully",
+                data: reportsData
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while reporting question"
+            });
+        }
+    }
+
+    /**
+     * GET QUESTION REPORTS (Admin/Student)
+     * GET /reports/:testId
+     */
+    static async getQuestionReports(req: Request, res: Response) {
+        try {
+            const { testId } = req.params;
+
+            const reportDoc = await db.collection("question_reports").doc(testId).get();
+            const reportsData = reportDoc.exists ? (reportDoc.data()?.reports || {}) : {};
+
+            return res.status(200).json({
+                success: true,
+                message: "Question reports retrieved successfully",
+                data: reportsData
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while retrieving question reports"
+            });
+        }
+    }
 }
+

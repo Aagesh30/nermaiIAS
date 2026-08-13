@@ -1,0 +1,22 @@
+{
+  "name": "@nermai/shared",
+  "version": "1.0.0",
+  "description": "Shared React hooks and utilities for Web and Mobile",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "dependencies": {
+    "@nermai/api": "*",
+    "@nermai/types": "*",
+    "firebase": "^12.16.0"
+  },
+  "peerDependencies": {
+    "react": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

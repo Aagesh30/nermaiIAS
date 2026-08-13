@@ -3,8 +3,8 @@ import admin from "firebase-admin";
 
 if (!admin.apps.length) {
     admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || "nermai-academy-backend",
-        databaseURL: process.env.FIREBASE_DATABASE_URL || "https://nermai-academy-backend-default-rtdb.firebaseio.com"
+        projectId: process.env.FIREBASE_PROJECT_ID || "nermaiiasacademy-519c8",
+        databaseURL: process.env.FIREBASE_DATABASE_URL || "https://nermaiiasacademy-519c8-default-rtdb.firebaseio.com"
     });
 }
 
@@ -536,6 +536,69 @@ export class EvaluationController {
             return res.status(500).json({
                 success: false,
                 message: error.message || "An error occurred while deleting result"
+            });
+        }
+    }
+
+    /**
+     * GET ALL RESULTS OF A STUDENT
+     * GET /student/:studentId
+     */
+    static async getStudentAllResults(req: Request, res: Response) {
+        try {
+            const { studentId } = req.params;
+
+            const snapshot = await db.collection("results")
+                .where("studentId", "==", studentId)
+                .where("isDeleted", "==", false)
+                .get();
+
+            const results = snapshot.docs.map(doc => doc.data());
+            
+            // Enrich results
+            const enriched = await Promise.all(
+                results.map(r => EvaluationController.enrichResult(r))
+            );
+
+            // Fetch tests to get topic/title and dates if needed
+            const testIds = Array.from(new Set(enriched.map(r => r.testId)));
+            const testMap: { [id: string]: any } = {};
+            if (testIds.length > 0) {
+                const testRefs = testIds.map(id => db.collection("tests").doc(id));
+                const testDocs = await db.getAll(...testRefs);
+                testDocs.forEach(doc => {
+                    if (doc.exists) {
+                        testMap[doc.id] = doc.data();
+                    }
+                });
+            }
+
+            const history = enriched.map(r => {
+                const test = testMap[r.testId] || {};
+                return {
+                    ...r,
+                    testTitle: test.title || r.testTitle || "Unknown Test",
+                    testDescription: test.description || "",
+                    createdAt: test.createdAt || null
+                };
+            });
+
+            // Sort in memory by evaluatedAt/createdAt descending
+            history.sort((a, b) => {
+                const timeA = a.evaluatedAt ? (a.evaluatedAt.toDate ? a.evaluatedAt.toDate().getTime() : new Date(a.evaluatedAt).getTime()) : 0;
+                const timeB = b.evaluatedAt ? (b.evaluatedAt.toDate ? b.evaluatedAt.toDate().getTime() : new Date(b.evaluatedAt).getTime()) : 0;
+                return timeB - timeA;
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: history
+            });
+
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while retrieving student results"
             });
         }
     }

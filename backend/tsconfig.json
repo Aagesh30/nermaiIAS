@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "commonjs",
+    "lib": ["es2020", "dom"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",
+    "rootDir": "./",
+    "baseUrl": ".",
+    "paths": {
+      "@nermai/*": ["packages/*/src/index.ts", "packages/*/index.ts", "packages/*"]
+    },
+    "resolveJsonModule": true
+  },
+  "include": [
+    "app.ts",
+    "server.ts",
+    "index.ts",
+    "core/**/*.ts",
+    "core/**/*.d.ts",
+    "infrastructure/**/*.ts",
+    "modules/**/*.ts",
+    "routes/**/*.ts",
+    "services/**/*.ts",
+    "config/**/*.ts",
+    "packages/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "apps", "packages/shared"],
+  "ts-node": {
+    "files": true
+  }
+}
+
