@@ -465,4 +465,62 @@ export class StaffController {
             });
         }
     }
+
+    /**
+     * GET CURRENT LOGGED-IN STAFF PROFILE
+     * GET /api/erp/staff/profile/me
+     */
+    static async getMe(req: Request, res: Response) {
+        try {
+            if (!req.user) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+            
+            const username = req.user.username;
+            const email = req.user.email;
+            
+            if (!username && !email) {
+                return res.status(400).json({ success: false, message: "No identity credentials in token" });
+            }
+            
+            const parseTimestamp = (val: any) => {
+                if (!val) return null;
+                if (typeof val.toDate === "function") return val.toDate().toISOString();
+                return new Date(val).toISOString();
+            };
+
+            let query = db.collection(COLLECTION).where("isDeleted", "==", false);
+            let snapshot;
+            
+            if (username) {
+                snapshot = await query.where("loginUsername", "==", username).limit(1).get();
+            }
+            
+            if ((!snapshot || snapshot.empty) && email) {
+                snapshot = await query.where("email", "==", email).limit(1).get();
+            }
+            
+            if (!snapshot || snapshot.empty) {
+                return res.status(404).json({ success: false, message: "Staff profile not found" });
+            }
+            
+            const doc = snapshot.docs[0];
+            const data = doc.data();
+            
+            return res.status(200).json({
+                success: true,
+                data: {
+                    ...data,
+                    id: data.id || doc.id,
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt)
+                }
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while fetching profile"
+            });
+        }
+    }
 }

@@ -2642,22 +2642,31 @@ function MainApp() {
     if (user.role !== "guest") {
       loadAnnouncements();
       loadNotifications();
-      loadStudents();
       loadBatches();
-      loadProfileRequests();
-      loadStaff();
-      loadFees();
       loadTests();
       loadQuestions();
-      loadAdmissions();
-      loadEnquiries();
-      loadLeads();
       loadCampaigns();
       loadFeedback();
       loadTestFeedbacks();
       loadTodayQuiz();
       loadAllQuizzes();
-      loadRolePermissions();
+
+      // Only load administrative datasets for admin/staff roles
+      if (user.role && ["super_admin", "admin", "staff"].includes(user.role)) {
+        loadStudents();
+        loadProfileRequests();
+        loadStaff();
+        loadFees();
+        loadAdmissions();
+        loadEnquiries();
+        loadLeads();
+      }
+
+      // Only load role permissions for super_admin role
+      if (user.role === "super_admin") {
+        loadRolePermissions();
+      }
+
       if (user.role && ["developer", "super_admin", "admin"].includes(user.role)) {
         loadPendingApprovals();
       }

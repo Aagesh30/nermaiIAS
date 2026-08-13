@@ -37,8 +37,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, darkMo
         CourseApi.listAllTopics(),
         CourseApi.listAllSubtopics(),
         api.get('/test-portal/review/results/all-tests').catch(() => ({ data: { data: [] } })),
-        // Fetch staff list to find this teacher's staff record by username
-        api.get('/erp/staff').catch(() => ({ data: { data: [] } })),
+        // Fetch current teacher's staff record
+        api.get('/erp/staff/profile/me').catch(() => ({ data: null })),
       ]);
 
       setCourses(coursesRes.data?.data || coursesRes.data || []);
@@ -48,16 +48,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, darkMo
       setTests(testsRes.data?.data || testsRes.data || []);
 
       // Resolve the staff record ID for this teacher
-      // The staff collection has loginUsername which matches the teacher's login username
-      const allStaff = staffRes.data?.data || staffRes.data || [];
-      const teacherStaff = allStaff.find((s: any) => {
-        // Match by loginUsername (the username they log in with)
-        if (teacherUsername && s.loginUsername && s.loginUsername === teacherUsername) return true;
-        // Also try matching by name
-        const fullName = `${s.firstName || ''} ${s.lastName || ''}`.trim();
-        if (user?.name && fullName && fullName === user.name) return true;
-        return false;
-      });
+      const teacherStaff = staffRes.data?.data || staffRes.data || null;
 
       if (teacherStaff) {
         setStaffRecordId(teacherStaff.id || '');

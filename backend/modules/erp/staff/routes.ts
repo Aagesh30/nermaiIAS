@@ -29,6 +29,7 @@ const requireSelfStaffOrAdmin = (req: any, res: any, next: any) => {
   return res.status(403).json({ status: "error", message: "Forbidden: Access denied" });
 };
 
+router.get("/profile/me", StaffController.getMe);
 router.get("/:id", requireSelfStaffOrAdmin, StaffController.getOne);
 
 // All other endpoints require full admin roles
