@@ -9875,10 +9875,10 @@ function MainApp() {
                         style={[
                           styles.roleBtn,
                           admissionForm.preferredCourse === c && styles.roleBtnActive,
-                          { borderRadius: 20 }
+                          { borderRadius: 20, flex: 0, paddingHorizontal: 14, paddingVertical: 8 }
                         ]}
                       >
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 11 }]}>
+                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 12 }]}>
                           {c}
                         </Text>
                       </TouchableOpacity>
@@ -10130,10 +10130,10 @@ function MainApp() {
                         style={[
                           styles.roleBtn,
                           admissionForm.preferredCourse === c && styles.roleBtnActive,
-                          { borderRadius: 20 }
+                          { borderRadius: 20, flex: 0, paddingHorizontal: 14, paddingVertical: 8 }
                         ]}
                       >
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 11 }]}>
+                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 12 }]}>
                           {c}
                         </Text>
                       </TouchableOpacity>
