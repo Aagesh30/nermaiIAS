@@ -15,8 +15,13 @@ const router = Router();
  * ==========================================
  */
 
-// Protect ALL developer routes: must be authenticated AND super_admin
+// Protect ALL developer routes: must be authenticated
 router.use(requireAuth);
+
+// GET /page-locks is accessible to any authenticated user (needed for client routing)
+router.get("/page-locks", DeveloperController.getPageLocks);
+
+// All other developer routes require super_admin role
 router.use(requireRole(['super_admin']));
 
 // Collection overview
@@ -38,7 +43,6 @@ router.get("/role-permissions", DeveloperController.getRolePermissions);
 router.put("/role-permissions/:role", DeveloperController.updateRolePermissions);
 
 // Global Page Lock Management
-router.get("/page-locks", DeveloperController.getPageLocks);
 router.put("/page-locks", DeveloperController.updatePageLocks);
 
 export default router;
