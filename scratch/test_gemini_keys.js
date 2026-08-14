@@ -1,10 +1,8 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Test key 1: hardcoded key in controller
-const key1 = "AQ.Ab8RN6IKbxZIPclJjd20Qe7lQeYl9HdAiwNsn6NRcww8V7xTpg";
-
-// Test key 2: Firebase API key
-const key2 = "AIzaSyBZ07n1v6D7ZT5O0nIcut6JuSb0GMtM0fo";
+const key1 = "";
+const key2 = "";
 
 async function testKey(keyName, keyVal) {
     console.log(`\nTesting key: ${keyName} (${keyVal.substring(0, 10)}...)`);

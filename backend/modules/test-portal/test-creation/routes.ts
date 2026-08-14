@@ -25,6 +25,10 @@ router.get("/draft/:draftId", TestCreationController.getDraft);
 /** GET ALL TESTS */
 router.get("/", TestCreationController.getAll);
 
+/** TEST FEEDBACK ROUTING */
+router.get("/feedback", TestCreationController.getFeedback);
+router.post("/feedback", TestCreationController.submitFeedback);
+
 /** GET SINGLE TEST */
 router.get("/:id", TestCreationController.getOne);
 
@@ -49,8 +53,5 @@ router.patch("/:id/unpublish", TestCreationController.unpublish);
 /** DELETE TEST (SOFT DELETE) */
 router.delete("/:id", TestCreationController.delete);
 
-/** TEST FEEDBACK ROUTING */
-router.post("/feedback", TestCreationController.submitFeedback);
-router.get("/feedback", TestCreationController.getFeedback);
-
 export default router;
+// Trigger build change 1

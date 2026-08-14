@@ -11,7 +11,7 @@ const COLLECTION = "tests";
 const TEMP_COLLECTION = "tests";
 // Groq is PRIMARY (free). Gemini is fallback (costs money — only used if Groq fails).
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.FIREBASE_API_KEY || "";
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "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";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 const groq = new Groq({ apiKey: GROQ_API_KEY });

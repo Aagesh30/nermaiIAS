@@ -2209,7 +2209,7 @@ function MainApp() {
           </View>
 
           <Text style={styles.idCardName}>{getStudentName(student)}</Text>
-          <Text style={{ color: cardTheme, fontSize: 12, fontWeight: "bold", marginBottom: 6, letterSpacing: 0.5 }}>Roll No: {student.rollNumber || "—"}</Text>
+          <Text style={{ color: cardTheme, fontSize: 12, fontWeight: "bold", marginBottom: 6, letterSpacing: 0.5 }}>Roll No: {student.rollNumber || student.loginUsername || "—"}</Text>
 
           <View style={{ width: "100%", borderTopWidth: 1, borderColor: "#eeeeee", paddingTop: 6, gap: 3 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -2315,7 +2315,7 @@ function MainApp() {
                   <View style={{ flex: 1, gap: 4 }}>
                     <Text style={{ fontSize: 10, color: "#757575", fontWeight: "bold" }}>CANDIDATE DETAILS</Text>
                     <Text style={{ fontSize: 14, fontWeight: "bold", color: "#212121" }}>{getStudentName(student)}</Text>
-                    <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Roll No:</Text> {student.rollNumber}</Text>
+                    <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Roll No:</Text> {student.rollNumber || student.loginUsername || "—"}</Text>
                     <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Course:</Text> {student.course}</Text>
                     <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Batch:</Text> {student.batch || "General"}</Text>
                   </View>
@@ -2652,8 +2652,8 @@ function MainApp() {
       loadAllQuizzes();
 
       // Only load administrative datasets for admin/staff roles
+      loadStudents();
       if (user.role && ["super_admin", "admin", "staff"].includes(user.role)) {
-        loadStudents();
         loadProfileRequests();
         loadStaff();
         loadFees();
@@ -2667,7 +2667,7 @@ function MainApp() {
         loadRolePermissions();
       }
 
-      if (user.role && ["developer", "super_admin", "admin"].includes(user.role)) {
+      if (user.role && ["developer", "super_admin"].includes(user.role)) {
         loadPendingApprovals();
       }
     } else {
@@ -2745,7 +2745,7 @@ function MainApp() {
     } else if (erpSub === "approvals") {
       loadPendingApprovals();
     }
-  }, [erpSub]);
+  }, [erpSub, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -2766,7 +2766,7 @@ function MainApp() {
     if (testSub === "feedback") {
       loadTestFeedbacks();
     }
-  }, [testSub]);
+  }, [testSub, user]);
 
   // Load LMS module data when user navigates to LMS tab or switches sub-tabs
   useEffect(() => {
@@ -3085,7 +3085,8 @@ function MainApp() {
 
   const loadStudents = async () => {
     try {
-      const res = await api.get("/erp/student");
+      const endpoint = user?.role === "student" ? "/erp/student/profile/me" : "/erp/student";
+      const res = await api.get(endpoint);
       setStudents(res?.data || res || []);
     } catch (e) {
       console.log("Failed loading students:", e);
@@ -5145,7 +5146,7 @@ function MainApp() {
       return;
     }
     try {
-      await api.put(`/erp/student/${myStudent.id}`, { loginPassword: studentNewPassword });
+      await api.put("/erp/student/profile/me", { loginPassword: studentNewPassword });
     } catch (err: any) {
       setIsSubmittingProfile(false);
       Alert.alert("Error", "Failed to update password: " + err.message);
@@ -5164,7 +5165,7 @@ function MainApp() {
       }, undefined, 60000);
       // Disable edit permission and mark as submitted after student submission
       if (myStudent?.id) {
-        await api.put(`/erp/student/${myStudent.id}`, { profileEditPermission: false, isProfileSubmitted: true });
+        await api.put("/erp/student/profile/me", { profileEditPermission: false, isProfileSubmitted: true });
       }
       setIsSubmittingProfile(false);
       setShowProfileReviewModal(false);
@@ -11761,6 +11762,7 @@ function MainApp() {
                   <>
                     {user.role === "student" && (() => {
                       const myStudent = getLoggedInStudent(user, students);
+                      if (myStudent && (myStudent.profileComplete === true || myStudent.profileComplete === "true")) return null;
                       const rawCount = myStudent?.profileSubmitCount;
                       const submitCount = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
                       const isSubmitted = myStudent?.isProfileSubmitted === true || submitCount >= 1;
@@ -11811,6 +11813,7 @@ function MainApp() {
                     {(() => {
                       if (user.role !== "student") return null;
                       const myStudent = getLoggedInStudent(user, students);
+                      if (myStudent && (myStudent.profileComplete === true || myStudent.profileComplete === "true")) return null;
                       const rawCount = myStudent?.profileSubmitCount;
                       const submitCount = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
                       const isComplete = myStudent?.isProfileSubmitted === true || submitCount >= 1 || myProfileRequest?.status === "approved" || myProfileRequest?.status === "pending";
@@ -14657,7 +14660,7 @@ PASTED QUESTION PAPER TEXT:
                                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                                           <View style={{ flex: 1 }}>
                                             <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>{getStudentName(s)}</Text>
-                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || "N/A"} | Batch: {s.batch || "N/A"}</Text>
+                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"}</Text>
                                           </View>
                                           <View style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "#1976d2", borderRadius: 4 }}>
                                             <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>View Details</Text>
@@ -14731,7 +14734,7 @@ PASTED QUESTION PAPER TEXT:
                                           </View>
 
                                           <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
-                                            <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Roll Number:</Text> {s.rollNumber || "N/A"}</Text>
+                                            <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Roll Number:</Text> {s.rollNumber || s.loginUsername || "N/A"}</Text>
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Login:</Text> Username: <Text style={{ fontWeight: "bold" }}>{s.loginUsername || s.rollNumber || "N/A"}</Text> | Password: <Text style={{ fontWeight: "bold", color: "#c62828" }}>{s.loginPassword || "N/A"}</Text></Text>
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Initial:</Text> {s.initial || "N/A"}</Text>
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Course:</Text> {s.course || "N/A"}</Text>
@@ -17499,7 +17502,7 @@ PASTED QUESTION PAPER TEXT:
                                       <View key={s.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: "#eeeeee", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                                         <View style={{ flex: 1 }}>
                                           <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>{getStudentName(s)}</Text>
-                                          <Text style={{ fontSize: 11, color: "#757575", marginTop: 1 }}>Roll: {s.rollNumber || "N/A"} | Batch: {s.batch || "N/A"}</Text>
+                                          <Text style={{ fontSize: 11, color: "#757575", marginTop: 1 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"}</Text>
                                           <Text style={{ fontSize: 11, color: "#757575" }}>Total: ₹{tot.toLocaleString()} | Paid: ₹{paid.toLocaleString()}</Text>
                                         </View>
                                         <View style={{ alignItems: "flex-end", gap: 6 }}>
@@ -17697,7 +17700,7 @@ PASTED QUESTION PAPER TEXT:
                                             <Text style={{ color: isSelected ? "#c62828" : "#212121", fontWeight: "bold", fontSize: 13 }}>
                                               {s.firstName} {s.lastName}
                                             </Text>
-                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || "N/A"} | {s.batch || "General"}</Text>
+                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | {s.batch || "General"}</Text>
                                           </View>
                                           <View style={{ flexDirection: "row", gap: 4 }}>
                                             {s.idCardGenerated && (
@@ -23119,7 +23122,7 @@ PASTED QUESTION PAPER TEXT:
                 return (
                   <View style={{ backgroundColor: "#f9f9f9", borderRadius: 10, padding: 12, borderWidth: 1, borderColor: "#e0e0e0", gap: 4 }}>
                     <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 14 }}>{getStudentName(s)}</Text>
-                    <Text style={{ fontSize: 11, color: "#757575" }}>Roll: {s.rollNumber || "N/A"} | Batch: {s.batch || "N/A"} | Course: {s.course || "N/A"}</Text>
+                    <Text style={{ fontSize: 11, color: "#757575" }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"} | Course: {s.course || "N/A"}</Text>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderColor: "#eee" }}>
                       <Text style={{ fontSize: 12, color: "#555" }}>Pending Amount:</Text>
                       <Text style={{ fontSize: 13, fontWeight: "bold", color: pending > 0 ? "#c62828" : "#2e7d32" }}>₹{pending.toLocaleString()}</Text>

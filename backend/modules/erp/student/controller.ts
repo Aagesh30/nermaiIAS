@@ -833,4 +833,164 @@ export class StudentController {
             });
         }
     }
+
+    /**
+     * GET CURRENT LOGGED-IN STUDENT PROFILE (self-service)
+     * GET /api/erp/student/profile/me
+     */
+    static async getMe(req: Request, res: Response) {
+        try {
+            if (!req.user) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+
+            const { username, email, studentId, userId } = req.user as any;
+
+            const parseTimestamp = (val: any) => {
+                if (!val) return null;
+                if (typeof val.toDate === "function") return val.toDate().toISOString();
+                return new Date(val).toISOString();
+            };
+
+            const baseQuery = db.collection(COLLECTION).where("isDeleted", "==", false);
+            let snapshot: admin.firestore.QuerySnapshot | null = null;
+
+            // Try studentId first
+            if (studentId) {
+                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            // Try userId
+            if (!snapshot && userId) {
+                const s = await baseQuery.where("id", "==", userId).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            // Try username (loginUsername or rollNumber)
+            if (!snapshot && username) {
+                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            if (!snapshot && username) {
+                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            // Try email
+            if (!snapshot && email) {
+                const s = await baseQuery.where("email", "==", email).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+
+            if (!snapshot || snapshot.empty) {
+                return res.status(404).json({ success: false, message: "Student profile not found" });
+            }
+
+            const doc = snapshot.docs[0];
+            const data = doc.data();
+
+            return res.status(200).json({
+                success: true,
+                data: [{
+                    ...data,
+                    id: data.id || doc.id,
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt),
+                    deletedAt: parseTimestamp(data.deletedAt),
+                    approvedAt: parseTimestamp(data.approvedAt)
+                }]
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while fetching student profile"
+            });
+        }
+    }
+
+    /**
+     * UPDATE CURRENT LOGGED-IN STUDENT PROFILE (self-service, restricted fields only)
+     * PUT /api/erp/student/profile/me
+     */
+    static async updateMe(req: Request, res: Response) {
+        try {
+            if (!req.user) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+
+            const { username, email, studentId, userId } = req.user as any;
+
+            // Students may only update these fields via self-service
+            const ALLOWED_FIELDS = ["loginPassword", "profileEditPermission", "isProfileSubmitted"];
+            const updateData: any = {};
+            for (const field of ALLOWED_FIELDS) {
+                if (req.body[field] !== undefined) {
+                    updateData[field] = req.body[field];
+                }
+            }
+
+            if (Object.keys(updateData).length === 0) {
+                return res.status(400).json({ success: false, message: "No updatable fields provided" });
+            }
+
+            // If updating password, also hash and sync to users collection
+            if (updateData.loginPassword) {
+                const salt = await bcrypt.genSalt(10);
+                updateData.passwordHash = await bcrypt.hash(updateData.loginPassword, salt);
+                updateData.loginPasswordHash = updateData.passwordHash;
+            }
+
+            updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+
+            const baseQuery = db.collection(COLLECTION).where("isDeleted", "==", false);
+            let snapshot: admin.firestore.QuerySnapshot | null = null;
+
+            if (studentId) {
+                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            if (!snapshot && userId) {
+                const s = await baseQuery.where("id", "==", userId).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            if (!snapshot && username) {
+                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            if (!snapshot && username) {
+                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+            if (!snapshot && email) {
+                const s = await baseQuery.where("email", "==", email).limit(1).get();
+                if (!s.empty) snapshot = s;
+            }
+
+            if (!snapshot || snapshot.empty) {
+                return res.status(404).json({ success: false, message: "Student profile not found" });
+            }
+
+            const doc = snapshot.docs[0];
+            await db.collection(COLLECTION).doc(doc.id).update(updateData);
+
+            // Sync password to users collection if changed
+            if (updateData.loginPassword) {
+                const usersSnapshot = await db.collection("users")
+                    .where("username", "==", username || "")
+                    .limit(1).get();
+                if (!usersSnapshot.empty) {
+                    await db.collection("users").doc(usersSnapshot.docs[0].id).update({
+                        password: updateData.loginPassword,
+                        passwordHash: updateData.loginPasswordHash,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+            }
+
+            return res.status(200).json({ success: true, message: "Profile updated successfully" });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while updating student profile"
+            });
+        }
+    }
 }

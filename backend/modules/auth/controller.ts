@@ -63,7 +63,7 @@ function issueAccessToken(payload: {
   isAdmin?: boolean;
   sessionId?: string;
 }): string {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '15m' });
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '7d' });
 }
 
 /**

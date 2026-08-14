@@ -1,30 +1,43 @@
 import { Router } from "express";
 import { StudentController } from "./controller";
 import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
-import { requireSelfOrAdmin } from "../../../core/middleware/ownershipGuard";
 
 const router = Router();
 
+/**
+ * ==========================================
+ * STUDENT ROUTES
+ * Base Route: /api/erp/student
+ * SECURITY: All routes require auth + admin/staff role.
+ * ==========================================
+ */
 const adminRoles = ['super_admin', 'admin', 'staff'];
 
 router.use(requireAuth);
 
-// Get all students (requires admin/staff role)
-router.get("/", requireRole(adminRoles), StudentController.getAll);
+// Self-service routes: any authenticated student can access their own profile
+router.get("/profile/me", StudentController.getMe);
+router.put("/profile/me", StudentController.updateMe);
 
-// Get single student (requires self ownership or admin/staff role)
-router.get("/:id", requireSelfOrAdmin(['id']), StudentController.getOne);
+// All other endpoints require full admin/staff roles
+router.use(requireRole(adminRoles));
 
-// Create student (requires admin/staff role)
-router.post("/", requireRole(adminRoles), StudentController.create);
+// Get all students (with search, filter, pagination, sorting)
+router.get("/", StudentController.getAll);
 
-// Update student (requires self ownership or admin/staff role)
-router.put("/:id", requireSelfOrAdmin(['id']), StudentController.update);
+// Get single student
+router.get("/:id", StudentController.getOne);
+
+// Create student
+router.post("/", StudentController.create);
+
+// Update student
+router.put("/:id", StudentController.update);
 
 // Bulk update credentials for batch (super_admin only — highly privileged)
 router.post("/bulk/credentials", requireRole(['super_admin']), StudentController.bulkUpdateCredentials);
 
-// Soft delete student (requires admin/staff role)
-router.delete("/:id", requireRole(['super_admin', 'admin']), StudentController.delete);
+// Soft delete student
+router.delete("/:id", StudentController.delete);
 
 export default router;

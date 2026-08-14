@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Platform, View as RNView, Text as RNText, ScrollView as RNScrollView, 
-  TouchableOpacity as RNTouchableOpacity, TextInput as RNTextInput, 
-  ActivityIndicator as RNActivityIndicator, StyleSheet as RNStyleSheet, 
-  Alert as RNAlert 
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { 
   BookOpen, Layers, Search, RefreshCw, CheckCircle, 
   AlertCircle, ChevronDown, ChevronRight, User, Calendar, 
   Clock, Award, HelpCircle as HelpIcon 
@@ -76,11 +69,7 @@ export const SyllabusTrackerPage = () => {
 
   const handleSyncExcel = async () => {
     if (!selectedCourse) {
-      if (Platform.OS === 'web') {
-        alert('Please select a course to sync the syllabus.');
-      } else {
-        RNAlert.alert('Selection Required', 'Please select a course to sync the syllabus.');
-      }
+      alert('Please select a course to sync the syllabus.');
       return;
     }
     setIsSyncing(true);
@@ -150,11 +139,7 @@ export const SyllabusTrackerPage = () => {
       fetchData(false);
     } catch (error) {
       console.error(error);
-      if (Platform.OS === 'web') {
-        alert('Failed to save update.');
-      } else {
-        RNAlert.alert('Error', 'Failed to save update.');
-      }
+      alert('Failed to save update.');
     } finally {
       setIsSavingInline(prev => ({ ...prev, [itemId]: false }));
     }
@@ -294,30 +279,7 @@ export const SyllabusTrackerPage = () => {
     return 'Partial';
   };
 
-  // Mobile-specific status dialog
-  const showMobileStatusPicker = (item: any, type: 'subtopic' | 'topic') => {
-    let rawStatus = item.coverageStatus;
-    if (type === 'topic') {
-      const topicSubtopics = subtopics.filter(st => st.topicId === item.id);
-      rawStatus = getTopicStatus(item, topicSubtopics);
-    } else {
-      rawStatus = rawStatus || 'Pending';
-    }
-    const currentStatusVal = (rawStatus.toLowerCase() === 'done' || rawStatus.toLowerCase() === 'completed') ? 'Completed' : rawStatus;
-
-    RNAlert.alert(
-      'Update Status',
-      `Current Status: ${currentStatusVal.toUpperCase()}`,
-      [
-        { text: 'PENDING', onPress: () => handleStatusChange(item.id!, type, 'Pending') },
-        { text: 'PARTIAL', onPress: () => handleStatusChange(item.id!, type, 'Partial') },
-        { text: 'COMPLETED', onPress: () => handleStatusChange(item.id!, type, 'Completed') },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
-  };
-
-  // Render coverage status select box (Web Version)
+  // Render coverage status select box
   const renderStatusDropdown = (item: any, type: 'subtopic' | 'topic') => {
     let rawStatus = item.coverageStatus;
     if (type === 'topic') {
@@ -364,240 +326,6 @@ export const SyllabusTrackerPage = () => {
     );
   };
 
-  // ==========================================
-  // MOBILE RENDERING PATH (React Native)
-  // ==========================================
-  const renderMobileSyllabusTracker = () => {
-    return (
-      <RNScrollView style={mStyles.container} contentContainerStyle={mStyles.scrollContent}>
-        {/* Header Block */}
-        <RNView style={mStyles.card}>
-          <RNView style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <Ionicons name="book" size={24} color="#c62828" />
-            <RNText style={mStyles.headerTitle}>Syllabus Tracker</RNText>
-          </RNView>
-          <RNText style={mStyles.subtitle}>
-            Track faculty class logs and curriculum progress against Master Tracker spreadsheet.
-          </RNText>
-
-          {/* Selector & Sync buttons */}
-          <RNView style={{ gap: 10, marginTop: 15 }}>
-            <RNTouchableOpacity 
-              onPress={() => {
-                if (courses.length === 0) return;
-                RNAlert.alert(
-                  'Select Course',
-                  'Choose a course to track',
-                  [
-                    ...courses.map(c => ({
-                      text: c.name || c.title,
-                      onPress: () => setSelectedCourse(c.id || '')
-                    })),
-                    { text: 'Cancel', style: 'cancel' }
-                  ]
-                );
-              }}
-              style={mStyles.dropdownPicker}
-            >
-              <RNText style={mStyles.pickerText}>
-                {courses.find(c => c.id === selectedCourse)?.name || 'Select course to track...'}
-              </RNText>
-              <Ionicons name="chevron-down" size={16} color="#757575" />
-            </RNTouchableOpacity>
-
-            <RNTouchableOpacity 
-              disabled={isSyncing || !selectedCourse}
-              onPress={handleSyncExcel}
-              style={[mStyles.syncBtn, (!selectedCourse || isSyncing) && { backgroundColor: '#e0e0e0' }]}
-            >
-              <Ionicons name="refresh" size={16} color="#fff" />
-              <RNText style={mStyles.syncBtnText}>{isSyncing ? 'Syncing...' : 'Sync Excel Tracker'}</RNText>
-            </RNTouchableOpacity>
-          </RNView>
-        </RNView>
-
-        {/* Sync status alert */}
-        {syncStatus.message ? (
-          <RNView style={[mStyles.alertBox, syncStatus.type === 'success' ? mStyles.alertSuccess : mStyles.alertError]}>
-            <Ionicons 
-              name={syncStatus.type === 'success' ? 'checkmark-circle' : 'alert-circle'} 
-              size={18} 
-              color={syncStatus.type === 'success' ? '#2e7d32' : '#c62828'} 
-            />
-            <RNText style={[mStyles.alertText, syncStatus.type === 'success' ? { color: '#2e7d32' } : { color: '#c62828' }]}>
-              {syncStatus.message}
-            </RNText>
-          </RNView>
-        ) : null}
-
-        {isLoading ? (
-          <RNView style={{ py: 30, alignItems: 'center', justifyContent: 'center' }}>
-            <RNActivityIndicator size="large" color="#c62828" />
-            <RNText style={{ color: '#757575', marginTop: 10, fontWeight: 'bold' }}>Loading metrics...</RNText>
-          </RNView>
-        ) : (
-          <RNView style={{ gap: 12 }}>
-            {/* Stats list */}
-            <RNView style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {[
-                { title: 'Total Subtopics', val: stats.total, color: '#212121' },
-                { title: 'Done', val: stats.done, color: '#2e7d32' },
-                { title: 'Partial', val: stats.partial, color: '#e65100' },
-                { title: 'Pending', val: stats.pending, color: '#c62828' },
-                { title: 'Progress', val: `${stats.avgCoverage}%`, color: '#1976d2' }
-              ].map((stat, i) => (
-                <RNView key={i} style={[mStyles.card, { width: '48%', marginBottom: 0, padding: 12, flexGrow: 1 }]}>
-                  <RNText style={{ fontSize: 10, color: '#757575', fontWeight: 'bold', textTransform: 'uppercase' }}>{stat.title}</RNText>
-                  <RNText style={{ fontSize: 20, fontWeight: '800', color: stat.color, marginTop: 4 }}>{stat.val}</RNText>
-                </RNView>
-              ))}
-            </RNView>
-
-            {/* Subject Level Summary list */}
-            <RNView style={mStyles.card}>
-              <RNText style={mStyles.sectionTitleText}>Subject Progress</RNText>
-              <RNView style={{ gap: 10, marginTop: 10 }}>
-                {subjectProgress.map(subj => (
-                  <RNView key={subj.id}>
-                    <RNView style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <RNText style={{ fontSize: 12, fontWeight: 'bold', color: '#212121' }}>{subj.name}</RNText>
-                      <RNText style={{ fontSize: 12, fontWeight: 'bold', color: '#757575' }}>{subj.avgPct}%</RNText>
-                    </RNView>
-                    <RNView style={mStyles.progressBarBg}>
-                      <RNView style={[mStyles.progressBarFill, { width: `${subj.avgPct}%` }]} />
-                    </RNView>
-                  </RNView>
-                ))}
-              </RNView>
-            </RNView>
-
-            {/* Search and Filters */}
-            <RNView style={mStyles.card}>
-              <RNView style={mStyles.searchContainer}>
-                <Ionicons name="search" size={16} color="#757575" style={{ marginLeft: 10 }} />
-                <RNTextInput
-                  style={mStyles.searchInput}
-                  placeholder="Search syllabus..."
-                  placeholderTextColor="#9e9e9e"
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                />
-              </RNView>
-
-              {/* Status Select Buttons */}
-              <RNView style={{ flexDirection: 'row', gap: 6, marginTop: 10 }}>
-                {['all', 'Done', 'Partial', 'Pending'].map(filterVal => (
-                  <RNTouchableOpacity 
-                    key={filterVal}
-                    onPress={() => setStatusFilter(filterVal)}
-                    style={[mStyles.filterPill, statusFilter === filterVal && mStyles.filterPillActive]}
-                  >
-                    <RNText style={[mStyles.filterPillText, statusFilter === filterVal && mStyles.filterPillTextActive]}>
-                      {filterVal.toUpperCase()}
-                    </RNText>
-                  </RNTouchableOpacity>
-                ))}
-              </RNView>
-            </RNView>
-
-            {/* Curriculum list */}
-            <RNView style={{ gap: 8 }}>
-              {courseSubjects.map(subj => {
-                const isExpanded = !!expandedSubjects[subj.id!];
-                const subjTopics = courseTopics.filter(t => t.subjectId === subj.id);
-                const isMatching = filteredTrackedItems.some(item => {
-                  if (item.isDirectTopic) return item.subjectId === subj.id;
-                  const topic = courseTopics.find(t => t.id === item.topicId);
-                  return topic?.subjectId === subj.id;
-                });
-
-                if ((searchQuery || statusFilter !== 'all') && !isMatching) return null;
-
-                return (
-                  <RNView key={subj.id} style={mStyles.subjCard}>
-                    <RNTouchableOpacity onPress={() => toggleSubject(subj.id!)} style={mStyles.subjHeader}>
-                      <RNView style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                        <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={18} color="#c62828" />
-                        <RNText style={mStyles.subjTitle}>{subj.name}</RNText>
-                      </RNView>
-                      <RNText style={mStyles.subjBadge}>{subj.avgPct}%</RNText>
-                    </RNTouchableOpacity>
-
-                    {isExpanded && (
-                      <RNView style={mStyles.subjBody}>
-                        {subjTopics.map(topic => {
-                          const isTopicExpanded = !!expandedTopics[topic.id!];
-                          const topicSubtopics = courseSubtopics.filter(st => st.topicId === topic.id);
-                          const isTopicMatching = filteredTrackedItems.some(item => {
-                            if (item.isDirectTopic) return item.id === topic.id;
-                            return item.topicId === topic.id;
-                          });
-
-                          if ((searchQuery || statusFilter !== 'all') && !isTopicMatching) return null;
-
-                          return (
-                            <RNView key={topic.id} style={mStyles.topicBox}>
-                              <RNTouchableOpacity onPress={() => toggleTopic(topic.id!)} style={mStyles.topicHeader}>
-                                <RNView style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                                  <Ionicons name={isTopicExpanded ? 'chevron-down' : 'chevron-forward'} size={14} color="#e65100" />
-                                  <RNText style={mStyles.topicTitle}>{topic.name}</RNText>
-                                </RNView>
-                                
-                                <RNTouchableOpacity onPress={() => showMobileStatusPicker(topic, 'topic')}>
-                                  <RNView style={mStyles.statusBadgeMini}>
-                                    <RNText style={mStyles.statusBadgeTextMini}>
-                                      {(topic.coverageStatus || 'Pending').toUpperCase()}
-                                    </RNText>
-                                  </RNView>
-                                </RNTouchableOpacity>
-                              </RNTouchableOpacity>
-
-                              {isTopicExpanded && (
-                                <RNView style={mStyles.topicBody}>
-                                  {topicSubtopics.length === 0 ? (
-                                    <RNText style={{ fontSize: 11, fontStyle: 'italic', color: '#9e9e9e' }}>
-                                      No subtopics. Direct topic tracking enabled.
-                                    </RNText>
-                                  ) : (
-                                    topicSubtopics.map(st => (
-                                      <RNView key={st.id} style={mStyles.subtopicRow}>
-                                        <RNText style={mStyles.subtopicText}>{st.name}</RNText>
-                                        <RNTouchableOpacity onPress={() => showMobileStatusPicker(st, 'subtopic')}>
-                                          <RNView style={mStyles.statusBadgeMini}>
-                                            <RNText style={mStyles.statusBadgeTextMini}>
-                                              {(st.coverageStatus || 'Pending').toUpperCase()}
-                                            </RNText>
-                                          </RNView>
-                                        </RNTouchableOpacity>
-                                      </RNView>
-                                    ))
-                                  )}
-                                </RNView>
-                              )}
-                            </RNView>
-                          );
-                        })}
-                      </RNView>
-                    )}
-                  </RNView>
-                );
-              })}
-            </RNView>
-
-          </RNView>
-        )}
-      </RNScrollView>
-    );
-  };
-
-  // RENDER DISTRIBUTOR
-  if (Platform.OS !== 'web') {
-    return renderMobileSyllabusTracker();
-  }
-
-  // ==========================================
-  // WEB RENDERING PATH (HTML/Tailwind)
-  // ==========================================
   return (
     <div className="space-y-6 w-full pb-10 text-gray-900 dark:text-white">
       {/* Header Banner */}
@@ -662,7 +390,7 @@ export const SyllabusTrackerPage = () => {
       {isLoading ? (
         <div className="py-20 text-center text-gray-500 dark:text-gray-400 flex flex-col items-center justify-center gap-3">
           <RefreshCw className="w-8 h-8 animate-spin text-[#8B0000]" />
-          <p className="font-semibold text-sm">Loading curriculum metrics...</p>
+          <p className="font-semibold text-sm">Loading syllabus tracking metrics...</p>
         </div>
       ) : (
         <>
@@ -852,7 +580,7 @@ export const SyllabusTrackerPage = () => {
                               });
 
                               if ((searchQuery || statusFilter !== 'all' || facultyFilter !== 'all') && topicFilteredTrackedItems.length === 0) {
-                                  return null;
+                                return null;
                               }
 
                               return (
@@ -976,7 +704,7 @@ export const SyllabusTrackerPage = () => {
                   {courseSubjects.length === 0 && (
                     <div className="text-center py-20 bg-gray-50 dark:bg-white/5 rounded-2xl border border-gray-100 dark:border-white/10">
                       <HelpIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-bold text-gray-700 dark:text-slate-300">Curriculum is Empty</h3>
+                      <h3 className="text-lg font-bold text-gray-700 dark:text-slate-300">Syllabus is Empty</h3>
                       <p className="text-gray-400 dark:text-gray-500 mt-2">Select a course and sync curriculum from the Faculty Tracker Excel sheet.</p>
                     </div>
                   )}
@@ -989,232 +717,3 @@ export const SyllabusTrackerPage = () => {
     </div>
   );
 };
-
-// ==========================================
-// MOBILE STYLESHEET (React Native)
-// ==========================================
-const mStyles = RNStyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#212121',
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#757575',
-    lineHeight: 18,
-  },
-  dropdownPicker: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#fafafa',
-  },
-  pickerText: {
-    fontSize: 13,
-    color: '#424242',
-    fontWeight: '600',
-  },
-  syncBtn: {
-    backgroundColor: '#c62828',
-    borderRadius: 10,
-    paddingVertical: 11,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-  },
-  syncBtnText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-  alertBox: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  alertSuccess: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#c8e6c9',
-  },
-  alertError: {
-    backgroundColor: '#ffebee',
-    borderColor: '#ffcdd2',
-  },
-  alertText: {
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-  },
-  sectionTitleText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#c62828',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingBottom: 6,
-    marginBottom: 8,
-  },
-  progressBarBg: {
-    height: 6,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginTop: 4,
-    marginBottom: 10,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#2e7d32',
-    borderRadius: 3,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    backgroundColor: '#fafafa',
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    color: '#212121',
-  },
-  filterPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    backgroundColor: '#ffffff',
-  },
-  filterPillActive: {
-    backgroundColor: '#ffebee',
-    borderColor: '#c62828',
-  },
-  filterPillText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#757575',
-  },
-  filterPillTextActive: {
-    color: '#c62828',
-  },
-  subjCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    overflow: 'hidden',
-  },
-  subjHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 14,
-    backgroundColor: '#ffffff',
-  },
-  subjTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#212121',
-    flex: 1,
-  },
-  subjBadge: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    backgroundColor: '#2e7d32',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  subjBody: {
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    padding: 10,
-    gap: 8,
-  },
-  topicBox: {
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    overflow: 'hidden',
-  },
-  topicHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 10,
-  },
-  topicTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#424242',
-  },
-  topicBody: {
-    padding: 8,
-    backgroundColor: '#fcfcfc',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    gap: 6,
-  },
-  subtopicRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  subtopicText: {
-    fontSize: 11,
-    color: '#616161',
-    flex: 1,
-  },
-  statusBadgeMini: {
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  statusBadgeTextMini: {
-    fontSize: 8,
-    fontWeight: 'bold',
-    color: '#757575',
-  }
-});
