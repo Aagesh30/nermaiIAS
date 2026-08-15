@@ -8,17 +8,19 @@ const router = Router();
  * ==========================================
  * ADMISSION ROUTES
  * Base Route: /api/crm/admission
- * SECURITY: All routes require auth + admin/staff role.
+ * SECURITY: POST / (submit form) is public so guests can apply.
+ *           All management routes require auth + admin/staff role.
  * ==========================================
  */
 const adminRoles = ['super_admin', 'admin', 'staff'];
 
-router.use(requireAuth);
-router.use(requireRole(adminRoles));
-
+// Public: guest submission of admission application form
 router.post("/", AdmissionController.create);
-router.get("/", AdmissionController.getAll);
-router.patch("/:id", AdmissionController.updateStatus);
-router.delete("/:id", AdmissionController.delete);
+
+// Admin-only: manage admissions
+router.get("/", requireAuth, requireRole(adminRoles), AdmissionController.getAll);
+router.patch("/:id", requireAuth, requireRole(adminRoles), AdmissionController.updateStatus);
+router.delete("/:id", requireAuth, requireRole(adminRoles), AdmissionController.delete);
 
 export default router;
+

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MeetingLaunchRequest — provider-agnostic meeting launch descriptor.
  * The launcher only knows the token and session ID. Meeting credentials
  * stay on the server — the popup page exchanges the token itself.
@@ -31,4 +31,3 @@ export type MeetingBridgeEvent =
   | 'RECONNECT_REQUESTED'
   | 'LAUNCHER_OPENED'
   | 'MEET_LAUNCH_REQUESTED';
-

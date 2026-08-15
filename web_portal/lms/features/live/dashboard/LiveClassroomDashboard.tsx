@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { RoleLayoutFactory } from './RoleLayoutFactory';
 import { HeaderRibbon } from './controls/HeaderRibbon';
 import { ClassHealthWidget } from './controls/ClassHealthWidget';
@@ -25,7 +25,6 @@ export const LiveClassroomDashboard: React.FC = () => {
     </LiveSessionController>
   );
 };
-
 
 
 

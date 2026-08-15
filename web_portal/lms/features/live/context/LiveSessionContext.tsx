@@ -1,5 +1,5 @@
-﻿import React, { createContext, useContext } from 'react';
-import { ILiveSession, UserRole, LiveCapabilities } from '../../../core/live-core/src';
+import React, { createContext, useContext } from 'react';
+import { ILiveSession, UserRole, LiveCapabilities } from '@nermai/live-core';
 
 export interface LiveSessionContextState {
   session: ILiveSession | null;
@@ -40,4 +40,3 @@ export const LiveSessionProvider: React.FC<{
     </LiveSessionContext.Provider>
   );
 };
-

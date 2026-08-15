@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Zoom Meeting Embedded Standalone Test</title>
+    <!-- Use exactly the same versions as zoom.html -->
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://source.zoom.us/6.2.0/zoom-meeting-embedded-6.2.0.min.js"></script>
+    <style>
+        body, html { width: 100%; height: 100%; margin: 0; padding: 0; }
+        #zmmtg-root { width: 100%; height: 100%; }
+        #control-panel { position: absolute; z-index: 9999; background: white; padding: 10px; border: 1px solid black; }
+    </style>
+</head>
+<body>
+    <div id="control-panel">
+        <h3>Zoom Standalone Test</h3>
+        <p>This page loads the Zoom SDK exactly as your application does, but without the React wrappers or iframe lifecycle.</p>
+        <div>
+            <input type="text" id="token-input" placeholder="Enter Join Token" style="width: 300px; padding: 5px;">
+            <button onclick="startTest()">Start Test</button>
+        </div>
+        <div id="logs" style="margin-top: 10px; font-family: monospace; max-height: 200px; overflow-y: auto; background: #eee; padding: 5px;"></div>
+    </div>
+    <div id="zmmtg-root"></div>
+
+    <script>
+        function logMsg(msg) {
+            console.log(msg);
+            const el = document.getElementById('logs');
+            el.innerHTML += `<div>${new Date().toISOString()}: ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function startTest() {
+            const token = document.getElementById('token-input').value;
+            if (!token) {
+                alert('Please enter a token.');
+                return;
+            }
+
+            try {
+                logMsg('Fetching payload from API...');
+                const response = await fetch(`http://127.0.0.1:3000/api/v1/live-sessions/token/${token}`);
+                if (!response.ok) throw new Error('Invalid or expired join token.');
+                
+                const json = await response.json();
+                const payload = json.data;
+
+                logMsg(`Payload received. Meeting: ${payload.meetingId}`);
+                logMsg(`createClient()...`);
+                
+                const client = ZoomMtgEmbedded.createClient();
+                const root = document.getElementById('zmmtg-root');
+                document.getElementById('control-panel').style.display = 'none';
+
+                logMsg(`client.init()...`);
+                await client.init({ zoomAppRoot: root, language: 'en-US' });
+
+                const joinOptions = {
+                    signature: payload.sdk.signature,
+                    meetingNumber: payload.meetingId.replace(/\D/g, ''),
+                    password: payload.sdk.passcode || '',
+                    userName: payload.displayName || 'Participant'
+                };
+                if (payload.sdk.zak) {
+                    joinOptions.zak = payload.sdk.zak;
+                }
+
+                logMsg(`client.join()...`);
+                await client.join(joinOptions);
+                logMsg(`client.join() complete!`);
+                
+            } catch (err) {
+                logMsg(`ERROR: ${err.message || JSON.stringify(err)}`);
+                console.error(err);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { providerRegistry } from './ProviderRegistry';
 import { useLiveSessionContext } from '../context/LiveSessionContext';
 import { LiveErrorBoundary } from './LiveErrorBoundary';
@@ -30,4 +30,3 @@ export const MeetingPlayerFactory: React.FC = () => {
     </LiveErrorBoundary>
   );
 };
-

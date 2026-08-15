@@ -1,8 +1,8 @@
-﻿import React from 'react';
+import React from 'react';
 import { useParams } from 'react-router-dom';
 import { LiveSessionProvider, LiveSessionContextState } from './context/LiveSessionContext';
 import { LiveSessionLayout } from './core/LiveSessionLayout';
-import { liveSessionService, JoinPayload, SessionState, LiveCapabilities } from '../../core/live-core/src';
+import { liveSessionService, JoinPayload, SessionState, LiveCapabilities } from '@nermai/live-core';
 import { MeetingStateManager } from './services/MeetingStateManager';
 import { MeetingWindowState } from './services/MeetingTypes';
 import { useState, useEffect, useCallback } from 'react';
@@ -113,4 +113,3 @@ export const LiveSessionFeature: React.FC<LiveSessionFeatureProps> = ({ role, ca
     </LiveSessionProvider>
   );
 };
-

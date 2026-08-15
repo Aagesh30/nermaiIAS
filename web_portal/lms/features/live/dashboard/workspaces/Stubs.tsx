@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { liveWorkspaceRegistry } from '../registry/LiveWorkspaceRegistry';
 import { FileText, CheckSquare, Bot, Activity, Users, TrendingUp } from 'lucide-react';
 import { useLiveSessionContext } from '../../context/LiveSessionContext';
@@ -81,4 +81,3 @@ liveWorkspaceRegistry.register({
   order: 6,
   requiresCapabilities: ['canViewReports'] // E.g., for admins/teachers
 });
-

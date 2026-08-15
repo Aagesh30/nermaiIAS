@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLiveSessionContext } from '../../context/LiveSessionContext';
 import { MeetingStateManager } from '../../services/MeetingStateManager';
 import { MeetingWindowState } from '../../services/MeetingTypes';
@@ -78,4 +78,3 @@ export const InitializationTimeline: React.FC = () => {
     </div>
   );
 };
-

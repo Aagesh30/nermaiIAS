@@ -6,7 +6,7 @@ import { TeacherLobby } from '../layouts/lobbies/TeacherLobby';
 import { StudentLobby } from '../layouts/lobbies/StudentLobby';
 import { WaitingRoomLobby } from '../layouts/lobbies/WaitingRoomLobby';
 import { InitializationTimeline } from './InitializationTimeline';
-import { liveSessionService } from '../../../../core/live-core/src';
+import { liveSessionService } from '@nermai/live-core';
 import { meetingLauncher } from '../../services/MeetingLauncherService';
 import { liveEventBus } from './LiveEventBus';
 import { recoveryController } from './RecoveryController';
@@ -85,8 +85,8 @@ export const LiveSessionController: React.FC<{ children: React.ReactNode }> = ({
 
     const unsubPromoted = liveEventBus.on('PARTICIPANT_PROMOTED', (event) => {
       if (event.payload) {
-        import('../../../../core/services').then(({ LiveSessionApi }) => {
-          LiveSessionApi.recordPromotion(sessionId || '', {
+        import('@nermai/api').then(({ LiveSessionApi }) => {
+          LiveSessionApi.recordPromotion(sessionId, {
             nermaiUserId: event.payload.nermaiUserId,
             zoomUserId: event.payload.zoomUserId,
             timestamp: event.payload.timestamp,
@@ -156,4 +156,3 @@ export const LiveSessionController: React.FC<{ children: React.ReactNode }> = ({
   // ── Live / Ended — render role layout ─────────────────────────────────────
   return <>{children}</>;
 };
-

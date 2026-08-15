@@ -647,7 +647,16 @@ app.use("/uploads", (req, res, next) => {
 let lazyApiRouter: any = null;
 app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     if (!lazyApiRouter) {
-        console.log("[Express] Lazy loading API routes...");
+        console.log("[Express] Lazy loading API routes & registering live providers...");
+        try {
+            const { ProviderRegistry } = require("./modules/live-sessions/providers/ProviderRegistry");
+            const { ZoomProvider } = require("./modules/live-sessions/providers/ZoomProvider");
+            const { YouTubeProvider } = require("./modules/live-sessions/providers/YouTubeProvider");
+            ProviderRegistry.registerProvider("zoom", new ZoomProvider());
+            ProviderRegistry.registerProvider("youtube", new YouTubeProvider());
+        } catch (e: any) {
+            console.error("[app.ts] Failed initializing live providers:", e?.message || e);
+        }
         lazyApiRouter = require("./routes").default;
     }
     lazyApiRouter(req, res, next);

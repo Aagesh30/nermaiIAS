@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { useLiveSessionContext } from '../context/LiveSessionContext';
 import { AdminLayout } from './layouts/AdminLayout';
 import { TeacherLayout } from './layouts/TeacherLayout';
@@ -28,5 +28,4 @@ export const RoleLayoutFactory: React.FC = () => {
       return <FallbackLayout />;
   }
 };
-
 

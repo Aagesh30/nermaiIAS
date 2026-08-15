@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, UploadCloud, Link as LinkIcon, Loader2, Plus, Trash2 } from 'lucide-react';
 import { ResourceApi  } from '../core/services';
 import { CourseApi  } from '../core/services';
@@ -352,20 +352,17 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
             {/* Right Column */}
             <div className="space-y-8">
               
-              {/* 4. Visibility & Display */}
+              {/* 4. Target Audience & Display */}
               <section>
-                <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-wider border-b border-gray-800 pb-2">4. Access Rules & Display</h3>
+                <h3 className="text-xs font-bold text-gray-400 mb-4 uppercase tracking-wider border-b border-gray-800 pb-2">4. Access Rules & Target Audience</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">Visibility</label>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">Target Audience *</label>
                     <select value={visibility} onChange={e=>setVisibility(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2 text-white focus:border-red-500 focus:outline-none">
-                      <option value="public">Public (Everyone)</option>
-                      <option value="batch">Specific Batches</option>
-                      <option value="premium">Premium Only (Any paid student)</option>
+                      <option value="public">All Users (Public)</option>
+                      <option value="premium">Paid All (All Paid Students)</option>
+                      <option value="batch">Paid Batch Wise (Specific Batches)</option>
                     </select>
-                    {visibility === 'premium' && (
-                      <p className="text-xs text-slate-500 mt-1.5 leading-snug">Any student who has paid and joined a batch can access this, irrespective of which batch.</p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">Display Group</label>
@@ -425,114 +422,9 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
                   </div>
                 </div>
               </section>
-
-              {/* 5. Distribution Rules (Cascading) */}
-              <section>
-                <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-4">
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">5. Distribution Rules</h3>
-                  <button type="button" onClick={addDistribution} className="text-red-400 hover:text-red-300 text-xs font-semibold flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> Add Rule
-                  </button>
-                </div>
-                
-                <div className="mb-4">
-                  <label className="flex items-center gap-3 cursor-pointer bg-gray-950 p-3 rounded-lg border border-gray-800 hover:border-gray-700 transition-colors">
-                    <input type="checkbox" checked={isGeneral} onChange={e=>setIsGeneral(e.target.checked)} className="w-4 h-4 rounded border-gray-700 text-red-600 focus:ring-red-600 bg-gray-900 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="text-sm text-gray-200 font-medium">Make this a Global Resource</span>
-                      <span className="text-xs text-gray-500 mt-0.5 leading-snug">Available to everyone independently. Does not need to be assigned to a specific course.</span>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="space-y-4">
-                  {distributions.map((dist, idx) => (
-                    <div key={idx} className="p-4 bg-gray-950 border border-gray-800 rounded-xl relative group">
-                      <button type="button" onClick={() => removeDistribution(idx)} className="absolute top-3 right-3 text-gray-600 hover:text-red-500 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      
-                      <div className="pr-8 space-y-3">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Assign to:</label>
-                          <select value={dist.type} onChange={e=>updateDistribution(idx, 'type', e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-white text-sm focus:border-red-500 outline-none">
-                            <option value="course">Entire Course</option>
-                            <option value="subject">Specific Subject</option>
-                            <option value="topic">Specific Topic</option>
-                            <option value="class">Specific Class</option>
-                          </select>
-                        </div>
-
-                        {/* Course Selector (Always required for everything) */}
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Select Course</label>
-                          <select value={dist.courseId} onChange={e=>updateDistribution(idx, 'courseId', e.target.value)} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-white text-sm focus:border-red-500 outline-none">
-                            <option value="">-- Choose Course --</option>
-                            {courses.map(c => <option key={c.id} value={c.id}>{c.title || c.name}</option>)}
-                          </select>
-                        </div>
-
-                        {/* Subject Selector */}
-                        {['subject', 'topic', 'class'].includes(dist.type) && (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Select Subject</label>
-                            <select value={dist.subjectId} onChange={e=>updateDistribution(idx, 'subjectId', e.target.value)} disabled={!dist.courseId} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-white text-sm focus:border-red-500 outline-none disabled:opacity-50">
-                              <option value="">-- Choose Subject --</option>
-                              {subjects.filter(s => s.courseId === dist.courseId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Topic Selector */}
-                        {['topic', 'class'].includes(dist.type) && (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Select Topic</label>
-                            <select value={dist.topicId} onChange={e=>updateDistribution(idx, 'topicId', e.target.value)} disabled={!dist.subjectId} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-white text-sm focus:border-red-500 outline-none disabled:opacity-50">
-                              <option value="">-- Choose Topic --</option>
-                              {topics.filter(t => t.subjectId === dist.subjectId).map(t => <option key={t.id} value={t.id}>{t.name || t.title}</option>)}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Class Selector */}
-                        {['class'].includes(dist.type) && (
-                          <div>
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Select Class</label>
-                            <select value={dist.classId} onChange={e=>updateDistribution(idx, 'classId', e.target.value)} disabled={!dist.topicId} className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-white text-sm focus:border-red-500 outline-none disabled:opacity-50">
-                              <option value="">-- Choose Class --</option>
-                              {classes.filter(c => c.topicId === dist.topicId).map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {distributions.length === 0 && !isGeneral && (
-                    <div className="text-center py-6 border border-dashed border-gray-800 rounded-xl text-gray-500 text-sm">
-                      No distribution rules configured. Asset will be orphaned.
-                    </div>
-                  )}
-                </div>
-              </section>
             </div>
           </div>
         </form>
-
-        {/* Live Preview Bar */}
-        <div className="bg-red-500/5 border-t border-red-500/10 p-3 px-6 text-sm flex items-center gap-3">
-          <span className="text-red-400 font-semibold uppercase tracking-wider text-xs">Distribution Preview:</span>
-          <span className="text-gray-300 truncate">
-            {isGeneral && <span className="bg-gray-800 px-2 py-0.5 rounded mr-2 text-xs">General Library</span>}
-            {distributions.map((d, i) => {
-               if (d.type === 'course' && d.courseId) return <span key={i} className="bg-gray-800 px-2 py-0.5 rounded mr-2 text-xs">Course: {courses.find(c=>c.id===d.courseId)?.name || 'Unknown'}</span>;
-               if (d.type === 'subject' && d.subjectId) return <span key={i} className="bg-gray-800 px-2 py-0.5 rounded mr-2 text-xs">Subject: {subjects.find(s=>s.id===d.subjectId)?.name || 'Unknown'}</span>;
-               if (d.type === 'topic' && d.topicId) return <span key={i} className="bg-gray-800 px-2 py-0.5 rounded mr-2 text-xs">Topic: {topics.find(t=>t.id===d.topicId)?.name || 'Unknown'}</span>;
-               if (d.type === 'class' && d.classId) return <span key={i} className="bg-gray-800 px-2 py-0.5 rounded mr-2 text-xs">Class: {classes.find(c=>c.id===d.classId)?.title || 'Unknown'}</span>;
-               return null;
-            })}
-            {!isGeneral && distributions.length === 0 && <span className="text-gray-500 italic">No valid mappings...</span>}
-          </span>
-        </div>
 
         {/* Footer */}
         <div className="p-5 border-t border-gray-800 bg-gray-950 flex justify-end gap-3 shrink-0">

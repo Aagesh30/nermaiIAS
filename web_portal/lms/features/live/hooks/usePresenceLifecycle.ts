@@ -1,9 +1,9 @@
-﻿import { useEffect, useRef, useCallback } from 'react';
-import { getApiClient } from '../../../core/services';
+import { useEffect, useRef, useCallback } from 'react';
+import { getApiClient } from '@nermai/api';
 import { useLiveSessionContext } from '../context/LiveSessionContext';
 import { liveEventBus } from '../dashboard/orchestration/LiveEventBus';
 import { meetingLauncher } from '../services/MeetingLauncherService';
-import { LiveClassesApi } from '../../../core/services';
+import { LiveClassesApi } from '@nermai/api';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -87,4 +87,3 @@ export function usePresenceLifecycle(sessionId: string | undefined): {
 
   return { leaveSession };
 }
-

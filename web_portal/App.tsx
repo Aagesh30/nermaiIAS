@@ -16,6 +16,7 @@ import {
   Linking
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import * as ScreenCapture from "expo-screen-capture";
 
 // Dynamically load HashRouter only on Web to prevent React Native mobile app crashes on startup
 let HashRouter: any = React.Fragment;
@@ -139,7 +140,7 @@ if (Platform.OS === "web" && typeof document !== "undefined") {
 }
 
 // Configure your Host IP address for local network connections
-const DEFAULT_HOST_IP = "192.168.0.120";
+const DEFAULT_HOST_IP = "10.42.115.38";
 // Timeout in ms for all API calls — 12s gives plenty of room on LAN
 const API_TIMEOUT_MS = 12000;
 
@@ -592,6 +593,128 @@ const getSavedNav = () => {
   return { activeTabVal, erpSubVal, lmsSubVal, crmSubVal, testSubVal, guestTabVal, hasExplicitSub };
 };
 
+// Web screenshot protection helpers
+let webContextMenuListener: any = null;
+let webKeydownListener: any = null;
+let webBlurListener: any = null;
+let webFocusListener: any = null;
+let webStyleElement: any = null;
+
+const enableWebScreenshotProtection = () => {
+  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+
+  if (!webStyleElement) {
+    webStyleElement = document.createElement("style");
+    webStyleElement.id = "screenshot-protection-styles";
+    webStyleElement.innerHTML = `
+      @media print {
+        body {
+          display: none !important;
+        }
+      }
+      body {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+      }
+      img {
+        -webkit-user-drag: none !important;
+        -khtml-user-drag: none !important;
+        -moz-user-drag: none !important;
+        -o-user-drag: none !important;
+        user-drag: none !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(webStyleElement);
+  }
+
+  if (!webContextMenuListener) {
+    webContextMenuListener = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", webContextMenuListener);
+  }
+
+  if (!webKeydownListener) {
+    webKeydownListener = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen") {
+        e.preventDefault();
+        try {
+          navigator.clipboard.writeText("");
+        } catch (_) {}
+        alert("Screenshots are disabled on this platform.");
+      }
+      if (
+        (e.ctrlKey && e.key === "p") ||
+        (e.ctrlKey && e.key === "s") ||
+        (e.ctrlKey && e.shiftKey && e.key === "I") ||
+        (e.ctrlKey && e.shiftKey && e.key === "i") ||
+        e.key === "F12" ||
+        (e.ctrlKey && e.key === "u") ||
+        (e.ctrlKey && e.shiftKey && e.key === "C") ||
+        (e.ctrlKey && e.shiftKey && e.key === "c")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", webKeydownListener, true);
+  }
+
+  if (!webBlurListener) {
+    webBlurListener = () => {
+      const rootDiv = document.getElementById("root") || document.body;
+      if (rootDiv) {
+        rootDiv.style.filter = "blur(15px)";
+        rootDiv.style.transition = "filter 0.2s ease";
+      }
+    };
+    window.addEventListener("blur", webBlurListener);
+  }
+
+  if (!webFocusListener) {
+    webFocusListener = () => {
+      const rootDiv = document.getElementById("root") || document.body;
+      if (rootDiv) {
+        rootDiv.style.filter = "none";
+      }
+    };
+    window.addEventListener("focus", webFocusListener);
+  }
+};
+
+const disableWebScreenshotProtection = () => {
+  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+
+  if (webStyleElement) {
+    webStyleElement.remove();
+    webStyleElement = null;
+  }
+  if (webContextMenuListener) {
+    window.removeEventListener("contextmenu", webContextMenuListener);
+    webContextMenuListener = null;
+  }
+  if (webKeydownListener) {
+    window.removeEventListener("keydown", webKeydownListener, true);
+    webKeydownListener = null;
+  }
+  if (webBlurListener) {
+    window.removeEventListener("blur", webBlurListener);
+    webBlurListener = null;
+  }
+  if (webFocusListener) {
+    window.removeEventListener("focus", webFocusListener);
+    webFocusListener = null;
+  }
+
+  const rootDiv = document.getElementById("root") || document.body;
+  if (rootDiv) {
+    rootDiv.style.filter = "none";
+  }
+};
+
 function MainApp() {
   const initialNavRef = useRef(getSavedNav());
   const initialNav = initialNavRef.current;
@@ -630,6 +753,35 @@ function MainApp() {
       (global as any).globalShowAlert = globalShowAlert;
     }
   }, []);
+
+  useEffect(() => {
+    const shouldBlock = user && user.role !== "guest";
+    if (shouldBlock) {
+      if (Platform.OS !== "web") {
+        ScreenCapture.preventScreenCaptureAsync().catch(err => {
+          console.warn("Failed to prevent screen capture:", err);
+        });
+      } else {
+        enableWebScreenshotProtection();
+      }
+    } else {
+      if (Platform.OS !== "web") {
+        ScreenCapture.allowScreenCaptureAsync().catch(err => {
+          console.warn("Failed to allow screen capture:", err);
+        });
+      } else {
+        disableWebScreenshotProtection();
+      }
+    }
+
+    return () => {
+      if (Platform.OS !== "web") {
+        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      } else {
+        disableWebScreenshotProtection();
+      }
+    };
+  }, [user]);
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
@@ -1062,6 +1214,8 @@ function MainApp() {
   const [lmsRecordedClasses, setLmsRecordedClasses] = useState<any[]>([]);
   const [lmsDailyContent, setLmsDailyContent] = useState<any[]>([]);
   const [lmsLoading, setLmsLoading] = useState(false);
+  const [liveSessionsLoading, setLiveSessionsLoading] = useState(false);
+  const [recordedClassesLoading, setRecordedClassesLoading] = useState(false);
   const [lmsResourceError, setLmsResourceError] = useState<string | null>(null);
   const [lmsCourses, setLmsCourses] = useState<any[]>([]);
   const [erpBatches, setErpBatches] = useState<any[]>([]);
@@ -1191,6 +1345,10 @@ function MainApp() {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
   const [showDocModal, setShowDocModal] = useState(false);
+  const [showConstituencyModal, setShowConstituencyModal] = useState(false);
+  const [showLedgerSubjectModal, setShowLedgerSubjectModal] = useState(false);
+  const [showLedgerTopicModal, setShowLedgerTopicModal] = useState(false);
+  const [showLedgerExamModal, setShowLedgerExamModal] = useState(false);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string>("Preview");
   const [editingStaff, setEditingStaff] = useState<any | null>(null);
@@ -1209,6 +1367,7 @@ function MainApp() {
   const [ledgerSubjectFilter, setLedgerSubjectFilter] = useState("");
   const [ledgerTopicFilter, setLedgerTopicFilter] = useState("");
   const [resultsCategoryFilter, setResultsCategoryFilter] = useState("");
+  const [testModeFilter, setTestModeFilter] = useState("all");
   const [knownSubjects, setKnownSubjects] = useState<string[]>([]);
   const [knownTopics, setKnownTopics] = useState<Record<string, string[]>>({});
   const [showManualSubjectDropdown, setShowManualSubjectDropdown] = useState(false);
@@ -1306,7 +1465,7 @@ function MainApp() {
     const end = new Date(start.getTime() + 60 * 60 * 1000);
     const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0") + "T" + String(start.getHours()).padStart(2, "0") + ":" + String(Math.floor(start.getMinutes() / 5) * 5).padStart(2, "0");
     const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
-    return { title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "" };
+    return { title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" };
   });
   const [pdfBase64, setPdfBase64] = useState("");
   const [akBase64, setAkBase64] = useState("");
@@ -2073,7 +2232,7 @@ function MainApp() {
     const end = new Date(start.getTime() + 60 * 60 * 1000);
     const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0") + "T" + String(start.getHours()).padStart(2, "0") + ":" + String(Math.floor(start.getMinutes() / 5) * 5).padStart(2, "0");
     const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
-    return { title: "", description: "", duration: "", passingMarks: "", startTime: startStr, endTime: endStr, selectedQIds: [] as string[], targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "" };
+    return { title: "", description: "", duration: "", passingMarks: "", startTime: startStr, endTime: endStr, selectedQIds: [] as string[], targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" };
   });
 
   // Test Feedback Modal & list states
@@ -2306,18 +2465,18 @@ function MainApp() {
               <View style={{ gap: 10 }}>
                 {/* Header */}
                 <View style={{ alignItems: "center", borderBottomWidth: 1, borderColor: "#e0e0e0", paddingBottom: 10 }}>
-                  <Text style={{ fontSize: 16, fontWeight: "bold", color: "#212121", letterSpacing: 0.5 }}>NERMAI IAS ACADEMY</Text>
-                  <Text style={{ fontSize: 11, color: "#757575", fontWeight: "bold", marginTop: 2, letterSpacing: 2 }}>HALL TICKET / ADMIT CARD</Text>
+                  <Text style={{ fontSize: 19, fontWeight: "bold", color: "#212121", letterSpacing: 0.5 }}>NERMAI IAS ACADEMY</Text>
+                  <Text style={{ fontSize: 13, color: "#757575", fontWeight: "bold", marginTop: 2, letterSpacing: 2 }}>HALL TICKET / ADMIT CARD</Text>
                 </View>
 
                 {/* Candidate Details */}
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 15 }}>
                   <View style={{ flex: 1, gap: 4 }}>
-                    <Text style={{ fontSize: 10, color: "#757575", fontWeight: "bold" }}>CANDIDATE DETAILS</Text>
-                    <Text style={{ fontSize: 14, fontWeight: "bold", color: "#212121" }}>{getStudentName(student)}</Text>
-                    <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Roll No:</Text> {student.rollNumber || student.loginUsername || "—"}</Text>
-                    <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Course:</Text> {student.course}</Text>
-                    <Text style={{ fontSize: 11, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Batch:</Text> {student.batch || "General"}</Text>
+                    <Text style={{ fontSize: 12, color: "#757575", fontWeight: "bold" }}>CANDIDATE DETAILS</Text>
+                    <Text style={{ fontSize: 16, fontWeight: "bold", color: "#212121" }}>{getStudentName(student)}</Text>
+                    <Text style={{ fontSize: 13, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Roll No:</Text> {student.rollNumber || student.loginUsername || "—"}</Text>
+                    <Text style={{ fontSize: 13, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Course:</Text> {student.course}</Text>
+                    <Text style={{ fontSize: 13, color: "#424242" }}><Text style={{ fontWeight: "bold" }}>Batch:</Text> {student.batch || "General"}</Text>
                   </View>
                   <View style={{ width: 65, height: 75, borderWidth: 1.5, borderColor: "#bdbdbd", borderRadius: 4, backgroundColor: "#eeeeee", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     {student.photoBase64 && student.photoBase64 !== "test" ? (
@@ -2327,7 +2486,7 @@ function MainApp() {
                     ) : (
                       <>
                         <Ionicons name="person" size={30} color="#9e9e9e" />
-                        <Text style={{ fontSize: 7, color: "#9e9e9e", marginTop: 4, fontWeight: "bold" }}>PHOTO</Text>
+                        <Text style={{ fontSize: 9, color: "#9e9e9e", marginTop: 4, fontWeight: "bold" }}>PHOTO</Text>
                       </>
                     )}
                   </View>
@@ -2335,49 +2494,49 @@ function MainApp() {
 
                 {/* Exam Details */}
                 <View style={{ backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e0e0e0", borderRadius: 6, padding: 12, gap: 6 }}>
-                  <Text style={{ fontSize: 10, color: "#c62828", fontWeight: "bold" }}>EXAMINATION DETAILS</Text>
-                  <Text style={{ fontSize: 12, fontWeight: "bold", color: "#212121" }}>{examName || "UPSC Mock Exam"}</Text>
+                  <Text style={{ fontSize: 12, color: "#c62828", fontWeight: "bold" }}>EXAMINATION DETAILS</Text>
+                  <Text style={{ fontSize: 14, fontWeight: "bold", color: "#212121" }}>{examName || "UPSC Mock Exam"}</Text>
 
                   <View style={{ flexDirection: "row", marginTop: 4 }}>
-                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#616161", width: 80 }}>Date:</Text>
-                    <Text style={{ fontSize: 11, color: "#212121", flex: 1 }}>{date || "24/05/2026"}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#616161", width: 80 }}>Date:</Text>
+                    <Text style={{ fontSize: 13, color: "#212121", flex: 1 }}>{date || "24/05/2026"}</Text>
                   </View>
                   <View style={{ flexDirection: "row" }}>
-                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#616161", width: 80 }}>Time:</Text>
-                    <Text style={{ fontSize: 11, color: "#212121", flex: 1 }}>{time || "09:30 AM - 12:30 PM"}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#616161", width: 80 }}>Time:</Text>
+                    <Text style={{ fontSize: 13, color: "#212121", flex: 1 }}>{time || "09:30 AM - 12:30 PM"}</Text>
                   </View>
                   <View style={{ flexDirection: "row" }}>
-                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#616161", width: 80 }}>Venue:</Text>
-                    <Text style={{ fontSize: 11, color: "#212121", flex: 1 }}>{venue || "Academy Campus"}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#616161", width: 80 }}>Venue:</Text>
+                    <Text style={{ fontSize: 13, color: "#212121", flex: 1 }}>{venue || "Academy Campus"}</Text>
                   </View>
                 </View>
 
                 {/* Instructions Placeholder / Short Instructions */}
                 {needsTwoPages ? (
                   <View style={{ gap: 4, padding: 8, backgroundColor: "#fffde7", borderWidth: 1, borderColor: "#fff59d", borderRadius: 6 }}>
-                    <Text style={{ fontSize: 9, color: "#f57f17", fontWeight: "bold" }}> IMPORTANT INSTRUCTIONS</Text>
-                    <Text style={{ fontSize: 8, color: "#5d4037", fontWeight: "bold", lineHeight: 11 }}>Please refer to PAGE 2 for complete exam instructions, rules and code of conduct.</Text>
+                    <Text style={{ fontSize: 11, color: "#f57f17", fontWeight: "bold" }}> IMPORTANT INSTRUCTIONS</Text>
+                    <Text style={{ fontSize: 10, color: "#5d4037", fontWeight: "bold", lineHeight: 13 }}>Please refer to PAGE 2 for complete exam instructions, rules and code of conduct.</Text>
                   </View>
                 ) : instructions ? (
                   <View style={{ gap: 4 }}>
-                    <Text style={{ fontSize: 10, color: "#757575", fontWeight: "bold" }}>IMPORTANT INSTRUCTIONS</Text>
-                    <Text style={{ fontSize: 8, color: "#616161", lineHeight: 11 }} numberOfLines={4} selectable>{instructions}</Text>
+                    <Text style={{ fontSize: 12, color: "#757575", fontWeight: "bold" }}>IMPORTANT INSTRUCTIONS</Text>
+                    <Text style={{ fontSize: 10, color: "#616161", lineHeight: 13 }} numberOfLines={4} selectable>{instructions}</Text>
                   </View>
                 ) : null}
               </View>
 
               {/* Signatures */}
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", borderTopWidth: 1, borderColor: "#e0e0e0", paddingTop: 10 }}>
-                <Text style={{ fontSize: 9, color: "#757575", fontWeight: "500" }}>System Generated Hall Ticket</Text>
+                <Text style={{ fontSize: 11, color: "#757575", fontWeight: "500" }}>System Generated Hall Ticket</Text>
                 <View style={{ alignItems: "center" }}>
                   <View style={{ width: 120, borderTopWidth: 1.5, borderColor: "#222", marginBottom: 4 }} />
-                  <Text style={{ fontSize: 9, color: "#757575", fontWeight: "bold" }}>Candidate's Signature</Text>
+                  <Text style={{ fontSize: 11, color: "#757575", fontWeight: "bold" }}>Candidate's Signature</Text>
                 </View>
               </View>
 
               {/* Page Indicator */}
               <View style={{ position: "absolute", bottom: 4, right: 10 }}>
-                <Text style={{ fontSize: 8, color: "#9e9e9e", fontWeight: "bold" }}>{needsTwoPages ? "Page 1 of 2" : "Page 1 of 1"}</Text>
+                <Text style={{ fontSize: 10, color: "#9e9e9e", fontWeight: "bold" }}>{needsTwoPages ? "Page 1 of 2" : "Page 1 of 1"}</Text>
               </View>
             </>
           ) : (
@@ -2385,30 +2544,30 @@ function MainApp() {
               <View style={{ flex: 1, gap: 10 }}>
                 {/* Page 2: Instructions Only */}
                 <View style={{ alignItems: "center", borderBottomWidth: 1, borderColor: "#e0e0e0", paddingBottom: 10 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "bold", color: "#212121", letterSpacing: 0.5 }}>NERMAI IAS ACADEMY</Text>
-                  <Text style={{ fontSize: 10, color: "#757575", fontWeight: "bold", marginTop: 2, letterSpacing: 1 }}>CANDIDATE INSTRUCTIONS (CONTINUED)</Text>
+                  <Text style={{ fontSize: 17, fontWeight: "bold", color: "#212121", letterSpacing: 0.5 }}>NERMAI IAS ACADEMY</Text>
+                  <Text style={{ fontSize: 12, color: "#757575", fontWeight: "bold", marginTop: 2, letterSpacing: 1 }}>CANDIDATE INSTRUCTIONS (CONTINUED)</Text>
                 </View>
 
                 <View style={{ flex: 1, marginVertical: 4, gap: 6 }}>
-                  <Text style={{ fontSize: 11, color: "#c62828", fontWeight: "bold" }}>RULES & CODE OF CONDUCT:</Text>
+                  <Text style={{ fontSize: 13, color: "#c62828", fontWeight: "bold" }}>RULES & CODE OF CONDUCT:</Text>
                   <ScrollView nestedScrollEnabled={true} style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 9, color: "#424242", lineHeight: 13 }} selectable>{instructions}</Text>
+                    <Text style={{ fontSize: 11, color: "#424242", lineHeight: 15 }} selectable>{instructions}</Text>
                   </ScrollView>
                 </View>
               </View>
 
               {/* Signatures repeated on Page 2 for official validation */}
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", borderTopWidth: 1, borderColor: "#e0e0e0", paddingTop: 10 }}>
-                <Text style={{ fontSize: 9, color: "#757575", fontWeight: "500" }}>System Generated Hall Ticket</Text>
+                <Text style={{ fontSize: 11, color: "#757575", fontWeight: "500" }}>System Generated Hall Ticket</Text>
                 <View style={{ alignItems: "center" }}>
                   <View style={{ width: 120, borderTopWidth: 1.5, borderColor: "#222", marginBottom: 4 }} />
-                  <Text style={{ fontSize: 9, color: "#757575", fontWeight: "bold" }}>Candidate's Signature</Text>
+                  <Text style={{ fontSize: 11, color: "#757575", fontWeight: "bold" }}>Candidate's Signature</Text>
                 </View>
               </View>
 
               {/* Page Indicator */}
               <View style={{ position: "absolute", bottom: 4, right: 10 }}>
-                <Text style={{ fontSize: 8, color: "#9e9e9e", fontWeight: "bold" }}>Page 2 of 2</Text>
+                <Text style={{ fontSize: 10, color: "#9e9e9e", fontWeight: "bold" }}>Page 2 of 2</Text>
               </View>
             </>
           )}
@@ -2492,6 +2651,8 @@ function MainApp() {
   // without user or hostIp actually changing
   const loadedForUserRef = useRef<string | null>(null);
 
+
+
   // Centralized Logout Helper — ensures manual logout completely ends session
   const performLogout = async () => {
     try {
@@ -2506,6 +2667,8 @@ function MainApp() {
     }
     setShowHamburger(false);
     clearExamState(); // Ensure exam screen is gone when logging out
+    setShowFeedbackModal(false);
+    setTestFeedbackModal({ visible: false, testId: "", testTitle: "", rating: 5, comments: "" });
     setUser(null);
     setGuestTab("home");
     setActiveTab("dashboard");
@@ -2746,6 +2909,49 @@ function MainApp() {
       loadPendingApprovals();
     }
   }, [erpSub, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (lmsSub === "daily-content") {
+      loadLmsDailyContent();
+    }
+  }, [lmsSub, user, activeTab]);
+
+  // ── Universal Synchronization across all tabs & window focus ──
+  useEffect(() => {
+    if (!user) return;
+    if (activeTab === "dashboard") {
+      loadAnnouncements();
+      loadNotifications();
+      loadLiveSessions();
+    } else if (activeTab === "lms") {
+      loadLiveSessions();
+      loadCourses();
+      loadLmsDailyContent();
+      loadLmsResources();
+    } else if (activeTab === "test") {
+      loadTests();
+    } else if (activeTab === "erp" && isAdmin) {
+      loadStudents();
+      loadBatches();
+    }
+  }, [activeTab, user]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const syncOnFocus = () => {
+        if (user) {
+          loadNotifications();
+          loadAnnouncements();
+          loadLiveSessions();
+          if (activeTab === "test") loadTests();
+          if (activeTab === "lms") loadCourses();
+        }
+      };
+      window.addEventListener("focus", syncOnFocus);
+      return () => window.removeEventListener("focus", syncOnFocus);
+    }
+  }, [user, activeTab]);
 
   useEffect(() => {
     if (!user) return;
@@ -3479,17 +3685,21 @@ function MainApp() {
 
   const loadLiveSessions = async () => {
     if (!user || user.role === "guest") return;
+    setLiveSessionsLoading(true);
     try {
       const res = await api.get("/live-sessions");
       setLmsLiveSessions(res?.data || res || []);
     } catch (e) {
       console.log("Failed loading live sessions:", e);
       setLmsLiveSessions([]);
+    } finally {
+      setLiveSessionsLoading(false);
     }
   };
 
   const loadRecordedClasses = async () => {
     if (!user || user.role === "guest") return;
+    setRecordedClassesLoading(true);
     try {
       // Fetch all classes from courses module (includes recording links)
       const res = await api.get("/classes");
@@ -3500,6 +3710,8 @@ function MainApp() {
     } catch (e) {
       console.log("Failed loading recorded classes:", e);
       setLmsRecordedClasses([]);
+    } finally {
+      setRecordedClassesLoading(false);
     }
   };
 
@@ -3868,39 +4080,25 @@ function MainApp() {
   // ── LMS Resources / Live Class / Recorded Class Creation & Deletion Handlers ──
 
   const handleSaveResource = async () => {
-    const { title, description, type, categoryId, displayGroup, visibility, isGeneral, offlineAvailable, isSecure, targetBatchIds, uploadMode, file, externalUrl, distributions } = resourceForm;
+    const { title, description, type, categoryId, displayGroup, visibility, offlineAvailable, isSecure, targetBatchIds, uploadMode, file, externalUrl } = resourceForm;
     if (!title || !description) {
       Alert.alert("Required", "Please enter Title and Description.");
       return;
     }
 
     try {
-      const courseIds = new Set<string>();
-      const subjectIds = new Set<string>();
-      const topicIds = new Set<string>();
-      const classIds = new Set<string>();
-      const batchIds = new Set<string>();
+      const finalVisibility = visibility || "public";
+      let finalTargetBatchIds: string[] = [];
 
-      distributions.forEach((d: any) => {
-        if (d.type === "course" && d.courseId) courseIds.add(d.courseId);
-        if (d.type === "subject" && d.subjectId) subjectIds.add(d.subjectId);
-        if (d.type === "topic" && d.topicId) topicIds.add(d.topicId);
-        if (d.type === "class" && d.classId) classIds.add(d.classId);
-        if (d.type === "batch") {
-          if (d.batchTargetType === "all") batchIds.add("all");
-          else if (d.batchTargetType === "all_paid") batchIds.add("all_paid");
-          else if (d.batchTargetType === "all_free") batchIds.add("all_free");
-          else if (d.batchTargetType === "erp") {
-            erpBatches.forEach(b => batchIds.add(b.id || b._id));
-          } else if (d.batchTargetType === "select" && d.selectedBatchIds) {
-            d.selectedBatchIds.forEach((id: string) => batchIds.add(id));
-          }
+      if (finalVisibility === "premium") {
+        finalTargetBatchIds = ["all_paid"];
+      } else if (finalVisibility === "batch") {
+        if (targetBatchIds) {
+          finalTargetBatchIds = typeof targetBatchIds === "string"
+            ? targetBatchIds.split(",").map((s: string) => s.trim()).filter(Boolean)
+            : (Array.isArray(targetBatchIds) ? targetBatchIds : []);
         }
-      });
-
-      const hasBatchTarget = distributions.some((d: any) => d.type === "batch");
-      const finalVisibility = hasBatchTarget ? "batch" : visibility;
-      const finalTargetBatchIds = hasBatchTarget ? Array.from(batchIds) : (visibility === "batch" && targetBatchIds ? targetBatchIds.split(",").map((s: string) => s.trim()) : []);
+      }
 
       if (editingResource) {
         // UPDATE
@@ -3912,14 +4110,14 @@ function MainApp() {
           displayGroup,
           visibility: finalVisibility,
           status: "published",
-          isGeneral,
+          isGeneral: true,
           offlineAvailable,
           isSecure: finalVisibility === "public" ? isSecure : true,
           targetBatchIds: finalTargetBatchIds,
-          courseIds: Array.from(courseIds),
-          subjectIds: Array.from(subjectIds),
-          topicIds: Array.from(topicIds),
-          classIds: Array.from(classIds)
+          courseIds: [],
+          subjectIds: [],
+          topicIds: [],
+          classIds: []
         };
         await api.put(`/resources/${editingResource.id}`, updatePayload);
 
@@ -3948,17 +4146,17 @@ function MainApp() {
         formData.append("displayGroup", displayGroup);
         formData.append("visibility", finalVisibility);
         formData.append("status", "published");
-        formData.append("isGeneral", isGeneral.toString());
+        formData.append("isGeneral", "true");
         formData.append("offlineAvailable", offlineAvailable.toString());
         formData.append("isSecure", (finalVisibility === "public" ? isSecure : true).toString());
 
-        if (finalTargetBatchIds.length > 0 || finalVisibility === "batch") {
+        if (finalTargetBatchIds.length > 0 || finalVisibility === "batch" || finalVisibility === "premium") {
           formData.append("targetBatchIds", JSON.stringify(finalTargetBatchIds));
         }
-        formData.append("courseIds", JSON.stringify(Array.from(courseIds)));
-        formData.append("subjectIds", JSON.stringify(Array.from(subjectIds)));
-        formData.append("topicIds", JSON.stringify(Array.from(topicIds)));
-        formData.append("classIds", JSON.stringify(Array.from(classIds)));
+        formData.append("courseIds", JSON.stringify([]));
+        formData.append("subjectIds", JSON.stringify([]));
+        formData.append("topicIds", JSON.stringify([]));
+        formData.append("classIds", JSON.stringify([]));
 
         if (uploadMode === "file" && file) {
           formData.append("file", file);
@@ -3973,8 +4171,9 @@ function MainApp() {
 
       setShowResourceModal(false);
       loadLmsResources();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to save resource.");
+    } catch (err: any) {
+      console.error("Save Resource error:", err);
+      Alert.alert("Error", err.message || "Failed to save learning asset.");
     }
   };
 
@@ -4162,35 +4361,54 @@ function MainApp() {
   };
 
   const handleDeleteClass = async (classId: string, isLive: boolean, sessionId?: string) => {
-    Alert.alert(
-      "Delete Class",
-      "Are you sure you want to delete this class?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              if (sessionId) {
-                await api.delete(`/live-sessions/${sessionId}`).catch(() => { });
-              }
-              if (classId) {
-                await api.delete(`/classes/${classId}`).catch(() => { });
-              }
-              Alert.alert("Success", "Class deleted successfully.");
-              if (isLive) {
-                loadLiveSessions();
-              } else {
-                loadRecordedClasses();
-              }
-            } catch (e: any) {
-              Alert.alert("Error", e.message || "Failed to delete class.");
-            }
+    const doDelete = async () => {
+      try {
+        let deleted = false;
+        const targetId = sessionId || classId;
+
+        if (targetId) {
+          await api.delete(`/live-sessions/${targetId}`).catch((err) => console.warn("Live session delete notice:", err));
+          await api.delete(`/courses/classes/${targetId}`).catch((err) => console.warn("Course class delete notice:", err));
+          await api.delete(`/classes/${targetId}`).catch(() => { });
+          deleted = true;
+        }
+
+        if (deleted) {
+          if (typeof window !== "undefined") {
+            alert("Class deleted successfully.");
+          } else {
+            Alert.alert("Success", "Class deleted successfully.");
           }
         }
-      ]
-    );
+
+        if (isLive) {
+          loadLiveSessions();
+        } else {
+          loadRecordedClasses();
+        }
+      } catch (e: any) {
+        if (typeof window !== "undefined") {
+          alert(e.message || "Failed to delete class.");
+        } else {
+          Alert.alert("Error", e.message || "Failed to delete class.");
+        }
+      }
+    };
+
+    if (typeof window !== "undefined" && window.confirm) {
+      if (window.confirm("Are you sure you want to delete this class?")) {
+        await doDelete();
+      }
+    } else {
+      Alert.alert(
+        "Delete Class",
+        "Are you sure you want to delete this class?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: doDelete }
+        ]
+      );
+    }
   };
 
 
@@ -4623,7 +4841,8 @@ function MainApp() {
         requireFeedback: newPdfTest.requireFeedback,
         testType: newPdfTest.testType || "mock",
         subject: newPdfTest.subject || "",
-        topic: newPdfTest.topic || ""
+        topic: newPdfTest.topic || "",
+        testMode: newPdfTest.testMode || "online"
       });
       if (newPdfTest.subject) {
         setKnownSubjects(prev => prev.includes(newPdfTest.subject) ? prev : [...prev, newPdfTest.subject]);
@@ -4643,7 +4862,7 @@ function MainApp() {
       const end = new Date(start.getTime() + 60 * 60 * 1000);
       const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0") + "T" + String(start.getHours()).padStart(2, "0") + ":" + String(Math.floor(start.getMinutes() / 5) * 5).padStart(2, "0");
       const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
-      setNewPdfTest({ title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "" });
+      setNewPdfTest({ title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" });
       setTestSub("available");
       loadTests();
     } catch (e: any) {
@@ -4690,6 +4909,10 @@ function MainApp() {
     setReviewData(null);
     setExploredQuestions(new Set());
     setShowInstructions(false);
+    setWaitingRoomTest(null);
+    setWaitingRoomTimeLeft(0);
+    setPreviewImageUri(null);
+    setPreviewImageTitle("");
     tabLeaveCountRef.current = 0;
   };
 
@@ -5393,7 +5616,8 @@ function MainApp() {
         requireFeedback: newTest.requireFeedback,
         testType: newTest.testType || "mock",
         subject: newTest.subject || "",
-        topic: newTest.topic || ""
+        topic: newTest.topic || "",
+        testMode: newTest.testMode || "online"
       });
       if (newTest.subject) {
         setKnownSubjects(prev => prev.includes(newTest.subject) ? prev : [...prev, newTest.subject]);
@@ -5402,7 +5626,7 @@ function MainApp() {
         }
       }
       Alert.alert("Success", "Mock Test created & published!");
-      setNewTest({ title: "", description: "", duration: "", passingMarks: "", startTime: "", endTime: "", selectedQIds: [], targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "" });
+      setNewTest({ title: "", description: "", duration: "", passingMarks: "", startTime: "", endTime: "", selectedQIds: [], targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" });
       setManualQuestionsJson("");
       setManualNumQuestions("");
       loadTests();
@@ -7083,6 +7307,15 @@ function MainApp() {
                     ))}
                   </View>
 
+                  <Text style={[styles.label, darkMode && styles.labelDark]}>Test Mode:</Text>
+                  <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
+                    {[{ label: "🌐 Online", value: "online" }, { label: "🏢 Offline", value: "offline" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
+                      <TouchableOpacity key={modeOpt.value} onPress={() => setNewTest({ ...newTest, testMode: modeOpt.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
+                        <Text style={{ fontSize: 11, fontWeight: "bold", color: (newTest.testMode || "online") === modeOpt.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{modeOpt.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
                   <Text style={[styles.label, darkMode && styles.labelDark]}>Subject Name:</Text>
                   {(() => {
                     const uniqueSubjects = [...new Set(lmsSubjects.map(s => s.name || s.title || ""))].filter(Boolean);
@@ -7771,33 +8004,69 @@ function MainApp() {
                       </select>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Visibility</Text>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Audience *</Text>
                       <select
-                        value={resourceForm.visibility}
-                        onChange={e => setResourceForm({ ...resourceForm, visibility: e.target.value })}
+                        value={resourceForm.visibility === "batch" ? "batch" : (resourceForm.visibility === "premium" ? "premium" : "public")}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setResourceForm({
+                            ...resourceForm,
+                            visibility: val,
+                            targetBatchIds: val === "premium" ? "all_paid" : (val === "public" ? "" : resourceForm.targetBatchIds)
+                          });
+                        }}
                         style={{
                           width: "100%", height: 38, borderRadius: 8, padding: 8,
                           backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="public">Public</option>
-                        <option value="private">Private (Admin only)</option>
-                        <option value="batch">Specific Batch</option>
+                        <option value="public">All Users (Public)</option>
+                        <option value="premium">Paid All (All Paid Students)</option>
+                        <option value="batch">Paid Batch Wise (Specific Batches)</option>
                       </select>
                     </View>
                   </View>
 
                   {resourceForm.visibility === "batch" && (
-                    <View>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Batch Names (comma separated)</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="e.g. IAS Regular 2026, TNPSC Morning Group"
-                        placeholderTextColor={darkMode ? "#666" : "#999"}
-                        value={resourceForm.targetBatchIds}
-                        onChangeText={txt => setResourceForm({ ...resourceForm, targetBatchIds: txt })}
-                      />
+                    <View style={{ backgroundColor: darkMode ? "#222" : "#f9f9f9", padding: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0" }}>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 6 }]}>Select Target Batches</Text>
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {erpBatches.length === 0 ? (
+                          <Text style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>No ERP batches found. Asset will be accessible to all batch students.</Text>
+                        ) : (
+                          erpBatches.map((b: any) => {
+                            const batchId = b.id || b._id;
+                            const batchName = b.batchName || b.name || "Unnamed Batch";
+                            const currentBatchList = (resourceForm.targetBatchIds || "").split(",").map(s => s.trim()).filter(Boolean);
+                            const isSelected = currentBatchList.includes(batchId) || resourceForm.targetBatchIds === "all";
+                            const toggleBatch = () => {
+                              let updated: string[];
+                              if (isSelected) {
+                                updated = currentBatchList.filter(id => id !== batchId && id !== "all");
+                              } else {
+                                updated = [...currentBatchList.filter(id => id !== "all"), batchId];
+                              }
+                              setResourceForm({ ...resourceForm, targetBatchIds: updated.join(",") });
+                            };
+                            return (
+                              <TouchableOpacity
+                                key={batchId}
+                                onPress={toggleBatch}
+                                style={{
+                                  paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6,
+                                  borderWidth: 1, borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#ccc"),
+                                  backgroundColor: isSelected ? (darkMode ? "#3e1c1c" : "#ffebee") : (darkMode ? "#1a1a1a" : "#fff")
+                                }}
+                              >
+                                <Text style={{ fontSize: 11, fontWeight: isSelected ? "bold" : "normal", color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#333") }}>
+                                  {isSelected ? "✓ " : ""}{batchName}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })
+                        )}
+                      </View>
                     </View>
                   )}
 
@@ -7855,218 +8124,6 @@ function MainApp() {
                       />
                     </View>
                   )}
-
-                  {/* Distribution Management */}
-                  <View style={{ borderTopWidth: 1, borderColor: darkMode ? "#444" : "#eee", paddingTop: 10 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                      <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#fff" : "#212121" }}>Distribution Permissions</Text>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setResourceForm({
-                            ...resourceForm,
-                            distributions: [...resourceForm.distributions, { type: "course", courseId: "", subjectId: "", topicId: "", classId: "" }]
-                          });
-                        }}
-                        style={{ backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 }}
-                      >
-                        <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>+ Add Target</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {resourceForm.distributions.length === 0 ? (
-                      <Text style={{ fontSize: 11, color: darkMode ? "#888" : "#999", fontStyle: "italic" }}>
-                        No target distributions added. This asset will be general reference.
-                      </Text>
-                    ) : (
-                      <View style={{ gap: 8 }}>
-                        {resourceForm.distributions.map((dist: any, index: number) => {
-                          const updateDist = (field: string, val: any) => {
-                            const updated = [...resourceForm.distributions];
-                            updated[index][field] = val;
-                            if (field === "type") {
-                              updated[index].courseId = "";
-                              updated[index].subjectId = "";
-                              updated[index].topicId = "";
-                              updated[index].classId = "";
-                              updated[index].batchTargetType = "all";
-                              updated[index].selectedBatchIds = [];
-                            }
-                            if (field === "courseId") {
-                              updated[index].subjectId = "";
-                              updated[index].topicId = "";
-                              updated[index].classId = "";
-                            }
-                            if (field === "subjectId") {
-                              updated[index].topicId = "";
-                              updated[index].classId = "";
-                            }
-                            if (field === "topicId") {
-                              updated[index].classId = "";
-                            }
-                            setResourceForm({ ...resourceForm, distributions: updated });
-                          };
-
-                          const deleteDist = () => {
-                            setResourceForm({
-                              ...resourceForm,
-                              distributions: resourceForm.distributions.filter((_: any, idx: number) => idx !== index)
-                            });
-                          };
-
-                          return (
-                            <View key={index} style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", alignItems: "center", backgroundColor: darkMode ? "#222" : "#fcfcfc", padding: 8, borderRadius: 8, borderWidth: 0.5, borderColor: darkMode ? "#444" : "#ddd" }}>
-                              <select
-                                value={dist.type}
-                                onChange={e => updateDist("type", e.target.value)}
-                                style={{
-                                  height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                  backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                  border: "1px solid #ccc"
-                                }}
-                              >
-                                <option value="course">Course</option>
-                                <option value="subject">Subject</option>
-                                <option value="topic">Topic</option>
-                                <option value="class">Class</option>
-                                <option value="batch">Target Batch</option>
-                              </select>
-
-                              {/* Course Select */}
-                              {dist.type !== "batch" && (
-                                <select
-                                  value={dist.courseId}
-                                  onChange={e => updateDist("courseId", e.target.value)}
-                                  style={{
-                                    height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                    backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                    border: "1px solid #ccc"
-                                  }}
-                                >
-                                  <option value="">-- Course --</option>
-                                  {lmsCourses.map(c => <option key={c.id} value={c.id}>{c.title || c.name}</option>)}
-                                </select>
-                              )}
-
-                              {/* Subject Select */}
-                              {dist.type !== "batch" && ["subject", "topic", "class"].includes(dist.type) && (
-                                <select
-                                  value={dist.subjectId}
-                                  onChange={e => updateDist("subjectId", e.target.value)}
-                                  style={{
-                                    height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                    backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                    border: "1px solid #ccc"
-                                  }}
-                                >
-                                  <option value="">-- Subject --</option>
-                                  {lmsSubjects.filter(s => s.courseId === dist.courseId).map(s => (
-                                    <option key={s.id} value={s.id}>{s.name || s.title}</option>
-                                  ))}
-                                </select>
-                              )}
-
-                              {/* Topic Select */}
-                              {dist.type !== "batch" && ["topic", "class"].includes(dist.type) && (
-                                <select
-                                  value={dist.topicId}
-                                  onChange={e => updateDist("topicId", e.target.value)}
-                                  style={{
-                                    height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                    backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                    border: "1px solid #ccc"
-                                  }}
-                                >
-                                  <option value="">-- Topic --</option>
-                                  {lmsTopics.filter(t => t.subjectId === dist.subjectId).map(t => (
-                                    <option key={t.id} value={t.id}>{t.name || t.title}</option>
-                                  ))}
-                                </select>
-                              )}
-
-                              {/* Class Select */}
-                              {dist.type !== "batch" && dist.type === "class" && (
-                                <select
-                                  value={dist.classId}
-                                  onChange={e => updateDist("classId", e.target.value)}
-                                  style={{
-                                    height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                    backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                    border: "1px solid #ccc"
-                                  }}
-                                >
-                                  <option value="">-- Class --</option>
-                                  {lmsClassesList.filter(c => c.topicId === dist.topicId).map(c => (
-                                    <option key={c.id} value={c.id}>{c.title || c.name}</option>
-                                  ))}
-                                </select>
-                              )}
-
-                              {/* Batch Selection Options */}
-                              {dist.type === "batch" && (
-                                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center", width: "100%", marginTop: 4 }}>
-                                  <select
-                                    value={dist.batchTargetType || "all"}
-                                    onChange={e => updateDist("batchTargetType", e.target.value)}
-                                    style={{
-                                      height: 28, borderRadius: 4, paddingLeft: 4, paddingRight: 4,
-                                      backgroundColor: darkMode ? "#1a1a1a" : "#fff", color: darkMode ? "#fff" : "#212121",
-                                      border: "1px solid #ccc"
-                                    }}
-                                  >
-                                    <option value="all">All Users</option>
-                                    <option value="all_paid">All Paid Users</option>
-                                    <option value="all_free">All Free Users</option>
-                                    <option value="erp">ERP Batches (All)</option>
-                                    <option value="select">Select Specific Batches</option>
-                                  </select>
-
-                                  {(dist.batchTargetType || "all") === "select" && (
-                                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%", marginTop: 4 }}>
-                                      {erpBatches.length === 0 ? (
-                                        <Text style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>No batches available</Text>
-                                      ) : (
-                                        erpBatches.map(b => {
-                                          const batchId = b.id || b._id;
-                                          const batchName = b.batchName || b.name;
-                                          const isSelected = (dist.selectedBatchIds || []).includes(batchId);
-                                          const toggleSelect = () => {
-                                            const currentIds = dist.selectedBatchIds || [];
-                                            const updatedIds = isSelected
-                                              ? currentIds.filter((id: string) => id !== batchId)
-                                              : [...currentIds, batchId];
-                                            updateDist("selectedBatchIds", updatedIds);
-                                          };
-                                          return (
-                                            <TouchableOpacity
-                                              key={batchId}
-                                              onPress={toggleSelect}
-                                              style={{
-                                                paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4,
-                                                borderWidth: 1, borderColor: isSelected ? "#c62828" : "#ccc",
-                                                backgroundColor: isSelected ? "#ffebee" : "transparent"
-                                              }}
-                                            >
-                                              <Text style={{ fontSize: 10, color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#333") }}>
-                                                {batchName}
-                                              </Text>
-                                            </TouchableOpacity>
-                                          );
-                                        })
-                                      )}
-                                    </View>
-                                  )}
-                                </View>
-                              )}
-
-                              <TouchableOpacity onPress={deleteDist} style={{ marginLeft: "auto" }}>
-                                <Ionicons name="trash-outline" size={16} color="#c62828" />
-                              </TouchableOpacity>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-                  </View>
                 </ScrollView>
 
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
@@ -8155,10 +8212,10 @@ function MainApp() {
                     </select>
                   </View>
 
-                  {/* Access Level Selector */}
+                  {/* Target Audience / Access Selector */}
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Access Level</Text>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Audience / Access</Text>
                       <select
                         value={liveClassForm.accessLevel}
                         onChange={e => setLiveClassForm({ ...liveClassForm, accessLevel: e.target.value })}
@@ -8168,8 +8225,8 @@ function MainApp() {
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="free">Free</option>
-                        <option value="premium">Premium</option>
+                        <option value="premium">All Paid Students</option>
+                        <option value="free">All Students (Free & Paid)</option>
                         <option value="batch">Specific Batch</option>
                       </select>
                     </View>
@@ -8235,21 +8292,61 @@ function MainApp() {
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Date</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="YYYY-MM-DD"
-                        value={liveClassForm.startDate}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, startDate: txt })}
-                      />
+                      {Platform.OS === "web" ? (
+                        <input
+                          type="date"
+                          value={liveClassForm.startDate}
+                          onChange={(e: any) => setLiveClassForm({ ...liveClassForm, startDate: e.target.value })}
+                          style={{
+                            width: "100%",
+                            height: 38,
+                            borderRadius: 8,
+                            padding: "0 10px",
+                            borderWidth: 1,
+                            borderColor: darkMode ? "#444" : "#ccc",
+                            backgroundColor: darkMode ? "#2a2a2a" : "#fff",
+                            color: darkMode ? "#e0e0e0" : "#333",
+                            fontSize: 14,
+                            outline: "none"
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                          placeholder="YYYY-MM-DD"
+                          value={liveClassForm.startDate}
+                          onChangeText={txt => setLiveClassForm({ ...liveClassForm, startDate: txt })}
+                        />
+                      )}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Time</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="HH:MM"
-                        value={liveClassForm.startTime}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, startTime: txt })}
-                      />
+                      {Platform.OS === "web" ? (
+                        <input
+                          type="time"
+                          value={liveClassForm.startTime}
+                          onChange={(e: any) => setLiveClassForm({ ...liveClassForm, startTime: e.target.value })}
+                          style={{
+                            width: "100%",
+                            height: 38,
+                            borderRadius: 8,
+                            padding: "0 10px",
+                            borderWidth: 1,
+                            borderColor: darkMode ? "#444" : "#ccc",
+                            backgroundColor: darkMode ? "#2a2a2a" : "#fff",
+                            color: darkMode ? "#e0e0e0" : "#333",
+                            fontSize: 14,
+                            outline: "none"
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                          placeholder="HH:MM"
+                          value={liveClassForm.startTime}
+                          onChangeText={txt => setLiveClassForm({ ...liveClassForm, startTime: txt })}
+                        />
+                      )}
                     </View>
                   </View>
 
@@ -8401,10 +8498,10 @@ function MainApp() {
                     </select>
                   </View>
 
-                  {/* Access Level Selector */}
+                  {/* Target Audience / Access Selector */}
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Access Level</Text>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Audience / Access</Text>
                       <select
                         value={recordedClassForm.accessLevel}
                         onChange={e => setRecordedClassForm({ ...recordedClassForm, accessLevel: e.target.value })}
@@ -8414,8 +8511,8 @@ function MainApp() {
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="free">Free</option>
-                        <option value="premium">Premium</option>
+                        <option value="premium">All Paid Students</option>
+                        <option value="free">All Students (Free & Paid)</option>
                         <option value="batch">Specific Batch</option>
                       </select>
                     </View>
@@ -9101,21 +9198,61 @@ function MainApp() {
                   <View style={{ flexDirection: "row", gap: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Date</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="YYYY-MM-DD"
-                        value={liveClassForm.startDate}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, startDate: txt })}
-                      />
+                      {Platform.OS === "web" ? (
+                        <input
+                          type="date"
+                          value={liveClassForm.startDate}
+                          onChange={(e: any) => setLiveClassForm({ ...liveClassForm, startDate: e.target.value })}
+                          style={{
+                            width: "100%",
+                            height: 38,
+                            borderRadius: 8,
+                            padding: "0 10px",
+                            borderWidth: 1,
+                            borderColor: darkMode ? "#444" : "#ccc",
+                            backgroundColor: darkMode ? "#2a2a2a" : "#fff",
+                            color: darkMode ? "#e0e0e0" : "#333",
+                            fontSize: 14,
+                            outline: "none"
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                          placeholder="YYYY-MM-DD"
+                          value={liveClassForm.startDate}
+                          onChangeText={txt => setLiveClassForm({ ...liveClassForm, startDate: txt })}
+                        />
+                      )}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Time</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="HH:MM"
-                        value={liveClassForm.startTime}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, startTime: txt })}
-                      />
+                      {Platform.OS === "web" ? (
+                        <input
+                          type="time"
+                          value={liveClassForm.startTime}
+                          onChange={(e: any) => setLiveClassForm({ ...liveClassForm, startTime: e.target.value })}
+                          style={{
+                            width: "100%",
+                            height: 38,
+                            borderRadius: 8,
+                            padding: "0 10px",
+                            borderWidth: 1,
+                            borderColor: darkMode ? "#444" : "#ccc",
+                            backgroundColor: darkMode ? "#2a2a2a" : "#fff",
+                            color: darkMode ? "#e0e0e0" : "#333",
+                            fontSize: 14,
+                            outline: "none"
+                          }}
+                        />
+                      ) : (
+                        <TextInput
+                          style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                          placeholder="HH:MM"
+                          value={liveClassForm.startTime}
+                          onChangeText={txt => setLiveClassForm({ ...liveClassForm, startTime: txt })}
+                        />
+                      )}
                     </View>
                   </View>
 
@@ -10626,7 +10763,11 @@ function MainApp() {
               {/* Submit: only shown when all questions are explored */}
               {allExplored ? (
                 <TouchableOpacity
-                  onPress={submitTestAttempt}
+                  onPress={() => {
+                    setPreviewImageUri(null);
+                    setPreviewImageTitle("");
+                    submitTestAttempt();
+                  }}
                   disabled={submitLoading}
                   style={{
                     flex: 1.2,
@@ -11561,6 +11702,8 @@ function MainApp() {
         </Modal>
       )}
 
+
+
       {/* ─── In-App Toast Notification ─── */}
       {appToast.visible && (
         <View
@@ -12090,86 +12233,89 @@ function MainApp() {
                     )}
                   </>
                 )}
-                {/* Notifications Center for Users */}
-                <View style={{ marginTop: 10 }}>
-                  <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>System Alerts & Notifications</Text>
-                  {(() => {
-                    const filtered = notifications.filter((notif: any) => !((notif.title || "").includes("Fee Payment Alert") || (notif.message || "").toLowerCase().includes("pay your pending") || (notif.message || "").toLowerCase().includes("pending tuition fee")));
+                {/* Notifications Center for Admin Users */}
+                {isAdmin && (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>System Alerts & Notifications</Text>
+                    {(() => {
+                      const filtered = notifications.filter((notif: any) => !((notif.title || "").includes("Fee Payment Alert") || (notif.message || "").toLowerCase().includes("pay your pending") || (notif.message || "").toLowerCase().includes("pending tuition fee")));
 
-                    // Consolidated pending student profile verification requests count alert for admins
-                    const pendingReqs = profileRequests.filter((r: any) => r.status === "pending");
-                    const pendingCount = pendingReqs.length;
-                    let latestSubmittedAt = null;
-                    if (pendingCount > 0) {
-                      latestSubmittedAt = pendingReqs.reduce((latest: any, r: any) => {
-                        if (!latest) return r.submittedAt;
-                        if (!r.submittedAt) return latest;
-                        return new Date(r.submittedAt).getTime() > new Date(latest).getTime() ? r.submittedAt : latest;
-                      }, null);
-                    }
+                      // Consolidated pending student profile verification requests count alert for admins
+                      const pendingReqs = profileRequests.filter((r: any) => r.status === "pending");
+                      const pendingCount = pendingReqs.length;
+                      let latestSubmittedAt = null;
+                      if (pendingCount > 0) {
+                        latestSubmittedAt = pendingReqs.reduce((latest: any, r: any) => {
+                          if (!latest) return r.submittedAt;
+                          if (!r.submittedAt) return latest;
+                          return new Date(r.submittedAt).getTime() > new Date(latest).getTime() ? r.submittedAt : latest;
+                        }, null);
+                      }
 
-                    const profileAlerts = (isAdmin && pendingCount > 0)
-                      ? [{
-                        id: "profile-req-summary",
-                        title: `Pending Profile Verification Requests (${pendingCount})`,
-                        message: `There ${pendingCount === 1 ? "is 1 student profile completion request" : `are ${pendingCount} student profile completion requests`} awaiting review.`,
-                        createdAt: latestSubmittedAt || new Date().toISOString(),
-                        sentBy: "System",
-                        isProfileRequest: true
-                      }]
-                      : [];
+                      const profileAlerts = (isAdmin && pendingCount > 0)
+                        ? [{
+                          id: "profile-req-summary",
+                          title: `Pending Profile Verification Requests (${pendingCount})`,
+                          message: `There ${pendingCount === 1 ? "is 1 student profile completion request" : `are ${pendingCount} student profile completion requests`} awaiting review.`,
+                          createdAt: latestSubmittedAt || new Date().toISOString(),
+                          sentBy: "System",
+                          isProfileRequest: true
+                        }]
+                        : [];
 
-                    const allAlerts = [...profileAlerts, ...filtered];
+                      const allAlerts = [...profileAlerts, ...filtered];
 
-                    if (allAlerts.length === 0) {
-                      return (
-                        <View style={[styles.card, { padding: 15, alignItems: "center" }]}>
-                          <Text style={styles.emptyText}>No notifications received yet.</Text>
-                        </View>
-                      );
-                    }
-
-                    return allAlerts.map(notif => {
-                      const formattedDate = notif.createdAt ? new Date(notif.createdAt).toLocaleDateString() : "";
-
-                      if (notif.isProfileRequest) {
+                      if (allAlerts.length === 0) {
                         return (
-                          <TouchableOpacity
-                            key={notif.id}
-                            onPress={() => { changeErpSub("profile-requests"); setProfileRequestsTab("requests"); setActiveTab("erp"); }}
-                            style={[styles.card, { marginBottom: 12, borderLeftWidth: 4, borderLeftColor: "#f57c00", backgroundColor: darkMode ? "#3e2723" : "#fff3e0" }]}
-                          >
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                              <Ionicons name="person-add" size={15} color="#f57c00" />
-                              <Text style={{ fontWeight: "bold", color: "#f57c00", fontSize: 11 }}>PROFILE REVIEW REQUIRED</Text>
-                            </View>
-                            <Text style={{ fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{notif.title}</Text>
-                            <Text style={{ color: darkMode ? "#cccccc" : "#424242", fontSize: 12, marginTop: 2 }}>{notif.message}</Text>
-                            <Text style={{ color: "#f57c00", fontSize: 11, fontWeight: "bold", marginTop: 6 }}>
-                              Click to verify & approve &rarr;
-                            </Text>
-                          </TouchableOpacity>
+                          <View style={[styles.card, { padding: 15, alignItems: "center" }]}>
+                            <Text style={styles.emptyText}>No notifications received yet.</Text>
+                          </View>
                         );
                       }
 
-                      return (
-                        <View key={notif.id} style={[styles.card, { marginBottom: 12, borderLeftWidth: 4, borderLeftColor: "#1565c0", backgroundColor: darkMode ? "#1a2c3d" : "#e3f2fd" }]}>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                            <Ionicons name="notifications" size={15} color="#1565c0" />
-                            <Text style={{ fontWeight: "bold", color: "#1565c0", fontSize: 11 }}>SYSTEM BROADCAST</Text>
+                      return allAlerts.map(notif => {
+                        const formattedDate = notif.createdAt ? new Date(notif.createdAt).toLocaleDateString() : "";
+
+                        if (notif.isProfileRequest) {
+                          return (
+                            <TouchableOpacity
+                              key={notif.id}
+                              onPress={() => { changeErpSub("profile-requests"); setProfileRequestsTab("requests"); setActiveTab("erp"); }}
+                              style={[styles.card, { marginBottom: 12, borderLeftWidth: 4, borderLeftColor: "#f57c00", backgroundColor: darkMode ? "#3e2723" : "#fff3e0" }]}
+                            >
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                                <Ionicons name="person-add" size={15} color="#f57c00" />
+                                <Text style={{ fontWeight: "bold", color: "#f57c00", fontSize: 11 }}>PROFILE REVIEW REQUIRED</Text>
+                              </View>
+                              <Text style={{ fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{notif.title}</Text>
+                              <Text style={{ color: darkMode ? "#cccccc" : "#424242", fontSize: 12, marginTop: 2 }}>{notif.message}</Text>
+                              <Text style={{ color: "#f57c00", fontSize: 11, fontWeight: "bold", marginTop: 6 }}>
+                                Click to verify & approve &rarr;
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        }
+
+                        return (
+                          <View
+                            key={notif.id}
+                            style={[styles.card, { marginBottom: 12, borderLeftWidth: 4, borderLeftColor: "#1565c0", backgroundColor: darkMode ? "#1a2c3d" : "#e3f2fd" }]}
+                          >
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <Ionicons name="notifications" size={15} color="#1565c0" />
+                              <Text style={{ fontWeight: "bold", color: "#1565c0", fontSize: 11 }}>SYSTEM BROADCAST</Text>
+                            </View>
+                            <Text style={{ fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{notif.title}</Text>
+                            <Text style={{ color: darkMode ? "#cccccc" : "#424242", fontSize: 12, marginTop: 2 }}>{notif.message}</Text>
+                            <Text style={{ color: darkMode ? "#888" : "#888", fontSize: 10, marginTop: 6 }}>
+                              Sent: {formattedDate} | By: {notif.sentBy || "Admin"}
+                            </Text>
                           </View>
-                          <Text style={{ fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{notif.title}</Text>
-                          <Text style={{ color: darkMode ? "#cccccc" : "#424242", fontSize: 12, marginTop: 2 }}>{notif.message}</Text>
-                          <Text style={{ color: darkMode ? "#888" : "#888", fontSize: 10, marginTop: 6 }}>
-                            Sent: {formattedDate} | By: {notif.sentBy || "Admin"}
-                          </Text>
-                        </View>
-                      );
-                    });
-                  })()}
-                </View>
-
-
+                        );
+                      });
+                    })()}
+                  </View>
+                )}
               </View>
             </ScrollView>
           )
@@ -12563,6 +12709,15 @@ function MainApp() {
                             {[{ label: "📅 Daily Test", value: "daily" }, { label: "📆 Weekly Test", value: "weekly" }, { label: "🏆 Mock Test", value: "mock" }].map(cat => (
                               <TouchableOpacity key={cat.value} onPress={() => setNewPdfTest({ ...newPdfTest, testType: cat.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newPdfTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newPdfTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
                                 <Text style={{ fontSize: 11, fontWeight: "bold", color: (newPdfTest.testType || "mock") === cat.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{cat.label}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          <Text style={[styles.label, darkMode && styles.labelDark]}>Test Mode:</Text>
+                          <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
+                            {[{ label: "🌐 Online", value: "online" }, { label: "🏢 Offline", value: "offline" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
+                              <TouchableOpacity key={modeOpt.value} onPress={() => setNewPdfTest({ ...newPdfTest, testMode: modeOpt.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newPdfTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newPdfTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
+                                <Text style={{ fontSize: 11, fontWeight: "bold", color: (newPdfTest.testMode || "online") === modeOpt.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{modeOpt.label}</Text>
                               </TouchableOpacity>
                             ))}
                           </View>
@@ -13734,21 +13889,50 @@ PASTED QUESTION PAPER TEXT:
 
                               {/* Test Category Filter Dropdown */}
                               <Text style={{ color: "#757575", fontSize: 11, marginBottom: 6, marginTop: 12, fontWeight: "bold" }}>FILTER BY TEST CATEGORY</Text>
-                              <select
-                                value={resultsCategoryFilter}
-                                onChange={e => setResultsCategoryFilter(e.target.value)}
-                                style={{
-                                  width: "100%", height: 38, borderRadius: 8, padding: 8,
-                                  backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                                  border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
-                                  outline: "none", fontSize: 13
-                                }}
-                              >
-                                <option value="">All Categories</option>
-                                <option value="daily">Daily Test</option>
-                                <option value="weekly">Weekly Test</option>
-                                <option value="mock">Mock Test</option>
-                              </select>
+                              {Platform.OS === 'web' ? (
+                                <select
+                                  value={resultsCategoryFilter}
+                                  onChange={e => setResultsCategoryFilter((e.target as HTMLSelectElement).value)}
+                                  style={{
+                                    width: "100%", height: 38, borderRadius: 8, padding: 8,
+                                    backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
+                                    border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
+                                    outline: "none", fontSize: 13
+                                  } as any}
+                                >
+                                  <option value="">All Categories</option>
+                                  <option value="daily">Daily Test</option>
+                                  <option value="weekly">Weekly Test</option>
+                                  <option value="mock">Mock Test</option>
+                                </select>
+                              ) : (
+                                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                                  {[
+                                    { label: "All", value: "" },
+                                    { label: "Daily Test", value: "daily" },
+                                    { label: "Weekly Test", value: "weekly" },
+                                    { label: "Mock Test", value: "mock" }
+                                  ].map(cat => {
+                                    const isSelected = resultsCategoryFilter === cat.value;
+                                    return (
+                                      <TouchableOpacity
+                                        key={cat.value}
+                                        onPress={() => setResultsCategoryFilter(cat.value)}
+                                        style={{
+                                          paddingHorizontal: 12,
+                                          paddingVertical: 6,
+                                          borderRadius: 20,
+                                          borderWidth: 2,
+                                          borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
+                                          backgroundColor: isSelected ? (darkMode ? "#3e2723" : "#ffebee") : (darkMode ? "#2a2a2a" : "#f9f9f9")
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 11, color: isSelected ? "#c62828" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>{cat.label}</Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              )}
                             </View>
 
                             {/* Closed Tests — auto-displayed, no button needed */}
@@ -16100,21 +16284,75 @@ PASTED QUESTION PAPER TEXT:
 
                               {/* Constituency */}
                               <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, marginTop: 10, fontWeight: "bold" }}>Constituency *</Text>
-                              <select
-                                value={profileForm.constituency}
-                                onChange={e => setProfileForm({ ...profileForm, constituency: e.target.value })}
-                                style={{
-                                  width: "100%", height: 38, borderRadius: 8, padding: 8,
-                                  backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                                  border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
-                                  marginBottom: 10, outline: "none", fontSize: 13
-                                }}
-                              >
-                                <option value="">Select Constituency</option>
-                                {["Ariankuppam", "Bahour", "Embalam", "Indira Nagar", "Kadirkamam", "Kalapet", "Kamaraj Nagar", "Karaikal North", "Karaikal South", "Lawspet", "Mahe", "Manavely", "Mangalam", "Mannadipet", "Mudaliarpet", "Muthialpet", "Nedungadu", "Nellithope", "Neravy T. R. Pattinam", "Nettapakkam", "Orleampeth", "Ossudu", "Oupalam", "Ozhukarai", "Raj Bhavan", "Thattanchavady", "Thirubuvanai", "Thirunallar", "Villianur", "Yanam", "Others"].map(c => (
-                                  <option key={c} value={c}>{c}</option>
-                                ))}
-                              </select>
+                              {Platform.OS === 'web' ? (
+                                <select
+                                  value={profileForm.constituency}
+                                  onChange={e => setProfileForm({ ...profileForm, constituency: (e.target as HTMLSelectElement).value })}
+                                  style={{
+                                    width: "100%", height: 38, borderRadius: 8, padding: 8,
+                                    backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
+                                    border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
+                                    marginBottom: 10, outline: "none", fontSize: 13
+                                  } as any}
+                                >
+                                  <option value="">Select Constituency</option>
+                                  {["Ariankuppam", "Bahour", "Embalam", "Indira Nagar", "Kadirkamam", "Kalapet", "Kamaraj Nagar", "Karaikal North", "Karaikal South", "Lawspet", "Mahe", "Manavely", "Mangalam", "Mannadipet", "Mudaliarpet", "Muthialpet", "Nedungadu", "Nellithope", "Neravy T. R. Pattinam", "Nettapakkam", "Orleampeth", "Ossudu", "Oupalam", "Ozhukarai", "Raj Bhavan", "Thattanchavady", "Thirubuvanai", "Thirunallar", "Villianur", "Yanam", "Others"].map(c => (
+                                    <option key={c} value={c}>{c}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <TouchableOpacity
+                                  onPress={() => setShowConstituencyModal(true)}
+                                  style={[styles.input, { justifyContent: 'center', minHeight: 40, marginBottom: 10 }]}
+                                >
+                                  <Text style={{ color: profileForm.constituency ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
+                                    {profileForm.constituency || "Select Constituency *"}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+
+                              {/* Custom Modal constituency selector for mobile */}
+                              {Platform.OS !== 'web' && showConstituencyModal && (
+                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowConstituencyModal(false)}>
+                                  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                                    <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
+                                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Constituency</Text>
+                                        <TouchableOpacity onPress={() => setShowConstituencyModal(false)} style={{ padding: 4 }}>
+                                          <Ionicons name="close" size={24} color="#757575" />
+                                        </TouchableOpacity>
+                                      </View>
+                                      <ScrollView style={{ marginVertical: 10 }}>
+                                        {["Ariankuppam", "Bahour", "Embalam", "Indira Nagar", "Kadirkamam", "Kalapet", "Kamaraj Nagar", "Karaikal North", "Karaikal South", "Lawspet", "Mahe", "Manavely", "Mangalam", "Mannadipet", "Mudaliarpet", "Muthialpet", "Nedungadu", "Nellithope", "Neravy T. R. Pattinam", "Nettapakkam", "Orleampeth", "Ossudu", "Oupalam", "Ozhukarai", "Raj Bhavan", "Thattanchavady", "Thirubuvanai", "Thirunallar", "Villianur", "Yanam", "Others"].map(c => {
+                                          const isSelected = profileForm.constituency === c;
+                                          return (
+                                            <TouchableOpacity
+                                              key={c}
+                                              onPress={() => {
+                                                setProfileForm({ ...profileForm, constituency: c });
+                                                setShowConstituencyModal(false);
+                                              }}
+                                              style={{
+                                                paddingVertical: 12,
+                                                paddingHorizontal: 15,
+                                                borderBottomWidth: 1,
+                                                borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                                backgroundColor: isSelected ? (darkMode ? "#c62828" : "#ffebee") : "transparent",
+                                                flexDirection: "row",
+                                                justifyContent: "space-between",
+                                                alignItems: "center"
+                                              }}
+                                            >
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{c}</Text>
+                                              {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
+                                            </TouchableOpacity>
+                                          );
+                                        })}
+                                      </ScrollView>
+                                    </View>
+                                  </View>
+                                </Modal>
+                              )}
                               {profileForm.constituency === "Others" && (
                                 <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.constituencyOthers && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Specify Constituency *" placeholderTextColor="#999" value={profileForm.constituencyOthers} onChangeText={v => setProfileForm({ ...profileForm, constituencyOthers: v })} />
                               )}
@@ -16521,7 +16759,7 @@ PASTED QUESTION PAPER TEXT:
                                 <TextInput style={styles.input} placeholder="Last Name" placeholderTextColor="#999" value={editingStaff.lastName} onChangeText={l => setEditingStaff({ ...editingStaff, lastName: l })} />
                                 <TextInput style={styles.input} placeholder="Employee ID" placeholderTextColor="#999" value={editingStaff.employeeId} onChangeText={e => setEditingStaff({ ...editingStaff, employeeId: e })} />
 
-                                 <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, fontWeight: "bold" }}>Admin Role / Privilege Level *</Text>
+                                <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, fontWeight: "bold" }}>Admin Role / Privilege Level *</Text>
                                 <View style={{ position: "relative", zIndex: 999, marginBottom: 12 }}>
                                   <TouchableOpacity
                                     onPress={() => setShowEditRoleDropdown(!showEditRoleDropdown)}
@@ -16538,10 +16776,10 @@ PASTED QUESTION PAPER TEXT:
                                   >
                                     <Text style={{ color: "#212121", fontWeight: "bold" }}>
                                       {editingStaff.role === "super_admin" ? "Super Admin" :
-                                       editingStaff.role === "admin" ? "Admin" :
-                                       editingStaff.role === "editor" ? "Editor" :
-                                       editingStaff.role === "contributor" ? "Contributor" :
-                                       editingStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                                        editingStaff.role === "admin" ? "Admin" :
+                                          editingStaff.role === "editor" ? "Editor" :
+                                            editingStaff.role === "contributor" ? "Contributor" :
+                                              editingStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                                     </Text>
                                     <Ionicons name={showEditRoleDropdown ? "chevron-up" : "chevron-down"} size={16} color="#757575" />
                                   </TouchableOpacity>
@@ -16708,10 +16946,10 @@ PASTED QUESTION PAPER TEXT:
                                   >
                                     <Text style={{ color: "#212121", fontWeight: "bold" }}>
                                       {newStaff.role === "super_admin" ? "Super Admin" :
-                                       newStaff.role === "admin" ? "Admin" :
-                                       newStaff.role === "editor" ? "Editor" :
-                                       newStaff.role === "contributor" ? "Contributor" :
-                                       newStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                                        newStaff.role === "admin" ? "Admin" :
+                                          newStaff.role === "editor" ? "Editor" :
+                                            newStaff.role === "contributor" ? "Contributor" :
+                                              newStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                                     </Text>
                                     <Ionicons name={showCreateRoleDropdown ? "chevron-up" : "chevron-down"} size={16} color="#757575" />
                                   </TouchableOpacity>
@@ -18849,41 +19087,12 @@ PASTED QUESTION PAPER TEXT:
                               {/* Subject Filter */}
                               <View style={{ flex: 1, minWidth: 200 }}>
                                 <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Subject</Text>
-                                <select
-                                  value={ledgerSubjectFilter}
-                                  onChange={e => {
-                                    setLedgerSubjectFilter(e.target.value);
-                                    setLedgerTopicFilter(""); // Reset topic
-                                  }}
-                                  style={{
-                                    width: "100%",
-                                    height: 40,
-                                    borderRadius: 8,
-                                    paddingLeft: 12,
-                                    paddingRight: 12,
-                                    fontSize: 14,
-                                    fontWeight: "500",
-                                    backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
-                                    color: darkMode ? "#fff" : "#212121",
-                                    border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
-                                    outline: "none"
-                                  }}
-                                >
-                                  <option value="">-- All Subjects --</option>
-                                  {[...new Set(tests.map((t: any) => t.subject || ""))].filter(Boolean).map(sName => (
-                                    <option key={sName} value={sName}>{sName}</option>
-                                  ))}
-                                </select>
-                              </View>
-
-                              {/* Topic Filter */}
-                              {ledgerSubjectFilter !== "" && (
-                                <View style={{ flex: 1, minWidth: 200 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Topic</Text>
+                                {Platform.OS === 'web' ? (
                                   <select
-                                    value={ledgerTopicFilter}
+                                    value={ledgerSubjectFilter}
                                     onChange={e => {
-                                      setLedgerTopicFilter(e.target.value);
+                                      setLedgerSubjectFilter((e.target as HTMLSelectElement).value);
+                                      setLedgerTopicFilter(""); // Reset topic
                                     }}
                                     style={{
                                       width: "100%",
@@ -18897,56 +19106,284 @@ PASTED QUESTION PAPER TEXT:
                                       color: darkMode ? "#fff" : "#212121",
                                       border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
                                       outline: "none"
-                                    }}
+                                    } as any}
                                   >
-                                    <option value="">-- All Topics --</option>
-                                    {[...new Set(tests.filter((t: any) => t.subject === ledgerSubjectFilter).map((t: any) => t.topic || ""))].filter(Boolean).map(tName => (
-                                      <option key={tName} value={tName}>{tName}</option>
+                                    <option value="">-- All Subjects --</option>
+                                    {[...new Set(tests.map((t: any) => t.subject || ""))].filter(Boolean).map(sName => (
+                                      <option key={sName} value={sName}>{sName}</option>
                                     ))}
                                   </select>
+                                ) : (
+                                  <TouchableOpacity
+                                    onPress={() => setShowLedgerSubjectModal(true)}
+                                    style={[styles.input, { justifyContent: 'center', minHeight: 40 }]}
+                                  >
+                                    <Text style={{ color: ledgerSubjectFilter ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
+                                      {ledgerSubjectFilter || "-- All Subjects --"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+
+                              {/* Custom Modal subject selector for mobile */}
+                              {Platform.OS !== 'web' && showLedgerSubjectModal && (
+                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerSubjectModal(false)}>
+                                  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                                    <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
+                                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Subject</Text>
+                                        <TouchableOpacity onPress={() => setShowLedgerSubjectModal(false)} style={{ padding: 4 }}>
+                                          <Ionicons name="close" size={24} color="#757575" />
+                                        </TouchableOpacity>
+                                      </View>
+                                      <ScrollView style={{ marginVertical: 10 }}>
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            setLedgerSubjectFilter("");
+                                            setLedgerTopicFilter("");
+                                            setShowLedgerSubjectModal(false);
+                                          }}
+                                          style={{
+                                            paddingVertical: 12,
+                                            paddingHorizontal: 15,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                            backgroundColor: !ledgerSubjectFilter ? (darkMode ? "#c62828" : "#ffebee") : "transparent"
+                                          }}
+                                        >
+                                          <Text style={{ color: !ledgerSubjectFilter ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: !ledgerSubjectFilter ? "bold" : "normal" }}>-- All Subjects --</Text>
+                                        </TouchableOpacity>
+                                        {[...new Set(tests.map((t: any) => t.subject || ""))].filter(Boolean).map(sName => {
+                                          const isSelected = ledgerSubjectFilter === sName;
+                                          return (
+                                            <TouchableOpacity
+                                              key={sName}
+                                              onPress={() => {
+                                                setLedgerSubjectFilter(sName);
+                                                setLedgerTopicFilter("");
+                                                setShowLedgerSubjectModal(false);
+                                              }}
+                                              style={{
+                                                paddingVertical: 12,
+                                                paddingHorizontal: 15,
+                                                borderBottomWidth: 1,
+                                                borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                                backgroundColor: isSelected ? (darkMode ? "#c62828" : "#ffebee") : "transparent",
+                                                flexDirection: "row",
+                                                justifyContent: "space-between",
+                                                alignItems: "center"
+                                              }}
+                                            >
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{sName}</Text>
+                                              {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
+                                            </TouchableOpacity>
+                                          );
+                                        })}
+                                      </ScrollView>
+                                    </View>
+                                  </View>
+                                </Modal>
+                              )}
+
+                              {/* Topic Filter */}
+                              {ledgerSubjectFilter !== "" && (
+                                <View style={{ flex: 1, minWidth: 200 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Topic</Text>
+                                  {Platform.OS === 'web' ? (
+                                    <select
+                                      value={ledgerTopicFilter}
+                                      onChange={e => setLedgerTopicFilter((e.target as HTMLSelectElement).value)}
+                                      style={{
+                                        width: "100%",
+                                        height: 40,
+                                        borderRadius: 8,
+                                        paddingLeft: 12,
+                                        paddingRight: 12,
+                                        fontSize: 14,
+                                        fontWeight: "500",
+                                        backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
+                                        color: darkMode ? "#fff" : "#212121",
+                                        border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
+                                        outline: "none"
+                                      } as any}
+                                    >
+                                      <option value="">-- All Topics --</option>
+                                      {[...new Set(tests.filter((t: any) => t.subject === ledgerSubjectFilter).map((t: any) => t.topic || ""))].filter(Boolean).map(tName => (
+                                        <option key={tName} value={tName}>{tName}</option>
+                                      ))}
+                                    </select>
+                                  ) : (
+                                    <TouchableOpacity
+                                      onPress={() => setShowLedgerTopicModal(true)}
+                                      style={[styles.input, { justifyContent: 'center', minHeight: 40 }]}
+                                    >
+                                      <Text style={{ color: ledgerTopicFilter ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
+                                        {ledgerTopicFilter || "-- All Topics --"}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
                                 </View>
+                              )}
+
+                              {/* Custom Modal topic selector for mobile */}
+                              {Platform.OS !== 'web' && ledgerSubjectFilter !== "" && showLedgerTopicModal && (
+                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerTopicModal(false)}>
+                                  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                                    <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
+                                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Topic</Text>
+                                        <TouchableOpacity onPress={() => setShowLedgerTopicModal(false)} style={{ padding: 4 }}>
+                                          <Ionicons name="close" size={24} color="#757575" />
+                                        </TouchableOpacity>
+                                      </View>
+                                      <ScrollView style={{ marginVertical: 10 }}>
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            setLedgerTopicFilter("");
+                                            setShowLedgerTopicModal(false);
+                                          }}
+                                          style={{
+                                            paddingVertical: 12,
+                                            paddingHorizontal: 15,
+                                            borderBottomWidth: 1,
+                                            borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                            backgroundColor: !ledgerTopicFilter ? (darkMode ? "#c62828" : "#ffebee") : "transparent"
+                                          }}
+                                        >
+                                          <Text style={{ color: !ledgerTopicFilter ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: !ledgerTopicFilter ? "bold" : "normal" }}>-- All Topics --</Text>
+                                        </TouchableOpacity>
+                                        {[...new Set(tests.filter((t: any) => t.subject === ledgerSubjectFilter).map((t: any) => t.topic || ""))].filter(Boolean).map(tName => {
+                                          const isSelected = ledgerTopicFilter === tName;
+                                          return (
+                                            <TouchableOpacity
+                                              key={tName}
+                                              onPress={() => {
+                                                setLedgerTopicFilter(tName);
+                                                setShowLedgerTopicModal(false);
+                                              }}
+                                              style={{
+                                                paddingVertical: 12,
+                                                paddingHorizontal: 15,
+                                                borderBottomWidth: 1,
+                                                borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                                backgroundColor: isSelected ? (darkMode ? "#c62828" : "#ffebee") : "transparent",
+                                                flexDirection: "row",
+                                                justifyContent: "space-between",
+                                                alignItems: "center"
+                                              }}
+                                            >
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{tName}</Text>
+                                              {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
+                                            </TouchableOpacity>
+                                          );
+                                        })}
+                                      </ScrollView>
+                                    </View>
+                                  </View>
+                                </Modal>
                               )}
                             </View>
 
                             {/* Mock Exam Dropdown */}
                             <View style={{ marginTop: 5 }}>
                               <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Select Mock Exam</Text>
-                              <select
-                                value={selectedErpTestId}
-                                onChange={e => {
-                                  const testId = e.target.value;
-                                  setSelectedErpTestId(testId);
-                                  loadErpTestResults(testId);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  maxWidth: 410,
-                                  height: 40,
-                                  borderRadius: 8,
-                                  paddingLeft: 12,
-                                  paddingRight: 12,
-                                  fontSize: 14,
-                                  fontWeight: "500",
-                                  backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
-                                  color: darkMode ? "#fff" : "#212121",
-                                  border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
-                                  outline: "none"
-                                }}
-                              >
-                                {selectedErpTestId === "" && <option value="">-- Select a Mock Exam --</option>}
-                                {tests
-                                  .filter((t: any) => {
-                                    if (ledgerSubjectFilter && t.subject !== ledgerSubjectFilter) return false;
-                                    if (ledgerTopicFilter && t.topic !== ledgerTopicFilter) return false;
-                                    return true;
-                                  })
-                                  .map(t => (
-                                    <option key={t.id} value={t.id}>
-                                      {t.title}
-                                    </option>
-                                  ))}
-                              </select>
+                              {Platform.OS === 'web' ? (
+                                <select
+                                  value={selectedErpTestId}
+                                  onChange={e => {
+                                    const testId = (e.target as HTMLSelectElement).value;
+                                    setSelectedErpTestId(testId);
+                                    loadErpTestResults(testId);
+                                  }}
+                                  style={{
+                                    width: "100%",
+                                    maxWidth: 410,
+                                    height: 40,
+                                    borderRadius: 8,
+                                    paddingLeft: 12,
+                                    paddingRight: 12,
+                                    fontSize: 14,
+                                    fontWeight: "500",
+                                    backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
+                                    color: darkMode ? "#fff" : "#212121",
+                                    border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
+                                    outline: "none"
+                                  } as any}
+                                >
+                                  {selectedErpTestId === "" && <option value="">-- Select a Mock Exam --</option>}
+                                  {tests
+                                    .filter((t: any) => {
+                                      if (ledgerSubjectFilter && t.subject !== ledgerSubjectFilter) return false;
+                                      if (ledgerTopicFilter && t.topic !== ledgerTopicFilter) return false;
+                                      return true;
+                                    })
+                                    .map(t => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.title}
+                                      </option>
+                                    ))}
+                                </select>
+                              ) : (
+                                <TouchableOpacity
+                                  onPress={() => setShowLedgerExamModal(true)}
+                                  style={[styles.input, { justifyContent: 'center', minHeight: 40, maxWidth: 410 }]}
+                                >
+                                  <Text style={{ color: selectedErpTestId ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
+                                    {tests.find(t => t.id === selectedErpTestId)?.title || "-- Select a Mock Exam --"}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
                             </View>
+
+                            {/* Custom Modal exam selector for mobile */}
+                            {Platform.OS !== 'web' && showLedgerExamModal && (
+                              <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerExamModal(false)}>
+                                <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+                                  <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
+                                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                                      <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Mock Exam</Text>
+                                      <TouchableOpacity onPress={() => setShowLedgerExamModal(false)} style={{ padding: 4 }}>
+                                        <Ionicons name="close" size={24} color="#757575" />
+                                      </TouchableOpacity>
+                                    </View>
+                                    <ScrollView style={{ marginVertical: 10 }}>
+                                      {tests
+                                        .filter((t: any) => {
+                                          if (ledgerSubjectFilter && t.subject !== ledgerSubjectFilter) return false;
+                                          if (ledgerTopicFilter && t.topic !== ledgerTopicFilter) return false;
+                                          return true;
+                                        })
+                                        .map(t => {
+                                          const isSelected = selectedErpTestId === t.id;
+                                          return (
+                                            <TouchableOpacity
+                                              key={t.id}
+                                              onPress={() => {
+                                                setSelectedErpTestId(t.id);
+                                                loadErpTestResults(t.id);
+                                                setShowLedgerExamModal(false);
+                                              }}
+                                              style={{
+                                                paddingVertical: 12,
+                                                paddingHorizontal: 15,
+                                                borderBottomWidth: 1,
+                                                borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                                backgroundColor: isSelected ? (darkMode ? "#c62828" : "#ffebee") : "transparent",
+                                                flexDirection: "row",
+                                                justifyContent: "space-between",
+                                                alignItems: "center"
+                                              }}
+                                            >
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{t.title}</Text>
+                                              {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
+                                            </TouchableOpacity>
+                                          );
+                                        })}
+                                    </ScrollView>
+                                  </View>
+                                </View>
+                              </Modal>
+                            )}
                           </View>
                         )}
                       </View>
@@ -20545,7 +20982,14 @@ PASTED QUESTION PAPER TEXT:
                       </View>
                     </View>
 
-                    {lmsLiveSessions.length === 0 ? (
+                    {liveSessionsLoading ? (
+                      <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                        <ActivityIndicator size="large" color={darkMode ? "#ef5350" : "#c62828"} />
+                        <Text style={{ marginTop: 12, fontSize: 13, color: darkMode ? "#aaa" : "#666", fontWeight: "600" }}>
+                          Loading live classes...
+                        </Text>
+                      </View>
+                    ) : lmsLiveSessions.length === 0 ? (
                       <View style={styles.emptyContainer}>
                         <Ionicons name="videocam-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
                         <Text style={[styles.emptyText, darkMode && styles.emptyTextDark]}>No live sessions scheduled yet.</Text>
@@ -20587,18 +21031,36 @@ PASTED QUESTION PAPER TEXT:
                         {lmsLiveSessions.map((session: any) => {
                           const sessionTitle = session.title || session.className || session.topicName || "Live Session";
                           const sessionStatus = session.status || "scheduled";
-                          const isLive = sessionStatus === "live" || sessionStatus === "active" || sessionStatus === "in_progress";
-                          const isCancelled = sessionStatus === "cancelled" || sessionStatus === "canceled";
+
+                          const scheduledTimeObj = session.scheduledStartTime
+                            ? new Date(session.scheduledStartTime._seconds ? session.scheduledStartTime._seconds * 1000 : session.scheduledStartTime)
+                            : null;
+                          const startTimeMs = scheduledTimeObj ? scheduledTimeObj.getTime() : 0;
+                          const durationMins = session.expectedDurationMinutes || session.liveSession?.expectedDurationMinutes || 60;
+                          const endTimeMs = startTimeMs + durationMins * 60 * 1000;
+                          const isExpired = startTimeMs > 0 && Date.now() > endTimeMs;
+
+                          // If expired, do not display as active or live
+                          if (isExpired) {
+                            return null;
+                          }
+
+                          const isLive = !isExpired && (sessionStatus === "live" || sessionStatus === "active" || sessionStatus === "in_progress" || sessionStatus === "LIVE" || sessionStatus === "JOINING" || sessionStatus === "HOST_CONNECTED");
+                          const isCancelled = sessionStatus === "cancelled" || sessionStatus === "canceled" || sessionStatus === "CANCELLED";
                           const faculty = session.teacherName || session.staffName || session.instructorName || "";
-                          const scheduledTime = session.scheduledStartTime
-                            ? new Date(session.scheduledStartTime._seconds ? session.scheduledStartTime._seconds * 1000 : session.scheduledStartTime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+                          const scheduledTime = scheduledTimeObj
+                            ? scheduledTimeObj.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
                             : session.scheduledAt || "Time not set";
-                          const isUserAdmin = isAdmin || user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'staff';
-                          const joinUrl = isUserAdmin
-                            ? (session.hostUrl || session.launchPayload?.start_url || session.launchPayload?.hostUrl || session.participantUrl || session.launchPayload?.join_url || session.launchPayload?.participantUrl || session.joinUrl || session.meetingUrl || null)
-                            : (session.participantUrl || session.launchPayload?.join_url || session.launchPayload?.participantUrl || session.joinUrl || session.meetingUrl || null);
                           const statusColor = isLive ? "#2e7d32" : isCancelled ? "#c62828" : "#1565c0";
                           const statusLabel = isLive ? "LIVE NOW" : isCancelled ? "CANCELLED" : sessionStatus.toUpperCase();
+
+                          const courseName = session.courseName || session.courseTitle || (lmsCourses.find((c: any) => c.id === session.courseId)?.title || lmsCourses.find((c: any) => c.id === session.courseId)?.name || "");
+                          let batchName = session.batchName || session.targetBatchName || "";
+                          if (!batchName) {
+                            if (session.accessLevel === "free") batchName = "All Students";
+                            else if (session.accessLevel === "batch") batchName = "Specific Batch";
+                            else batchName = "All Paid Students";
+                          }
 
                           return (
                             <View key={session.id || session._id} style={[styles.card, darkMode && styles.cardDark, { padding: 16, gap: 10, borderLeftWidth: 4, borderLeftColor: statusColor }]}>
@@ -20652,8 +21114,23 @@ PASTED QUESTION PAPER TEXT:
                               </View>
 
                               <Text style={{ fontSize: 15, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{sessionTitle}</Text>
-                              {faculty ? <Text style={{ fontSize: 12, color: darkMode ? "#aaa" : "#616161" }}>Faculty: {faculty}</Text> : null}
 
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap", marginVertical: 2 }}>
+                                {courseName ? (
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#1a2a3a" : "#f0f4f8", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: darkMode ? "#29435c" : "#d0e1f9" }}>
+                                    <Ionicons name="book" size={13} color={darkMode ? "#90caf9" : "#1565c0"} />
+                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#90caf9" : "#1565c0" }}>Course: {courseName}</Text>
+                                  </View>
+                                ) : null}
+                                {batchName ? (
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#1c3320" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: darkMode ? "#27542c" : "#c8e6c9" }}>
+                                    <Ionicons name="people" size={13} color={darkMode ? "#81c784" : "#2e7d32"} />
+                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#81c784" : "#1b5e20" }}>Batch: {batchName}</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+
+                              {faculty ? <Text style={{ fontSize: 12, color: darkMode ? "#aaa" : "#616161" }}>Faculty: {faculty}</Text> : null}
 
                               {session.provider && (
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -20665,39 +21142,40 @@ PASTED QUESTION PAPER TEXT:
                               )}
 
                               <View style={{ flexDirection: "row", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
-                                {isAdmin && !joinUrl ? (
+                                {isAdmin ? (
                                   <TouchableOpacity
                                     onPress={async () => {
                                       try {
                                         Alert.alert("Starting Class", "Initializing meeting links, please wait...");
-                                        await api.post(`/live-sessions/${session.id || session._id}/start`, {});
+                                        const sessionId = session.id || session._id;
+                                        await api.post(`/live-sessions/${sessionId}/start`, {});
 
-                                        // Load fresh session from backend to read the generated start/host URLs
-                                        const sessionRes = await api.get(`/live-sessions/${session.id || session._id}`);
-                                        const freshSession = sessionRes.data?.data || sessionRes.data;
-
-                                        const launchUrl = freshSession?.hostUrl || freshSession?.launchPayload?.start_url || freshSession?.launchPayload?.hostUrl || freshSession?.participantUrl || freshSession?.launchPayload?.join_url || freshSession?.launchPayload?.participantUrl || freshSession?.joinUrl || freshSession?.meetingUrl || null;
-
-                                        if (launchUrl) {
-                                          if (typeof window !== "undefined") {
-                                            window.open(launchUrl, "_blank");
-                                          } else {
-                                            Alert.alert("Start Session", `Opening URL: ${launchUrl}`);
-                                          }
-                                        } else {
-                                          // Fallback to join details payload
-                                          const joinRes = await api.get(`/live-sessions/${session.id || session._id}/join`);
-                                          const joinData = joinRes.data?.data || joinRes.data;
-                                          const fallbackUrl = joinData?.meetUrl || joinData?.joinUrl || joinData?.hostUrl || joinData?.url;
-
-                                          if (fallbackUrl) {
+                                        // 1. Try secure standalone zoom-client-launch.html window
+                                        let launched = false;
+                                        try {
+                                          const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
+                                          const token = tokenRes.data?.token || tokenRes.token;
+                                          if (token) {
+                                            const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
+                                            const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(baseOrigin)}`;
                                             if (typeof window !== "undefined") {
-                                              window.open(fallbackUrl, "_blank");
-                                            } else {
-                                              Alert.alert("Start Session", `Opening URL: ${fallbackUrl}`);
+                                              window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
                                             }
-                                          } else {
-                                            Alert.alert("Error", "Could not resolve meeting join URL.");
+                                            launched = true;
+                                          }
+                                        } catch (tokErr) {
+                                          console.warn("Join token resolution failed, checking join API:", tokErr);
+                                        }
+
+                                        if (!launched) {
+                                          const sessionRes = await api.get(`/live-sessions/${sessionId}`);
+                                          const freshSession = sessionRes.data?.data || sessionRes.data;
+                                          const launchUrl = freshSession?.hostUrl || freshSession?.launchPayload?.start_url || freshSession?.launchPayload?.hostUrl || freshSession?.participantUrl || freshSession?.launchPayload?.join_url || freshSession?.launchPayload?.participantUrl || freshSession?.joinUrl || freshSession?.meetingUrl || null;
+
+                                          if (launchUrl) {
+                                            if (typeof window !== "undefined") {
+                                              window.open(launchUrl, "_blank");
+                                            }
                                           }
                                         }
                                         loadLiveSessions();
@@ -20715,18 +21193,28 @@ PASTED QUESTION PAPER TEXT:
                                   <TouchableOpacity
                                     onPress={async () => {
                                       try {
-                                        // 1. Direct joinUrl if available
-                                        if (joinUrl) {
-                                          if (typeof window !== "undefined") {
-                                            window.open(joinUrl, "_blank");
-                                          } else {
-                                            Alert.alert("Join Session", `Opening: ${sessionTitle}`);
+                                        const sessionId = session.id || session._id || session.classId;
+
+                                        // 1. Try secure standalone zoom-client-launch.html window
+                                        let launched = false;
+                                        try {
+                                          const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
+                                          const token = tokenRes.data?.token || tokenRes.token;
+                                          if (token) {
+                                            const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
+                                            const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(baseOrigin)}`;
+                                            if (typeof window !== "undefined") {
+                                              window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+                                            }
+                                            launched = true;
                                           }
-                                          return;
+                                        } catch (tokErr) {
+                                          console.warn("Join token resolution failed, checking join API:", tokErr);
                                         }
 
-                                        // 2. Dynamic join resolution via API
-                                        const sessionId = session.id || session._id || session.classId;
+                                        if (launched) return;
+
+                                        // 2. Dynamic join resolution via API fallback
                                         const res = await api.get(`/live-sessions/${sessionId}/join`);
                                         const payload = res?.data?.data || res?.data || res;
 
@@ -20742,15 +21230,6 @@ PASTED QUESTION PAPER TEXT:
                                             window.open(launchUrl, "_blank");
                                           } else {
                                             Alert.alert("Join Session", `Opening: ${launchUrl}`);
-                                          }
-                                        } else if (payload?.sdk) {
-                                          const meetingId = payload.meetingId || session.providerSessionId || '';
-                                          const passcode = payload.sdk?.passcode || '';
-                                          const zoomWebUrl = `https://zoom.us/j/${meetingId}${passcode ? `?pwd=${passcode}` : ''}`;
-                                          if (typeof window !== "undefined") {
-                                            window.open(zoomWebUrl, "_blank");
-                                          } else {
-                                            Alert.alert("Join Zoom Session", `Opening: ${zoomWebUrl}`);
                                           }
                                         } else {
                                           Alert.alert("Notice", "The live meeting link is pending. Please wait for the instructor to start.");
@@ -20822,7 +21301,14 @@ PASTED QUESTION PAPER TEXT:
                       </View>
                     </View>
 
-                    {lmsRecordedClasses.length === 0 ? (
+                    {recordedClassesLoading ? (
+                      <View style={{ paddingVertical: 40, alignItems: "center", justifyContent: "center" }}>
+                        <ActivityIndicator size="large" color={darkMode ? "#ef5350" : "#c62828"} />
+                        <Text style={{ marginTop: 12, fontSize: 13, color: darkMode ? "#aaa" : "#666", fontWeight: "600" }}>
+                          Loading recorded classes...
+                        </Text>
+                      </View>
+                    ) : lmsRecordedClasses.length === 0 ? (
                       <View style={styles.emptyContainer}>
                         <Ionicons name="play-circle-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
                         <Text style={[styles.emptyText, darkMode && styles.emptyTextDark]}>No recorded lectures available yet.</Text>

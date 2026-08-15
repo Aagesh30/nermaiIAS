@@ -1,0 +1,13 @@
+{
+  "projects": {},
+  "targets": {
+    "nermaiiasacademy-519c8": {
+      "storage": {
+        "default": [
+          "nermaiiasacademy-519c8.appspot.com"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

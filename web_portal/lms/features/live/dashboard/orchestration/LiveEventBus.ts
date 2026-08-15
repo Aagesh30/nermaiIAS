@@ -1,4 +1,4 @@
-﻿export enum LiveEventType {
+export enum LiveEventType {
   // Zoom/Provider Events
   SESSION_CONNECTING = 'SESSION_CONNECTING',
   SESSION_CONNECTED = 'SESSION_CONNECTED',
@@ -116,4 +116,3 @@ class EventBus {
 }
 
 export const liveEventBus = new EventBus();
-

@@ -1,112 +1,156 @@
-﻿import React, { useState } from 'react';
-import { Send, X } from 'lucide-react';
-import { LiveCommentsApi } from '../../core/services';
+import React, { useState } from 'react';
+import { View, TextInput, TouchableOpacity, Text, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { Send, HelpCircle, MessageSquare } from 'lucide-react-native';
+import { colors } from '@nermai/theme';
+import { LiveCommentsApi } from '@nermai/api/services/liveComments';
 
 interface CommentInputProps {
   liveSessionId: string;
   isAdmin?: boolean;
-  filterMode: 'CHAT' | 'DOUBTS';
-  onRefresh: () => void;
-  replyTo: { id: string; name: string } | null;
-  onCancelReply: () => void;
 }
 
-export const CommentInput: React.FC<CommentInputProps> = ({ 
-  liveSessionId, 
-  isAdmin, 
-  filterMode, 
-  onRefresh,
-  replyTo,
-  onCancelReply
-}) => {
+export const CommentInput = ({ liveSessionId, isAdmin }: CommentInputProps) => {
   const [text, setText] = useState('');
+  const [mode, setMode] = useState<'COMMENT' | 'QUESTION' | 'ANNOUNCEMENT'>('COMMENT');
   const [loading, setLoading] = useState(false);
-  const [asAnnouncement, setAsAnnouncement] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!text.trim() || loading) return;
-
-    setLoading(true);
+  const handleSubmit = async () => {
+    if (!text.trim()) return;
     try {
-      // Determine message type based on UI state
-      let type: 'COMMENT' | 'QUESTION' | 'ANNOUNCEMENT' = 
-        filterMode === 'DOUBTS' ? 'QUESTION' : 'COMMENT';
-        
-      if (isAdmin && asAnnouncement) {
-        type = 'ANNOUNCEMENT';
-      }
-
+      setLoading(true);
       await LiveCommentsApi.createComment({
         liveSessionId,
+        type: mode,
         text: text.trim(),
-        type,
       });
-
       setText('');
-      if (replyTo) onCancelReply();
-      if (asAnnouncement) setAsAnnouncement(false);
-      onRefresh();
-    } catch (err) {
-      console.error('Failed to post comment', err);
+      setMode('COMMENT');
+    } catch (e) {
+      console.warn('Failed to submit comment:', e);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-[#1E293B] border-t border-white/10 p-3 flex flex-col gap-2">
-      
-      {/* Reply Context Bar */}
-      {replyTo && (
-        <div className="flex items-center justify-between bg-slate-800 px-3 py-1.5 rounded text-sm text-slate-300">
-          <span>Replying to <span className="font-semibold text-white">{replyTo.name}</span></span>
-          <button type="button" onClick={onCancelReply} className="text-slate-400 hover:text-white">
-            <X size={14} />
-          </button>
-        </div>
-      )}
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.container}>
+        {/* Mode Selector */}
+        <View style={styles.modeSelector}>
+          <TouchableOpacity 
+            style={[styles.modeBtn, mode === 'COMMENT' && styles.modeBtnActive]}
+            onPress={() => setMode('COMMENT')}
+          >
+            <MessageSquare size={14} color={mode === 'COMMENT' ? '#000' : colors.textSecondary} />
+            <Text style={[styles.modeText, mode === 'COMMENT' && styles.modeTextActive]}>Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.modeBtn, mode === 'QUESTION' && styles.modeQuestionActive]}
+            onPress={() => setMode('QUESTION')}
+          >
+            <HelpCircle size={14} color={mode === 'QUESTION' ? '#000' : colors.textSecondary} />
+            <Text style={[styles.modeText, mode === 'QUESTION' && styles.modeTextActive]}>Ask Question</Text>
+          </TouchableOpacity>
+          
+          {isAdmin && (
+            <TouchableOpacity 
+              style={[styles.modeBtn, mode === 'ANNOUNCEMENT' && styles.modeAdminActive]}
+              onPress={() => setMode('ANNOUNCEMENT')}
+            >
+              <Text style={[styles.modeText, mode === 'ANNOUNCEMENT' && styles.modeTextActive]}>Announce</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
-      {/* Admin Announcement Toggle */}
-      {isAdmin && !replyTo && (
-        <div className="flex items-center gap-2 px-1">
-          <input 
-            type="checkbox" 
-            id="announcement-toggle"
-            checked={asAnnouncement}
-            onChange={(e) => setAsAnnouncement(e.target.checked)}
-            className="rounded border-slate-600 text-accent focus:ring-accent/20 bg-slate-800"
+        {/* Input Area */}
+        <View style={styles.inputWrapper}>
+          <TextInput
+            style={styles.input}
+            placeholder={mode === 'QUESTION' ? 'Ask a question...' : mode === 'ANNOUNCEMENT' ? 'Make an announcement...' : 'Type a message...'}
+            placeholderTextColor={colors.textSecondary}
+            value={text}
+            onChangeText={setText}
+            multiline
+            maxLength={500}
           />
-          <label htmlFor="announcement-toggle" className="text-xs text-slate-400 select-none cursor-pointer">
-            Send as Announcement
-          </label>
-        </div>
-      )}
-
-      {/* Input Area */}
-      <div className="flex items-end gap-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={filterMode === 'DOUBTS' ? 'Ask a question...' : 'Type a message...'}
-          className="flex-1 bg-[#0F172A] text-sm text-white placeholder-slate-500 border border-slate-700 rounded-lg px-3 py-2.5 max-h-32 min-h-[44px] resize-none focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-          rows={1}
-        />
-        <button
-          type="submit"
-          disabled={!text.trim() || loading}
-          className="flex-shrink-0 w-[44px] h-[44px] flex items-center justify-center bg-accent text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-accent/90 transition-colors"
-        >
-          <Send size={18} />
-        </button>
-      </div>
-    </form>
+          <TouchableOpacity 
+            style={[
+              styles.sendBtn, 
+              !text.trim() && { opacity: 0.5 },
+              mode === 'QUESTION' && { backgroundColor: colors.accent },
+              mode === 'ANNOUNCEMENT' && { backgroundColor: colors.primary }
+            ]}
+            disabled={!text.trim() || loading}
+            onPress={handleSubmit}
+          >
+            {loading ? <ActivityIndicator size="small" color="#000" /> : <Send size={20} color="#000" />}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 };
 
+const styles = StyleSheet.create({
+  container: {
+    backgroundColor: colors.surface,
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  modeSelector: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    gap: 8,
+  },
+  modeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#2A2A2A',
+  },
+  modeBtnActive: {
+    backgroundColor: colors.textPrimary,
+  },
+  modeQuestionActive: {
+    backgroundColor: colors.accent,
+  },
+  modeAdminActive: {
+    backgroundColor: colors.primary,
+  },
+  modeText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  modeTextActive: {
+    color: '#000',
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    color: colors.textPrimary,
+    minHeight: 48,
+    maxHeight: 120,
+  },
+  sendBtn: {
+    backgroundColor: colors.textPrimary,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  }
+});

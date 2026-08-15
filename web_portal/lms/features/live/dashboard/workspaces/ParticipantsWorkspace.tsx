@@ -1,6 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLiveSessionContext } from '../../context/LiveSessionContext';
-import { LiveSessionApi } from '../../../../core/services';
+import { LiveSessionApi } from '@nermai/api';
 import { liveEventBus } from '../orchestration/LiveEventBus';
 import { Search, Mic, MicOff, Hand, Video } from 'lucide-react';
 
@@ -109,4 +109,3 @@ export const ParticipantsWorkspace: React.FC = () => {
     </div>
   );
 };
-

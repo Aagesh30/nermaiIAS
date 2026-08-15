@@ -8,6 +8,11 @@ import { AppError } from '../../../core/errors/AppError';
 import { StreamOptions, StreamResult } from './IResourceProvider';
 
 export class FirebaseStorageProvider implements IResourceProvider {
+  private getBucket() {
+    const bucketName = process.env.STORAGE_BUCKET || 'nermaiiasacademy-519c8-resources';
+    return storage.bucket(bucketName);
+  }
+
   async getStream(resource: IResource, options?: StreamOptions): Promise<StreamResult> {
     const storagePath = decrypt(resource.storagePath);
     if (!storagePath) {
@@ -15,7 +20,7 @@ export class FirebaseStorageProvider implements IResourceProvider {
     }
     
     try {
-      const file = storage.bucket().file(storagePath);
+      const file = this.getBucket().file(storagePath);
       const [exists] = await file.exists();
       if (!exists) {
          throw new AppError('File not found in Firebase Storage', 404);

@@ -35,26 +35,29 @@ function getFirebaseApp(): App {
     return _app;
   }
 
+  // Use the newly created custom dotless bucket as primary.
+  const projectId = env.FIREBASE_PROJECT_ID || 'nermaiiasacademy-519c8';
+  let storageBucket = process.env.STORAGE_BUCKET || `${projectId}-resources`;
+
   try {
     if (env.NODE_ENV === 'test') {
-      _app = initializeApp({ projectId: env.FIREBASE_PROJECT_ID });
+      _app = initializeApp({ projectId });
     } else if (!env.FIREBASE_PRIVATE_KEY || env.FIREBASE_PRIVATE_KEY === 'mock-key') {
-      _app = initializeApp({
-        storageBucket: `${env.FIREBASE_PROJECT_ID || 'nermaiiasacademy-519c8'}.appspot.com`
-      });
+      // Cloud Functions: use Application Default Credentials with explicit bucket
+      _app = initializeApp({ storageBucket });
     } else {
       // .env stores the key with literal \n — convert them to real newlines
       const privateKey = env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
       _app = initializeApp({
-        storageBucket: `${env.FIREBASE_PROJECT_ID}.appspot.com`,
+        storageBucket,
         credential: cert({
-          projectId: env.FIREBASE_PROJECT_ID,
+          projectId,
           clientEmail: env.FIREBASE_CLIENT_EMAIL,
           privateKey,
         }),
       });
     }
-    logger.info('Firebase Admin initialized successfully.');
+    logger.info(`Firebase Admin initialized successfully. Bucket: ${storageBucket}`);
   } catch (error: any) {
     logger.error('Firebase Admin initialization error:', error);
     throw new Error(`Firebase Admin failed to initialize: ${error.message}`);

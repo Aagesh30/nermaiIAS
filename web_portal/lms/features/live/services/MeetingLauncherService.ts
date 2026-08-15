@@ -1,13 +1,13 @@
-﻿import { MeetingLaunchRequest, MeetingWindowState, MeetingBridgeEvent } from './MeetingTypes';
+import { MeetingLaunchRequest, MeetingWindowState, MeetingBridgeEvent } from './MeetingTypes';
 import { MeetingStateManager } from './MeetingStateManager';
 import { MeetingTelemetryService } from './MeetingTelemetryService';
-import { getApiClient } from '../../../core/services';
+import { getApiClient } from '@nermai/api';
 
 const getZoomPopupRenderer = () => {
-  if (process.env.EXPO_PUBLIC_ZOOM_RENDERER === 'client') {
-    return '/meeting-hosts/zoom-client-launch.html';
+  if (process.env.EXPO_PUBLIC_ZOOM_RENDERER === 'sdk') {
+    return '/meeting-hosts/zoom-sdk-launch.html';
   }
-  return '/meeting-hosts/zoom-sdk-launch.html';
+  return '/meeting-hosts/zoom-client-launch.html';
 };
 
 /** Maps provider IDs to their SDK launch page filenames */
@@ -252,4 +252,3 @@ class MeetingLauncherServiceClass {
 }
 
 export const meetingLauncher = new MeetingLauncherServiceClass();
-

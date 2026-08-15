@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLiveSessionContext } from '../../context/LiveSessionContext';
-import { NERMAIAssistantWidget } from '../../../../student/NERMAIAssistantWidget';
+import { NERMAIAssistantWidget } from '../../../../student/LMS/Assistant/NERMAIAssistantWidget';
 import { Bot } from 'lucide-react';
 
 export const AIWorkspace: React.FC = () => {
@@ -24,4 +24,3 @@ export const AIWorkspace: React.FC = () => {
     </div>
   );
 };
-

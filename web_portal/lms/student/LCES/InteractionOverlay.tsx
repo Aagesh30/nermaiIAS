@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export interface InteractionEvent {
@@ -109,4 +109,3 @@ export const InteractionOverlay: React.FC<InteractionOverlayProps> = ({ liveSess
     </div>
   );
 };
-

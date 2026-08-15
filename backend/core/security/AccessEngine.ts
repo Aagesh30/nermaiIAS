@@ -114,7 +114,8 @@ export class AccessEngine {
     let signedUrl: string | null = null;
     if (resourceType === 'resource' && params.storagePath) {
       try {
-        const bucket = storage.bucket();
+        const bucketName = process.env.STORAGE_BUCKET || 'nermaiiasacademy-519c8-resources';
+        const bucket = storage.bucket(bucketName);
         const file = bucket.file(params.storagePath);
         const [url] = await file.getSignedUrl({
           version: 'v4',

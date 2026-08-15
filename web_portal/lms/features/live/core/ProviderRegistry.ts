@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 
 // Lazy load providers to keep the initial bundle small
 const ZoomMeetingPage = React.lazy(() => 
@@ -94,4 +94,3 @@ providerRegistry.register({
     supportsRaiseHand: true,
   }
 });
-

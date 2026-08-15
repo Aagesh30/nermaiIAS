@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
-import { CourseApi  } from '../core/services';
+import React, { useState, useEffect, useRef } from 'react';
+import { CourseApi  } from '@nermai/api';
 import { LoadingPlayer } from './components/LoadingPlayer';
 import { ErrorState } from './components/ErrorState';
 import { YoutubePlayer } from './YoutubePlayer';
@@ -137,4 +137,3 @@ export const MeetingPlayerFactory: React.FC<MeetingPlayerFactoryProps> = ({ clas
 
   return <PlayerComponent accessData={accessData} onRefresh={fetchAccess} playerToken={accessData.playerToken} />;
 };
-

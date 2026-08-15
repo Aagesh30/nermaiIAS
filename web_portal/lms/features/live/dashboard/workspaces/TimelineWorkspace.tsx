@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { liveEventBus, LiveEventMap, LiveEvent } from '../orchestration/LiveEventBus';
 import { Activity, UserPlus, UserMinus, MonitorUp, Info, AlertCircle, Video, CheckSquare } from 'lucide-react';
 
@@ -105,4 +105,3 @@ export const TimelineWorkspace: React.FC = () => {
     </div>
   );
 };
-

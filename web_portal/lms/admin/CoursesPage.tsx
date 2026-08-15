@@ -162,9 +162,23 @@ export const CoursesPage = () => {
             <AdminInput label="Price (₹)" type="number" placeholder="0" value={formData.price} onChange={(e) => setFormData({...formData, price: Number(e.target.value)})} />
           </div>
           <AdminInput label="Tags (comma separated)" placeholder="e.g. prelims, mains, general studies" value={formData.tags} onChange={(e) => setFormData({...formData, tags: e.target.value})} />
-          <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 dark:border-white/10">
-            <AdminButton type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</AdminButton>
-            <AdminButton type="submit">Save Course</AdminButton>
+          <div className="pt-4 flex justify-between items-center border-t border-gray-100 dark:border-white/10">
+            {editingCourse ? (
+              <AdminButton
+                type="button"
+                variant="danger"
+                onClick={() => {
+                  setIsModalOpen(false);
+                  handleDelete(editingCourse);
+                }}
+              >
+                Delete Course
+              </AdminButton>
+            ) : <div />}
+            <div className="flex gap-3">
+              <AdminButton type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Cancel</AdminButton>
+              <AdminButton type="submit">Save Course</AdminButton>
+            </div>
           </div>
         </form>
       </AdminModal>

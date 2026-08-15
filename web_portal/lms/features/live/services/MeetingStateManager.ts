@@ -1,4 +1,4 @@
-﻿import { MeetingWindowState, MeetingBridgeEvent } from './MeetingTypes';
+import { MeetingWindowState, MeetingBridgeEvent } from './MeetingTypes';
 
 type StateListener = (state: MeetingWindowState) => void;
 
@@ -67,4 +67,3 @@ class MeetingStateManagerClass {
 }
 
 export const MeetingStateManager = new MeetingStateManagerClass();
-

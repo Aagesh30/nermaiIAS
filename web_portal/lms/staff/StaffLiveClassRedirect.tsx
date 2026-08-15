@@ -1,6 +1,6 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { LiveSessionApi } from '../core/services';
+import { LiveSessionApi } from '@nermai/api';
 
 /**
  * StaffLiveClassRedirect
@@ -67,5 +67,3 @@ export const StaffLiveClassRedirect: React.FC = () => {
     </div>
   );
 };
-
-

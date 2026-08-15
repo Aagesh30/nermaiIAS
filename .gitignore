@@ -6,6 +6,7 @@ node_modules/
 *.xlsx
 *.pdf
 temp_zip_extract/
+temp_zoom_extract/
 dist/
 build/
 .env

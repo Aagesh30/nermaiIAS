@@ -1,4 +1,4 @@
-﻿import { liveEventBus, LiveEventMap, LiveEvent } from '../dashboard/orchestration/LiveEventBus';
+import { liveEventBus, LiveEventMap, LiveEvent } from '../dashboard/orchestration/LiveEventBus';
 import { MeetingStateManager } from './MeetingStateManager';
 import { MeetingWindowState } from './MeetingTypes';
 
@@ -50,4 +50,3 @@ class MeetingStateBusAdapterService {
 }
 
 export const meetingStateBusAdapter = new MeetingStateBusAdapterService();
-

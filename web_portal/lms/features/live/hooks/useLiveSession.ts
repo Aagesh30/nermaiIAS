@@ -1,4 +1,4 @@
-﻿import { useContext } from 'react';
+import { useContext } from 'react';
 import { LiveSessionContext } from '../context/LiveSessionContext';
 
 export function useLiveSession() {
@@ -8,4 +8,3 @@ export function useLiveSession() {
   }
   return context;
 }
-

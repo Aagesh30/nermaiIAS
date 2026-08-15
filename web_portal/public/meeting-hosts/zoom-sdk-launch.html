@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Zoom Meeting — NERMAI</title>
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #0a0a0a;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: white;
+    }
+
+    #meeting-root {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0a0a0a;
+    }
+
+    .status-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      gap: 16px;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border-top: 3px solid #3b82f6;
+      width: 36px;
+      height: 36px;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-text {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.6);
+      letter-spacing: 0.02em;
+    }
+
+    .error-box {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 12px;
+      padding: 24px 32px;
+      max-width: 420px;
+      text-align: center;
+    }
+
+    .error-box h3 {
+      color: #f87171;
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .error-box p {
+      color: rgba(255, 255, 255, 0.5);
+      margin: 0 0 16px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .btn-return {
+      display: inline-block;
+      padding: 10px 24px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    .btn-return:hover { background: #2563eb; }
+
+    .ended-box {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 12px;
+      padding: 24px 32px;
+      max-width: 380px;
+      text-align: center;
+    }
+
+    .ended-box h3 { color: #34d399; margin: 0 0 8px; }
+    .ended-box p  { color: rgba(255,255,255,0.5); margin: 0 0 16px; font-size: 14px; }
+  </style>
+
+  <!--
+    CRITICAL: All vendor scripts come from source.zoom.us/6.2.0
+    Do NOT replace with unpkg, jsDelivr, or any external CDN.
+    Mixing versions causes internal React render failures.
+  -->
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/lodash.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/zoom-meeting-embedded-6.2.0.min.js"></script>
+</head>
+
+<body>
+  <div id="status-overlay" class="status-overlay">
+    <div class="spinner"></div>
+    <div class="status-text" id="status-text">Authenticating secure meeting session…</div>
+  </div>
+
+  <!-- Debug Overlay for Layout Investigation -->
+  <div id="debug-overlay" style="position:fixed;top:10px;left:10px;z-index:9999;background:rgba(0,0,0,0.8);padding:10px;border-radius:8px;border:1px solid #3b82f6;display:none;font-size:12px;">
+    <h4 style="margin:0 0 8px;color:#60a5fa;">Layout Debugger</h4>
+    <button onclick="logDomSizes()" style="background:#3b82f6;border:none;padding:4px 8px;border-radius:4px;color:white;cursor:pointer;margin-bottom:8px;">Log DOM Sizes</button><br>
+    <button onclick="switchLayout('gallery')" style="background:#10b981;border:none;padding:4px 8px;border-radius:4px;color:white;cursor:pointer;margin-bottom:4px;">Force Gallery View</button><br>
+    <button onclick="switchLayout('speaker')" style="background:#8b5cf6;border:none;padding:4px 8px;border-radius:4px;color:white;cursor:pointer;">Force Speaker View</button>
+  </div>
+
+  <div id="meeting-root" style="display:none;"></div>
+
+  <script>
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    var urlParams  = new URLSearchParams(window.location.search);
+    var token      = urlParams.get('token');
+    var sessionId  = urlParams.get('sessionId');
+    var apiUrl     = urlParams.get('apiUrl') || window.location.origin;
+    var destroyed  = false;
+    var client     = null;
+
+    // --- Layout Debug Helpers ---
+    function logDomSizes() {
+      var mRoot = document.getElementById('meeting-root');
+      var zRoot = mRoot ? mRoot.firstElementChild : null;
+      var zChild = zRoot ? zRoot.firstElementChild : null;
+      var zChildRect = zChild ? zChild.getBoundingClientRect() : null;
+      
+      console.log('====== DOM MEASUREMENT LOG ======');
+      console.log('Window:', window.innerWidth + ' x ' + window.innerHeight);
+      console.log('MeetingRoot (#meeting-root):', mRoot ? mRoot.clientWidth + ' x ' + mRoot.clientHeight : 'null');
+      console.log('ZoomRoot (1st child):', zRoot ? zRoot.clientWidth + ' x ' + zRoot.clientHeight : 'null');
+      console.log('Zoom Internal Child (2nd child):', zChildRect ? 
+         zChildRect.width + ' x ' + zChildRect.height + ' (top: ' + zChildRect.top + ', left: ' + zChildRect.left + ')'
+       : 'null');
+      console.log('=================================');
+    }
+
+    function switchLayout(viewMode) {
+      if (!client) return;
+      console.log('Attempting runtime switch to:', viewMode);
+      try {
+        client.updateVideoOptions({
+          defaultView: viewMode,
+          viewSizes: {
+            default: { width: window.innerWidth, height: window.innerHeight },
+            ribbon: { width: 300 }
+          }
+        });
+      } catch (err) {
+        console.error('Failed to switch layout:', err);
+      }
+    }
+
+    function setStatus(msg) {
+      var el = document.getElementById('status-text');
+      if (el) el.textContent = msg;
+    }
+
+    function showError(msg) {
+      var overlay = document.getElementById('status-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.style.background = '#0a0a0a'; // Obscure Zoom completely without hiding its DOM node
+        overlay.innerHTML =
+          '<div class="error-box">'
+          + '<h3>Connection to LMS Lost</h3>'
+          + '<p>' + msg + '</p>'
+          + '<button class="btn-return" onclick="returnToLMS()">Return to NERMAI</button>'
+          + '</div>';
+      }
+    }
+
+    function showEnded() {
+      var overlay = document.getElementById('status-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.style.background = '#0a0a0a'; // Obscure Zoom completely
+        overlay.innerHTML =
+          '<div class="ended-box">'
+          + '<h3>Meeting Ended</h3>'
+          + '<p>Returning you to NERMAI…</p>'
+          + '<button class="btn-return" onclick="returnToLMS()">Return to NERMAI</button>'
+          + '</div>';
+      }
+      setTimeout(returnToLMS, 3000);
+    }
+
+    function returnToLMS() {
+      postBridgeEvent('WINDOW_CLOSED');
+      if (window.opener && !window.opener.closed) {
+        window.opener.focus();
+      }
+      window.close();
+    }
+
+    /**
+     * postBridgeEvent — sends lifecycle events to NERMAI.
+     * Supports two transports:
+     *   1. window.ReactNativeWebView.postMessage (Expo/React Native WebView)
+     *   2. window.opener.postMessage (desktop web popup)
+     */
+    function postBridgeEvent(type) {
+      var msg = JSON.stringify({ type: 'ZOOM_EVENT', event: type, provider: 'zoom', sessionId: sessionId });
+      // Mobile WebView bridge (Expo Go / React Native)
+      if (window.ReactNativeWebView) {
+        try { window.ReactNativeWebView.postMessage(msg); } catch (_) {}
+        return;
+      }
+      // Desktop popup bridge
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage(msg, window.location.origin); } catch (_) {}
+      }
+    }
+
+    window.addEventListener('beforeunload', function () {
+      destroyed = true;
+      postBridgeEvent('WINDOW_CLOSED');
+      if (client) {
+        try { client.leaveMeeting(); } catch (_) {}
+      }
+    });
+
+    window.addEventListener('message', function (e) {
+      if (e.origin !== window.location.origin) return;
+      try {
+        var msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (msg && msg.type === 'HEARTBEAT' && window.opener && !window.opener.closed) {
+          window.opener.postMessage(JSON.stringify({ type: 'HEARTBEAT_ACK', sessionId: sessionId }), window.location.origin);
+        }
+      } catch (_) {}
+    });
+
+    // ── Main Init ────────────────────────────────────────────────────────────
+
+    async function init() {
+      if (!token) {
+        showError('No session token provided.');
+        return;
+      }
+
+      try {
+        // 1. Exchange one-time token for SDK payload (token consumed here)
+        var baseUrl = apiUrl.endsWith('/api/v1')
+          ? apiUrl.replace(/\/api\/v1$/, '')
+          : apiUrl;
+
+        setStatus('Connecting to session…');
+        var res = await fetch(baseUrl + '/api/v1/live-sessions/token/' + token);
+        if (destroyed) return;
+
+        if (!res.ok) {
+          throw new Error('Session token expired or invalid (HTTP ' + res.status + ').');
+        }
+
+        var contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error('Unexpected server response. Please try again.');
+        }
+
+        var json = await res.json();
+        if (destroyed) return;
+
+        var data = json.data;
+        if (!data || !data.sdk) {
+          throw new Error('Invalid session payload from server.');
+        }
+
+        // 2. Create and init the Zoom SDK client
+        setStatus('Initializing meeting…');
+        client = ZoomMtgEmbedded.createClient();
+
+        var root = document.getElementById('meeting-root');
+        document.getElementById('status-overlay').style.display = 'none';
+        root.style.display = 'block';
+
+        // Ensure layout is computed before SDK measures the container
+        await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+
+        await client.init({
+          zoomAppRoot: root,
+          language: 'en-US',
+          customize: {
+            video: {
+              isResizable: true,
+              defaultView: 'gallery',
+              viewSizes: {
+                default: {
+                  width: window.innerWidth,
+                  height: window.innerHeight
+                },
+                ribbon: {
+                  width: 300
+                }
+              }
+            }
+          }
+        });
+        if (destroyed) return;
+
+        // Dynamically resize Zoom SDK when the popup window resizes
+        window.addEventListener('resize', function () {
+          if (client && !destroyed) {
+            try {
+              client.updateVideoOptions({
+                viewSizes: {
+                  default: {
+                    width: window.innerWidth,
+                    height: window.innerHeight
+                  }
+                }
+              });
+            } catch (_) {}
+          }
+        });
+
+        // 3. Register events AFTER init (correct lifecycle for SDK 6.2.x)
+        client.on('connection-change', function (e) {
+          if (e.state === 'Connected') {
+            postBridgeEvent('MEETING_STARTED');
+          } else if (e.state === 'Closed') {
+            postBridgeEvent('MEETING_ENDED');
+            showEnded();
+          }
+        });
+
+        // Forward participant events to EventBus
+        client.on('user-added', function(payload) {
+          if (payload && payload.length > 0) {
+            payload.forEach(function(user) {
+              if (window.opener && !window.opener.closed) {
+                var isHost = user.role === 'host' || user.role === 1;
+                var msg = JSON.stringify({
+                  type: isHost ? 'HOST_CONNECTED' : 'PARTICIPANT_JOINED',
+                  provider: 'zoom',
+                  sessionId: sessionId,
+                  providerParticipantId: user.userId,
+                  displayName: user.displayName,
+                  role: user.role,
+                  isRemote: true
+                });
+                try { window.opener.postMessage(msg, window.location.origin); } catch (_) {}
+              }
+            });
+          }
+        });
+
+        client.on('user-removed', function(payload) {
+          if (payload && payload.length > 0) {
+            payload.forEach(function(user) {
+              if (window.opener && !window.opener.closed) {
+                var isHost = user.role === 'host' || user.role === 1;
+                var msg = JSON.stringify({
+                  type: isHost ? 'HOST_DISCONNECTED' : 'PARTICIPANT_LEFT',
+                  provider: 'zoom',
+                  sessionId: sessionId,
+                  providerParticipantId: user.userId,
+                  displayName: user.displayName,
+                  isRemote: true
+                });
+                try { window.opener.postMessage(msg, window.location.origin); } catch (_) {}
+              }
+            });
+          }
+        });
+
+        // 4. Join the meeting
+        setStatus('Joining meeting…');
+        var joinOpts = {
+          signature:     data.sdk.signature,
+          meetingNumber: data.meetingId.replace(/\D/g, ''),
+          password:      data.sdk.passcode || '',
+          userName:      data.displayName || 'Participant'
+        };
+        if (data.sdk.zak) joinOpts.zak = data.sdk.zak;
+
+        await client.join(joinOpts);
+        if (destroyed) return;
+
+        postBridgeEvent('MEETING_STARTED');
+
+        // Reveal debug controls
+        var debugOverlay = document.getElementById('debug-overlay');
+        if (debugOverlay) debugOverlay.style.display = 'block';
+        
+        // Log DOM sizes immediately after join
+        setTimeout(logDomSizes, 1000);
+
+        // Force a layout recalculation now that the meeting is fully joined.
+        // Popups often report incorrect window dimensions during initialization.
+        setTimeout(function() {
+          if (!destroyed && client) {
+            window.dispatchEvent(new Event('resize'));
+            try {
+              client.updateVideoOptions({
+                viewSizes: {
+                  default: {
+                    width: window.innerWidth,
+                    height: window.innerHeight
+                  }
+                }
+              });
+            } catch(e) {}
+          }
+        }, 500);
+
+      } catch (err) {
+        var msg = err.reason || err.message || 'Failed to connect to the meeting.';
+        showError(msg);
+        postBridgeEvent('MEETING_ENDED');
+      }
+    }
+
+    init();
+  </script>
+</body>
+
+</html>

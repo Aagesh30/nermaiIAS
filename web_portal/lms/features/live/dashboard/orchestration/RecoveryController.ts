@@ -66,7 +66,7 @@ class RecoveryManager {
   private handleNetworkDisconnect = () => {
     console.warn('[RecoveryController] Network disconnected. Meeting is attempting to reconnect...');
     const currentStatus = this.getAcademicState ? this.getAcademicState() : 'SCHEDULED';
-    if (currentStatus !== 'ENDED') {
+    if (currentStatus !== 'ENDED' && currentStatus !== 'CANCELLED') {
       console.warn(JSON.stringify({
         event: "INVALID_STATE_TRANSITION",
         from: currentStatus,
@@ -97,4 +97,3 @@ class RecoveryManager {
 }
 
 export const recoveryController = new RecoveryManager();
-

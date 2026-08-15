@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { CommentList } from './CommentList';
 import { CommentInput } from './CommentInput';
-import { useLiveComments } from '../../core/shared/src';
+import { useLiveComments } from '@nermai/shared';
 import { MessageCircle } from 'lucide-react';
-import { getUserFromAuth } from '../../core/api';
 import { useAuth } from '../../core/auth/AuthProvider';
 
 interface ChatSidebarProps {
@@ -81,4 +80,3 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({ liveSessionId, classNa
     </div>
   );
 };
-

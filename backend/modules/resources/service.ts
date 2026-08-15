@@ -16,6 +16,11 @@ import { IResourceProvider } from './providers/IResourceProvider';
 export class ResourceService {
   private repo = new ResourceRepository();
 
+  private getBucket() {
+    const bucketName = process.env.STORAGE_BUCKET || 'nermaiiasacademy-519c8-resources';
+    return storage.bucket(bucketName);
+  }
+
   async createResource(data: any, file: any, userId: string, tenantId: string) {
     let finalStoragePath = '';
     let checksum = '';
@@ -26,7 +31,7 @@ export class ResourceService {
       fileSize = file.size;
       checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
       
-      const bucket = storage.bucket();
+      const bucket = this.getBucket();
       const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
       const bucketFile = bucket.file(destPath);
       
@@ -214,7 +219,7 @@ export class ResourceService {
     if (resource.provider === 'firebase_storage') {
       try {
         const decryptedPath = decrypt(resource.storagePath);
-        await storage.bucket().file(decryptedPath).delete();
+        await this.getBucket().file(decryptedPath).delete();
       } catch (e) {
         // Log but continue — document must still be soft-deleted even if blob is gone
       }
@@ -223,7 +228,7 @@ export class ResourceService {
     await this.repo.delete(id);
   }
 
-  async getResourceAccess(resourceId: string, user: any) {
+  async getResourceAccess(resourceId: string, user: any, protocol?: string, host?: string) {
     const resource = await this.repo.findById(resourceId);
     if (!resource) throw new AppError('Resource not found', 404);
     
@@ -262,7 +267,9 @@ export class ResourceService {
       viewerUrl = `https://drive.google.com/file/d/${fileId}/preview`;
       viewerType = 'webview';
     } else if (resource.provider === 'firebase_storage' && access.signedUrl) {
-      viewerUrl = access.signedUrl;
+      // Use the absolute backend proxy secure-stream path to bypass CORS issues on the client browser.
+      const baseUrl = (protocol && host) ? `${protocol}://${host}` : '';
+      viewerUrl = `${baseUrl}/api/resources/${resource.id}/secure-stream?token=${access.token}`;
       viewerType = 'pdf';
     } else if (resource.provider === 'external_link' && decryptedPath) {
       viewerUrl = decryptedPath;
@@ -576,7 +583,7 @@ YES
     const fileSize = file.size;
     const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
     
-    const bucket = storage.bucket();
+    const bucket = this.getBucket();
     const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
     const bucketFile = bucket.file(destPath);
     
@@ -600,7 +607,7 @@ YES
     // Attempt to delete old file
     try {
       const oldPath = decrypt(existing.storagePath);
-      await bucket.file(oldPath).delete();
+      await this.getBucket().file(oldPath).delete();
     } catch(e) {}
 
     return { ...existing, ...updateData };

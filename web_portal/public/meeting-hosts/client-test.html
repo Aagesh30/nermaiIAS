@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Zoom Meeting (Client View) — NERMAI Debug</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #0a0a0a;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: white;
+    }
+
+    #zmmtg-root {
+      display: none;
+    }
+    
+    .status-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      gap: 16px;
+    }
+  </style>
+
+  <!-- Client View SDK Scripts (3.8.0 equivalent to 6.x) -->
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/3.8.0/lib/vendor/lodash.min.js"></script>
+  <script src="https://source.zoom.us/zoom-meeting-3.8.0.min.js"></script>
+</head>
+
+<body>
+  <div id="status-overlay" class="status-overlay">
+    <div class="status-text" id="status-text">Authenticating secure meeting session (Client View)…</div>
+  </div>
+
+  <script>
+    var urlParams  = new URLSearchParams(window.location.search);
+    var token      = urlParams.get('token');
+    var sessionId  = urlParams.get('sessionId');
+    var apiUrl     = urlParams.get('apiUrl') || window.location.origin;
+
+    function setStatus(msg) {
+      var el = document.getElementById('status-text');
+      if (el) el.textContent = msg;
+    }
+
+    async function init() {
+      if (!token) return setStatus('No session token provided.');
+
+      try {
+        var baseUrl = apiUrl.endsWith('/api/v1') ? apiUrl.replace(/\/api\/v1$/, '') : apiUrl;
+        
+        setStatus('Connecting to session…');
+        var res = await fetch(baseUrl + '/api/v1/live-sessions/token/' + token);
+        if (!res.ok) throw new Error('Token expired.');
+
+        var json = await res.json();
+        var data = json.data;
+
+        setStatus('Initializing meeting…');
+        ZoomMtg.preLoadWasm();
+        ZoomMtg.prepareWebSDK();
+
+        ZoomMtg.init({
+          leaveUrl: window.location.origin,
+          success: function () {
+            document.getElementById('status-overlay').style.display = 'none';
+
+            var joinOpts = {
+              signature:     data.sdk.signature,
+              meetingNumber: data.meetingId.replace(/\D/g, ''),
+              userName:      data.displayName || 'Participant Debug',
+              passWord:      data.sdk.passcode || '',
+              success: function(res) {
+                console.log('Client View join success', res);
+              },
+              error: function(res) {
+                console.error(res);
+              }
+            };
+            if (data.sdk.zak) joinOpts.zak = data.sdk.zak;
+
+            ZoomMtg.join(joinOpts);
+          },
+          error: function(res) {
+            console.error(res);
+          }
+        });
+
+      } catch (err) {
+        setStatus(err.message || 'Failed to connect.');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

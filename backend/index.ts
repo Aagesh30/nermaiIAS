@@ -1,20 +1,10 @@
+import { onRequest } from "firebase-functions/v2/https";
 import app from "./app";
 
 /**
- * Main Firebase Cloud Functions & Cloud Run Serverless Entry Point
- * Exports Express app for Firebase Hosting rewrites and Cloud Functions / Cloud Run deployment.
+ * Main Firebase Cloud Functions Entry Point
+ * Exports Express app with v2 Cloud Functions configuration for region asia-south1.
  */
-let firebaseApp: any = app;
-
-try {
-    // Dynamically require firebase-functions if available in environment
-    const functions = require("firebase-functions");
-    if (functions && functions.https) {
-        firebaseApp = functions.https.onRequest(app);
-    }
-} catch (e) {
-    // If firebase-functions package is not installed, export native Express app for Cloud Run / Node
-}
-
-export const api = firebaseApp;
+export const api = onRequest({ region: "asia-south1", timeoutSeconds: 300, memory: "1GiB" }, app);
 export default app;
+

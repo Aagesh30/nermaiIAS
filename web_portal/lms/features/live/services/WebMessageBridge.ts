@@ -1,4 +1,4 @@
-﻿import { liveEventBus, LiveEventMap, LiveEvent } from '../dashboard/orchestration/LiveEventBus';
+import { liveEventBus, LiveEventMap, LiveEvent } from '../dashboard/orchestration/LiveEventBus';
 
 class WebMessageBridgeService {
   private isListening = false;
@@ -56,4 +56,3 @@ class WebMessageBridgeService {
 }
 
 export const webMessageBridge = new WebMessageBridgeService();
-

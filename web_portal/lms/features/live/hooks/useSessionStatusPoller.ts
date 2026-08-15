@@ -1,5 +1,5 @@
-﻿import { useState, useEffect, useRef } from 'react';
-import { LiveSessionApi } from '../../../core/services';
+import { useState, useEffect, useRef } from 'react';
+import { LiveSessionApi } from '@nermai/api';
 
 type SessionStatus =
   | 'DRAFT'
@@ -84,4 +84,3 @@ export function useSessionStatusPoller(
     error,
   };
 }
-

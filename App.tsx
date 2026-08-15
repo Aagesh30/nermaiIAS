@@ -16,6 +16,7 @@ import {
   NativeModules
 } from "react-native";
 import Constants from "expo-constants";
+import * as ScreenCapture from "expo-screen-capture";
 
 // Custom Alert wrapper — routes to in-app modal on Web, native RNAlert on mobile
 const Alert = {
@@ -251,6 +252,128 @@ if (typeof window !== "undefined") {
   (global as any).globalShowAlert = () => {};
 }
 
+// Web screenshot protection helpers
+let rootContextMenuListener: any = null;
+let rootKeydownListener: any = null;
+let rootBlurListener: any = null;
+let rootFocusListener: any = null;
+let rootStyleElement: any = null;
+
+const enableRootWebScreenshotProtection = () => {
+  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+
+  if (!rootStyleElement) {
+    rootStyleElement = document.createElement("style");
+    rootStyleElement.id = "root-screenshot-protection-styles";
+    rootStyleElement.innerHTML = `
+      @media print {
+        body {
+          display: none !important;
+        }
+      }
+      body {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+      }
+      img {
+        -webkit-user-drag: none !important;
+        -khtml-user-drag: none !important;
+        -moz-user-drag: none !important;
+        -o-user-drag: none !important;
+        user-drag: none !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(rootStyleElement);
+  }
+
+  if (!rootContextMenuListener) {
+    rootContextMenuListener = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", rootContextMenuListener);
+  }
+
+  if (!rootKeydownListener) {
+    rootKeydownListener = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen") {
+        e.preventDefault();
+        try {
+          navigator.clipboard.writeText("");
+        } catch (_) {}
+        alert("Screenshots are disabled on this platform.");
+      }
+      if (
+        (e.ctrlKey && e.key === "p") ||
+        (e.ctrlKey && e.key === "s") ||
+        (e.ctrlKey && e.shiftKey && e.key === "I") ||
+        (e.ctrlKey && e.shiftKey && e.key === "i") ||
+        e.key === "F12" ||
+        (e.ctrlKey && e.key === "u") ||
+        (e.ctrlKey && e.shiftKey && e.key === "C") ||
+        (e.ctrlKey && e.shiftKey && e.key === "c")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", rootKeydownListener, true);
+  }
+
+  if (!rootBlurListener) {
+    rootBlurListener = () => {
+      const rootDiv = document.getElementById("root") || document.body;
+      if (rootDiv) {
+        rootDiv.style.filter = "blur(15px)";
+        rootDiv.style.transition = "filter 0.2s ease";
+      }
+    };
+    window.addEventListener("blur", rootBlurListener);
+  }
+
+  if (!rootFocusListener) {
+    rootFocusListener = () => {
+      const rootDiv = document.getElementById("root") || document.body;
+      if (rootDiv) {
+        rootDiv.style.filter = "none";
+      }
+    };
+    window.addEventListener("focus", rootFocusListener);
+  }
+};
+
+const disableRootWebScreenshotProtection = () => {
+  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+
+  if (rootStyleElement) {
+    rootStyleElement.remove();
+    rootStyleElement = null;
+  }
+  if (rootContextMenuListener) {
+    window.removeEventListener("contextmenu", rootContextMenuListener);
+    rootContextMenuListener = null;
+  }
+  if (rootKeydownListener) {
+    window.removeEventListener("keydown", rootKeydownListener, true);
+    rootKeydownListener = null;
+  }
+  if (rootBlurListener) {
+    window.removeEventListener("blur", rootBlurListener);
+    rootBlurListener = null;
+  }
+  if (rootFocusListener) {
+    window.removeEventListener("focus", rootFocusListener);
+    rootFocusListener = null;
+  }
+
+  const rootDiv = document.getElementById("root") || document.body;
+  if (rootDiv) {
+    rootDiv.style.filter = "none";
+  }
+};
+
 export default function App() {
   const { width: screenWidth } = useWindowDimensions();
   const isMobile = screenWidth < 768;
@@ -283,6 +406,35 @@ export default function App() {
       (global as any).globalShowAlert = globalShowAlert;
     }
   }, []);
+
+  useEffect(() => {
+    const shouldBlock = user && user.role !== "guest";
+    if (shouldBlock) {
+      if (Platform.OS !== "web") {
+        ScreenCapture.preventScreenCaptureAsync().catch(err => {
+          console.warn("Failed to prevent screen capture:", err);
+        });
+      } else {
+        enableRootWebScreenshotProtection();
+      }
+    } else {
+      if (Platform.OS !== "web") {
+        ScreenCapture.allowScreenCaptureAsync().catch(err => {
+          console.warn("Failed to allow screen capture:", err);
+        });
+      } else {
+        disableRootWebScreenshotProtection();
+      }
+    }
+
+    return () => {
+      if (Platform.OS !== "web") {
+        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      } else {
+        disableRootWebScreenshotProtection();
+      }
+    };
+  }, [user]);
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);

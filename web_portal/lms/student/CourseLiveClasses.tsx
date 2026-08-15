@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { Calendar } from 'lucide-react';
 
 export const CourseLiveClasses: React.FC = () => {
@@ -10,4 +10,3 @@ export const CourseLiveClasses: React.FC = () => {
     </div>
   );
 };
-

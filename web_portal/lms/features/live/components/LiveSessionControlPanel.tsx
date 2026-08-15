@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLiveSessionContext } from '../context/LiveSessionContext';
-import { Play, Users, Video, Database, Server, Clock, Power, Shield, Link, Key, CheckSquare, StopCircle, Lock, Download, List, Pause, MoreVertical, Settings, User, AlertCircle, UserPlus, UserMinus, MonitorUp, Info, MicOff, Mic, MessageSquareOff, MessageSquare, Activity } from 'lucide-react';
+import { Play, Users, Video, Database, Server, Clock, Power, Shield, Link, Key, CheckSquare, StopCircle, Lock, Download, List, Pause, MoreVertical, Settings, User, AlertCircle, UserPlus, UserMinus, MonitorUp, Info, MicOff, Mic, MessageSquareOff, MessageSquare } from 'lucide-react';
 import { meetingLauncher } from '../services/MeetingLauncherService';
-import { LiveSessionApi } from '../../../core/services';
+import { LiveSessionApi } from '@nermai/api';
 import { liveEventBus, LiveEventMap } from '../dashboard/orchestration/LiveEventBus';
-import { liveSessionService } from '../../../core/live-core/src';
+import { liveSessionService } from '@nermai/live-core';
 
 interface TimelineEvent {
   id: string;
@@ -331,4 +331,3 @@ export const LiveSessionControlPanel: React.FC = () => {
     </div>
   );
 };
-

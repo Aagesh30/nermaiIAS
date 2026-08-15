@@ -1,4 +1,4 @@
-﻿export type TelemetryEventName =
+export type TelemetryEventName =
   | 'LAUNCH_INITIATED'
   | 'POPUP_OPENED'
   | 'POPUP_BLOCKED'
@@ -65,4 +65,3 @@ class MeetingTelemetryServiceClass {
 }
 
 export const MeetingTelemetryService = new MeetingTelemetryServiceClass();
-

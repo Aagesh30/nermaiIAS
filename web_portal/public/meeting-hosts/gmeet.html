@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Google Meet Launcher — NERMAI</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #050505;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .container {
+      max-width: 420px;
+      padding: 32px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      text-align: center;
+    }
+
+    .brand-logo {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 12px;
+      color: #e2e8f0;
+    }
+
+    p {
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 24px;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border-top: 3px solid #3b82f6;
+      width: 24px;
+      height: 24px;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .btn-launch {
+      display: none;
+      padding: 12px 24px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+
+    .btn-launch:hover {
+      background: #2563eb;
+    }
+
+    .btn-launch:disabled {
+      background: #334155;
+      color: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .warning-text {
+      display: none;
+      margin-top: 16px;
+      font-size: 12px;
+      color: #f59e0b;
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="main-container">
+    <div id="loading-state">
+      <div class="spinner"></div>
+      <p style="margin-top: 16px;">Authenticating secure meeting session…</p>
+    </div>
+
+    <div id="ready-state" style="display: none;">
+      <!-- Google Meet icon (simplified SVG) -->
+      <svg class="brand-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 2h6v6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M20 2L13 9" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <h1>Google Meet is Ready</h1>
+      <p>Click below to open Google Meet. Keep this window open in the background to maintain your attendance.</p>
+      <button class="btn-launch" id="btn-launch" onclick="launchMeet()">Open Google Meet</button>
+      <p class="warning-text" id="warning-text">Do not close this window while you are in the meeting.</p>
+    </div>
+
+    <div id="error-state" style="display: none;">
+      <h1 style="color: #ef4444;">Connection Error</h1>
+      <p id="error-text">Failed to authenticate session.</p>
+      <button class="btn-launch" style="display: block; background: #ef4444;" onclick="window.close()">Close Window</button>
+    </div>
+  </div>
+
+  <script>
+    var urlParams = new URLSearchParams(window.location.search);
+    var token     = urlParams.get('token');
+    var sessionId = urlParams.get('sessionId');
+    var apiUrl    = urlParams.get('apiUrl') || window.location.origin;
+    var meetUrl   = null;
+    var hasLaunched = false;
+
+    function postBridgeEvent(type) {
+      var msg = JSON.stringify({ type: type, provider: 'google_meet', sessionId: sessionId });
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage(msg, window.location.origin); } catch (_) {}
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('loading-state').style.display = 'none';
+      document.getElementById('ready-state').style.display = 'none';
+      document.getElementById('error-state').style.display = 'block';
+      document.getElementById('error-text').textContent = msg;
+    }
+
+    function showReady() {
+      document.getElementById('loading-state').style.display = 'none';
+      document.getElementById('error-state').style.display = 'none';
+      document.getElementById('ready-state').style.display = 'block';
+      document.getElementById('btn-launch').style.display = 'block';
+      
+      // Let the main app know the launcher is ready
+      postBridgeEvent('LAUNCHER_OPENED');
+    }
+
+    function launchMeet() {
+      if (!meetUrl) return;
+      
+      // Open in new tab
+      window.open(meetUrl, '_blank');
+      hasLaunched = true;
+      
+      // Update UI
+      var btn = document.getElementById('btn-launch');
+      btn.textContent = 'Return to Google Meet';
+      btn.style.background = '#0f172a';
+      btn.style.border = '1px solid #334155';
+      document.getElementById('warning-text').style.display = 'block';
+
+      // Tell bridge we requested launch (initiates heartbeat tracking on main dashboard)
+      postBridgeEvent('MEET_LAUNCH_REQUESTED');
+    }
+
+    window.addEventListener('beforeunload', function () {
+      postBridgeEvent('WINDOW_CLOSED');
+    });
+
+    window.addEventListener('message', function (e) {
+      if (e.origin !== window.location.origin) return;
+      try {
+        var msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (msg && msg.type === 'HEARTBEAT' && window.opener && !window.opener.closed) {
+          window.opener.postMessage(JSON.stringify({ type: 'HEARTBEAT_ACK', sessionId: sessionId }), window.location.origin);
+        }
+      } catch (_) {}
+    });
+
+    async function init() {
+      if (!token) {
+        showError('No session token provided.');
+        return;
+      }
+
+      try {
+        var baseUrl = apiUrl.endsWith('/api/v1') ? apiUrl.replace(/\/api\/v1$/, '') : apiUrl;
+        var res = await fetch(baseUrl + '/api/v1/live-sessions/token/' + token);
+
+        if (!res.ok) {
+          throw new Error('Session token expired or invalid.');
+        }
+
+        var json = await res.json();
+        if (!json.data || !json.data.url) {
+          throw new Error('Invalid session payload from server.');
+        }
+
+        meetUrl = json.data.url;
+        showReady();
+
+        // Auto-launch if possible? (Browsers block window.open without user interaction, 
+        // so we must require the user to click the button)
+      } catch (err) {
+        showError(err.message || 'Failed to connect to the session.');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -19,79 +19,149 @@ export class LiveSessionService {
   }
   
   static async listSessions(filters?: { teacherId?: string }): Promise<ILiveSession[]> {
-    let query: FirebaseFirestore.Query = db.collection(this.collection).where('isDeleted', '!=', true);
-    
-    if (filters?.teacherId) {
-       // Assuming hostId holds the teacherId if it's assigned to a specific teacher
-       query = query.where('hostId', '==', filters.teacherId);
-    }
-    
-    const snapshot = await query.get();
-    
-    // Fallback in-memory filter since '!=' requires it to be the only inequality or first indexed
-    let docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ILiveSession));
-    
-    if (filters?.teacherId) {
-       docs = docs.filter(doc => doc.hostId === filters.teacherId);
-    }
+    const now = Date.now();
 
-    // Enrich with class titles and formatting for Admin UI
+    // Cache courses and batches for fast lookup
+    const coursesSnap = await db.collection('courses').get();
+    const courseMap = new Map<string, string>();
+    coursesSnap.docs.forEach(d => {
+      courseMap.set(d.id, d.data().title || d.data().name || '');
+    });
+
+    const batchesSnap = await db.collection('student_batches').get();
+    const batchMap = new Map<string, string>();
+    batchesSnap.docs.forEach(d => {
+      batchMap.set(d.id, d.data().name || d.data().code || d.data().batchName || d.id);
+    });
+
+    // Query all live classes from 'classes' collection
+    const classesSnap = await db.collection('classes')
+       .where('classType', '==', 'live')
+       .get();
+
     const enriched = [];
-    for (const doc of docs) {
-       const classSnap = await db.collection('classes').doc(doc.classId).get();
-       const classData = classSnap.exists ? classSnap.data() : null;
-       const title = classData?.title || 'Unknown Class';
-       const topicId = classData?.topicId || (doc as any).topicId || '';
+    for (const doc of classesSnap.docs) {
+       const cls = { id: doc.id, ...doc.data() } as any;
+       if (cls.isDeleted === true) continue;
 
-       let subjectId = '';
-       let courseId = (classData as any)?.courseId || '';
-       if (topicId) {
-         try {
-           const topicSnap = await db.collection('topics').doc(topicId).get();
-           if (topicSnap.exists) {
-             subjectId = topicSnap.data()?.subjectId || '';
-             if (subjectId && !courseId) {
-               const subjectSnap = await db.collection('subjects').doc(subjectId).get();
-               if (subjectSnap.exists) {
-                 courseId = subjectSnap.data()?.courseId || '';
-               }
-             }
-           }
-         } catch (e) {}
+       // Find active live session for this class
+       const liveSessionSnap = await db.collection(this.collection)
+         .where('classId', '==', cls.id)
+         .get();
+
+       const validDocs = liveSessionSnap.docs
+         .map(d => ({ id: d.id, ...d.data() } as any))
+         .filter(d => d.isDeleted !== true)
+         .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+       const liveSession = validDocs.length > 0 ? validDocs[0] : null;
+
+       if (filters?.teacherId) {
+         const hostId = liveSession?.hostId || cls.teacherId || cls.hostId;
+         if (hostId !== filters.teacherId) continue;
+       }
+
+       const scheduledStartTime = liveSession?.scheduledStartTime || cls.scheduledStartTime;
+       const durationMinutes = liveSession?.expectedDurationMinutes || cls.expectedDurationMinutes || 60;
+       
+       let startTimeMs = 0;
+       if (scheduledStartTime) {
+         if (typeof scheduledStartTime === 'object' && (scheduledStartTime as any)._seconds) {
+           startTimeMs = (scheduledStartTime as any)._seconds * 1000;
+         } else {
+           startTimeMs = new Date(scheduledStartTime).getTime();
+         }
+       }
+
+       const endTimeMs = startTimeMs + durationMinutes * 60 * 1000;
+
+       // AUTO DELETE / AUTO END IF DURATION HAS PASSED
+       if (startTimeMs > 0 && now > endTimeMs) {
+         db.collection('classes').doc(cls.id).update({ isDeleted: true, updatedAt: new Date().toISOString() }).catch(() => {});
+         if (liveSession?.id) {
+           db.collection(this.collection).doc(liveSession.id).update({ isDeleted: true, status: 'ENDED', updatedAt: new Date().toISOString() }).catch(() => {});
+         }
+         continue; // Exclude expired/passed session from listing
+       }
+
+       const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
+       const targetBatchIds: string[] = cls.targetBatchIds || cls.targetBatches || [];
+       const accessLevel = cls.accessLevel || 'premium';
+       let batchName = '';
+       if (targetBatchIds.length > 0) {
+         batchName = targetBatchIds.map(bId => batchMap.get(bId) || bId).join(', ');
+       } else if (accessLevel === 'premium' || accessLevel === 'all_paid') {
+         batchName = 'All Paid Students';
+       } else if (accessLevel === 'free' || accessLevel === 'all') {
+         batchName = 'All Students';
+       } else {
+         batchName = 'All Batches';
        }
 
        enriched.push({
-         ...doc,
-         title,
-         topicId,
-         subjectId,
-         courseId,
-         liveStatus: doc.status,
-         lamsStatus: doc.attendance?.status === 'LIVE' ? 'ATTENDANCE_ACTIVE' : doc.attendance?.status || 'NOT_STARTED',
-         startTime: doc.scheduledStartTime || classData?.scheduledStartTime || doc.createdAt,
-         provider: doc.provider
+         id: liveSession?.id || cls.id,
+         classId: cls.id,
+         title: cls.title || cls.name || 'Live Class',
+         topicId: cls.topicId || '',
+         subjectId: cls.subjectId || '',
+         courseId: cls.courseId || '',
+         courseName,
+         batchName,
+         targetBatchIds,
+         accessLevel,
+         liveStatus: liveSession?.status || 'SCHEDULED',
+         status: liveSession?.status || 'SCHEDULED',
+         lamsStatus: liveSession?.attendance?.status === 'LIVE' ? 'ATTENDANCE_ACTIVE' : liveSession?.attendance?.status || 'NOT_STARTED',
+         startTime: scheduledStartTime,
+         scheduledStartTime,
+         expectedDurationMinutes: durationMinutes,
+         provider: liveSession?.provider || 'zoom',
+         teacherName: cls.teacherName || 'Teacher',
+         liveSession
        });
     }
 
-    return enriched;
+    return (enriched as any[]).sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
   }
   
   static async getStudentLiveSessions(studentId: string, tenantId: string): Promise<any[]> {
+    const now = Date.now();
+
+    // Cache courses and batches
+    const coursesSnap = await db.collection('courses').get();
+    const courseMap = new Map<string, string>();
+    coursesSnap.docs.forEach(d => {
+      courseMap.set(d.id, d.data().title || d.data().name || '');
+    });
+
+    const batchesSnap = await db.collection('student_batches').get();
+    const batchMap = new Map<string, string>();
+    batchesSnap.docs.forEach(d => {
+      batchMap.set(d.id, d.data().name || d.data().code || d.data().batchName || d.id);
+    });
+
     // 1. Fetch student memberships from 'students' and 'student_profiles' collections
     const rawBatchIds: string[] = [];
+    let userCourseIds: string[] = [];
     
     const studentDoc = await db.collection('students').doc(studentId).get();
-    if (studentDoc.exists) {
-      const d = studentDoc.data();
-      if (d?.batchId) rawBatchIds.push(d.batchId);
-      if (d?.batch) rawBatchIds.push(d.batch);
+    let studentData: any = studentDoc.exists ? studentDoc.data() : null;
+    
+    if (!studentData) {
+      const byUserId = await db.collection('students').where('userId', '==', studentId).limit(1).get();
+      if (!byUserId.empty) {
+        studentData = byUserId.docs[0].data();
+      }
     }
-    const byUserId = await db.collection('students').where('userId', '==', studentId).limit(5).get();
-    byUserId.docs.forEach(d => {
-      const data = d.data();
-      if (data?.batchId) rawBatchIds.push(data.batchId);
-      if (data?.batch) rawBatchIds.push(data.batch);
-    });
+    
+    if (studentData) {
+      if (studentData.batchId) rawBatchIds.push(studentData.batchId);
+      if (studentData.batch) rawBatchIds.push(studentData.batch);
+      if (studentData.courseId) userCourseIds.push(studentData.courseId);
+      if (studentData.enrolledCourseIds && Array.isArray(studentData.enrolledCourseIds)) {
+        userCourseIds.push(...studentData.enrolledCourseIds);
+      }
+    }
 
     let profileDoc = await db.collection('student_profiles').doc(studentId).get();
     if (!profileDoc.exists) {
@@ -100,16 +170,26 @@ export class LiveSessionService {
     }
     if (profileDoc.exists) {
       const pData = profileDoc.data();
-      (pData?.programMemberships || []).forEach((m: any) => { if (m.batchId) rawBatchIds.push(m.batchId); });
+      (pData?.programMemberships || []).forEach((m: any) => { 
+        if (m.batchId) rawBatchIds.push(m.batchId); 
+        if (m.courseId) userCourseIds.push(m.courseId);
+      });
+      if (pData?.enrolledCourseIds && Array.isArray(pData.enrolledCourseIds)) {
+        userCourseIds.push(...pData.enrolledCourseIds);
+      }
     }
 
     const userBatchIds = Array.from(new Set(rawBatchIds.filter(Boolean)));
 
-    let userCourseIds: string[] = [];
     if (userBatchIds.length > 0) {
       const batchDocs = await Promise.all(userBatchIds.map((b: string) => db.collection('student_batches').doc(b).get()));
-      userCourseIds = batchDocs.map(d => d.data()?.courseId).filter(Boolean);
+      batchDocs.forEach(d => {
+        const cId = d.data()?.courseId;
+        if (cId) userCourseIds.push(cId);
+      });
     }
+
+    const uniqueUserCourseIds = Array.from(new Set(userCourseIds.filter(Boolean)));
 
     // 2. Fetch all live classes
     const classesSnap = await db.collection('classes')
@@ -120,20 +200,25 @@ export class LiveSessionService {
     const result = [];
     for (const doc of classesSnap.docs) {
       const cls = { id: doc.id, ...doc.data() } as any;
-      const targetBatches: string[] = cls.targetBatchIds || [];
+      const targetBatches: string[] = cls.targetBatchIds || cls.targetBatches || [];
+      const accessLevel = cls.accessLevel || 'premium';
 
-      // Check access: batch targeting > course matching > public fallback
+      // Check access: free, all, premium, all_paid, batch, course matching
       let hasAccess = false;
-      if (cls.accessLevel === 'free' || targetBatches.includes('all') || targetBatches.includes('all_free')) {
+      if (
+        accessLevel === 'free' || 
+        accessLevel === 'all' || 
+        accessLevel === 'premium' || 
+        accessLevel === 'all_paid' ||
+        targetBatches.includes('all') || 
+        targetBatches.includes('all_paid') || 
+        targetBatches.includes('all_free')
+      ) {
         hasAccess = true;
       } else if (targetBatches.length > 0) {
-        if (targetBatches.includes('all_paid')) {
-          hasAccess = userBatchIds.length > 0;
-        } else {
-          hasAccess = targetBatches.some(bId => userBatchIds.includes(bId));
-        }
+        hasAccess = targetBatches.some(bId => userBatchIds.includes(bId));
       } else if (cls.courseId) {
-        hasAccess = userCourseIds.includes(cls.courseId);
+        hasAccess = uniqueUserCourseIds.length === 0 || uniqueUserCourseIds.includes(cls.courseId);
       } else {
         hasAccess = true;
       }
@@ -151,16 +236,54 @@ export class LiveSessionService {
 
         const liveSession = validDocs.length > 0 ? validDocs[0] : null;
 
+        const scheduledStartTime = liveSession?.scheduledStartTime || cls.scheduledStartTime;
+        const durationMinutes = liveSession?.expectedDurationMinutes || cls.expectedDurationMinutes || 60;
+
+        let startTimeMs = 0;
+        if (scheduledStartTime) {
+          if (typeof scheduledStartTime === 'object' && (scheduledStartTime as any)._seconds) {
+            startTimeMs = (scheduledStartTime as any)._seconds * 1000;
+          } else {
+            startTimeMs = new Date(scheduledStartTime).getTime();
+          }
+        }
+
+        const endTimeMs = startTimeMs + durationMinutes * 60 * 1000;
+
+        // AUTO DELETE / AUTO END IF DURATION HAS PASSED
+        if (startTimeMs > 0 && now > endTimeMs) {
+          db.collection('classes').doc(cls.id).update({ isDeleted: true, updatedAt: new Date().toISOString() }).catch(() => {});
+          if (liveSession?.id) {
+            db.collection(this.collection).doc(liveSession.id).update({ isDeleted: true, status: 'ENDED', updatedAt: new Date().toISOString() }).catch(() => {});
+          }
+          continue; // Exclude expired/passed session
+        }
+
+        const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
+        let batchName = '';
+        if (targetBatches.length > 0) {
+          batchName = targetBatches.map(bId => batchMap.get(bId) || bId).join(', ');
+        } else if (accessLevel === 'premium' || accessLevel === 'all_paid') {
+          batchName = 'All Paid Students';
+        } else if (accessLevel === 'free' || accessLevel === 'all') {
+          batchName = 'All Students';
+        } else {
+          batchName = 'All Batches';
+        }
+
         result.push({
           id: liveSession?.id || cls.id,
           classId: cls.id,
           title: cls.title,
           status: liveSession?.status || 'SCHEDULED',
-          scheduledStartTime: liveSession?.scheduledStartTime || cls.scheduledStartTime,
+          scheduledStartTime,
+          expectedDurationMinutes: durationMinutes,
           provider: liveSession?.provider || 'zoom',
           teacherName: cls.teacherName || 'Teacher',
           subjectName: cls.subjectName || 'Subject',
-          courseId: cls.courseId || ''
+          courseId: cls.courseId || '',
+          courseName,
+          batchName
         });
       }
     }
@@ -494,27 +617,36 @@ Launch Payload Exists: ${!!session.launchPayload}
   }
 
   static async deleteSession(sessionId: string, adminId: string) {
-    const session = await this.getSession(sessionId);
-    if (!session) throw new AppError('Live session not found', 404);
-    
-    // Soft delete allowed for admins.
-    // In a strict compliance environment, we might restrict this, 
-    // but since it's a soft delete, it's safe to allow admins to clean up the UI.
+    let session = await this.getSession(sessionId);
+    let targetClassId = session?.classId || sessionId;
 
-    // Soft delete
-    await db.collection(this.collection).doc(sessionId).update({
-      isDeleted: true,
-      updatedAt: new Date().toISOString()
-    });
-    await this.recordHistory(sessionId, 'DELETED', adminId);
+    if (session && session.id) {
+      await db.collection(this.collection).doc(session.id).update({
+        isDeleted: true,
+        updatedAt: new Date().toISOString()
+      }).catch(() => {});
+      await this.recordHistory(session.id, 'DELETED', adminId).catch(() => {});
+    }
 
-    // Also soft delete the associated class to keep it synchronous with the database
-    if (session.classId) {
+    // Also soft delete matching live_sessions by classId if sessionId is a classId
+    const matchingSessions = await db.collection(this.collection).where('classId', '==', targetClassId).get();
+    for (const d of matchingSessions.docs) {
+      await db.collection(this.collection).doc(d.id).update({
+        isDeleted: true,
+        updatedAt: new Date().toISOString()
+      }).catch(() => {});
+    }
+
+    // Soft delete the class record in 'classes' collection
+    if (targetClassId) {
       try {
         const classRepo = new ClassRepository();
-        await classRepo.softDelete(session.classId, adminId);
+        await classRepo.softDelete(targetClassId, adminId);
       } catch (err) {
-        console.error(`Failed to delete associated class ${session.classId} for live session ${sessionId}:`, err);
+        await db.collection('classes').doc(targetClassId).update({
+          isDeleted: true,
+          updatedAt: new Date().toISOString()
+        }).catch(() => {});
       }
     }
 

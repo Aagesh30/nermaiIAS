@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Zoom Meeting — NERMAI (Client View)</title>
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #0a0a0a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: white;
+    }
+
+    /* Keep the status overlay on top of Zoom's z-index hierarchy */
+    .status-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 2147483647; 
+      gap: 16px;
+      background: #0a0a0a;
+    }
+
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border-top: 3px solid #3b82f6;
+      width: 36px;
+      height: 36px;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-text {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.6);
+      letter-spacing: 0.02em;
+    }
+
+    .error-box {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 12px;
+      padding: 24px 32px;
+      max-width: 420px;
+      text-align: center;
+    }
+
+    .error-box h3 {
+      color: #f87171;
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .error-box p {
+      color: rgba(255, 255, 255, 0.5);
+      margin: 0 0 16px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .btn-return {
+      display: inline-block;
+      padding: 10px 24px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+
+    .btn-return:hover { background: #2563eb; }
+
+    /* Required for Client View styling consistency */
+    #zmmtg-root {
+      display: none;
+    }
+  </style>
+  
+  <link type="text/css" rel="stylesheet" href="https://source.zoom.us/6.2.0/css/bootstrap.css" />
+  <link type="text/css" rel="stylesheet" href="https://source.zoom.us/6.2.0/css/react-select.css" />
+
+  <!--
+    Zoom Client View SDK scripts (6.2.0)
+  -->
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/lodash.min.js"></script>
+  <!-- Client View SDK -->
+  <script src="https://source.zoom.us/6.2.0/zoom-meeting-6.2.0.min.js"></script>
+</head>
+
+<body>
+  <div id="status-overlay" class="status-overlay">
+    <div class="spinner"></div>
+    <div class="status-text" id="status-text">Authenticating secure meeting session…</div>
+  </div>
+
+  <script>
+    // ── Preload Zoom WebAssembly ─────────────────────────────────────────────
+    ZoomMtg.setZoomJSLib('https://source.zoom.us/6.2.0/lib', '/av');
+    ZoomMtg.preLoadWasm();
+    ZoomMtg.prepareWebSDK();
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    var urlParams  = new URLSearchParams(window.location.search);
+    var token      = urlParams.get('token');
+    var sessionId  = urlParams.get('sessionId');
+    var apiUrl     = urlParams.get('apiUrl') || window.location.origin;
+    var destroyed  = false;
+
+    function setStatus(msg) {
+      var el = document.getElementById('status-text');
+      if (el) el.textContent = msg;
+    }
+
+    function showError(msg) {
+      var overlay = document.getElementById('status-overlay');
+      if (overlay) {
+        overlay.style.display = 'flex';
+        overlay.style.background = '#0a0a0a';
+        overlay.innerHTML =
+          '<div class="error-box">'
+          + '<h3>Connection to LMS Lost</h3>'
+          + '<p>' + msg + '</p>'
+          + '<button class="btn-return" onclick="returnToLMS()">Return to NERMAI</button>'
+          + '</div>';
+      }
+      var zRoot = document.getElementById('zmmtg-root');
+      if (zRoot) zRoot.style.display = 'none';
+    }
+
+    function returnToLMS() {
+      postBridgeEvent('WINDOW_CLOSED');
+      if (window.opener && !window.opener.closed) {
+        window.opener.focus();
+      }
+      window.close();
+    }
+
+    /**
+     * postBridgeEvent — sends top-level lifecycle events to NERMAI.
+     */
+    function postBridgeEvent(type, extra) {
+      var payload = { type: type, provider: 'zoom', sessionId: sessionId };
+      if (extra) Object.assign(payload, extra);
+      var msg = JSON.stringify(payload);
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage(msg, window.location.origin); } catch (_) {}
+      }
+    }
+
+    window.addEventListener('beforeunload', function () {
+      destroyed = true;
+      postBridgeEvent('WINDOW_CLOSED');
+    });
+
+    window.addEventListener('message', function (e) {
+      if (e.origin !== window.location.origin) return;
+      try {
+        var msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (msg && msg.type === 'HEARTBEAT' && window.opener && !window.opener.closed) {
+          window.opener.postMessage(JSON.stringify({ type: 'HEARTBEAT_ACK', sessionId: sessionId }), window.location.origin);
+        }
+      } catch (_) {}
+    });
+
+    // ── Main Init ────────────────────────────────────────────────────────────
+    async function init() {
+      if (!token) {
+        showError('No session token provided.');
+        return;
+      }
+
+      try {
+        // 1. Exchange one-time token for SDK payload
+        var baseUrl = apiUrl.endsWith('/api/v1')
+          ? apiUrl.replace(/\/api\/v1$/, '')
+          : apiUrl;
+
+        setStatus('Connecting to session…');
+        var res = await fetch(baseUrl + '/api/v1/live-sessions/token/' + token);
+        if (destroyed) return;
+
+        if (!res.ok) {
+          throw new Error('Session token expired or invalid (HTTP ' + res.status + ').');
+        }
+
+        var contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error('Unexpected server response. Please try again.');
+        }
+
+        var json = await res.json();
+        if (destroyed) return;
+
+        var data = json.data;
+        if (!data || !data.sdk) {
+          throw new Error('Invalid session payload from server.');
+        }
+
+        // 2. Init Zoom SDK (Client View)
+        setStatus('Initializing meeting…');
+        
+        var leaveUrl = apiUrl + '/meeting-hosts/close.html?sessionId=' + sessionId;
+
+        ZoomMtg.init({
+          leaveUrl: leaveUrl,
+          isSupportAV: true,
+          success: function () {
+            if (destroyed) return;
+            
+            document.getElementById('status-overlay').style.display = 'none';
+            document.getElementById('zmmtg-root').style.display = 'block';
+
+            setStatus('Joining meeting…');
+            var joinOpts = {
+              signature:     data.sdk.signature,
+              sdkKey:        data.sdk.sdkKey,
+              meetingNumber: data.meetingId.replace(/\D/g, ''),
+              passWord:      data.sdk.passcode || '',
+              userName:      data.displayName || 'Participant',
+              customerKey:   data.userId,
+              success: function (res) {
+                if (destroyed) return;
+                postBridgeEvent('MEETING_STARTED');
+              },
+              error: function (err) {
+                if (destroyed) return;
+                console.error("Zoom Join Error:", err);
+                showError(err.errorMessage || 'Failed to connect to the meeting.');
+                postBridgeEvent('MEETING_ENDED');
+              }
+            };
+            
+            if (data.sdk.zak) {
+              joinOpts.zak = data.sdk.zak;
+            }
+
+            console.log(
+              JSON.stringify(
+                {
+                  sdkRole: data.sdk?.role,
+                  hasZak: !!data.sdk?.zak,
+                  zakLength: data.sdk?.zak?.length,
+                  meetingId: data.meetingId,
+                  currentUser: data.userId,
+                  sessionHost: data.host?.userId,
+                  displayName: data.displayName,
+                  signatureExists: !!data.sdk?.signature
+                },
+                null,
+                2
+              )
+            );
+            console.log('STEP 1: Calling ZoomMtg.join()');
+
+            ZoomMtg.join(joinOpts);
+          },
+          error: function (err) {
+            if (destroyed) return;
+            console.error("Zoom Init Error:", err);
+            showError(err.errorMessage || 'Failed to initialize the meeting.');
+            postBridgeEvent('MEETING_ENDED');
+          }
+        });
+
+        // 3. Adapter: Map Client View events to NERMAI Bridge & Co-Host Promotion
+        window.__promotionQueues = window.__promotionQueues || new Map();
+        if (!window.__promotionQueues.has(sessionId)) {
+          window.__promotionQueues.set(sessionId, new Map());
+        }
+        var promotionQueue = window.__promotionQueues.get(sessionId);
+
+        function attemptPromotion(user) {
+          if (!data.autoPromotionEnabled || !data.canPromote) return;
+          if (!user || !user.customerKey) return;
+          if (!data.expectedCoHostIds || !data.expectedCoHostIds.includes(user.customerKey)) return;
+
+          var state = promotionQueue.get(user.customerKey) || { status: 'PENDING', retries: 0 };
+          if (state.status === 'PROMOTED' || state.status === 'PROMOTING') return;
+          if (state.retries >= 3) return;
+
+          // Reconciliation: If they are already a co-host but missing from our queue (e.g. Host reconnected)
+          if (user.bCoHost === true || user.userRole === 2) {
+             state.status = 'PROMOTED';
+             promotionQueue.set(user.customerKey, state);
+             if (data.ledgerEnabled) {
+                postBridgeEvent('PARTICIPANT_PROMOTED', {
+                  nermaiUserId: user.customerKey,
+                  zoomUserId: user.userId,
+                  timestamp: Date.now(),
+                  source: 'zoom-sdk-reconciliation',
+                  status: 'PROMOTED'
+                });
+             }
+             return;
+          }
+
+          state.status = 'PROMOTING';
+          state.retries += 1;
+          promotionQueue.set(user.customerKey, state);
+
+          console.log('[Zoom Auto-Promotion] Attempting to promote:', user.userName);
+          
+          try {
+            ZoomMtg.makeCoHost({ userId: user.userId });
+            state.status = 'PROMOTED';
+            if (data.ledgerEnabled) {
+              postBridgeEvent('PARTICIPANT_PROMOTED', {
+                nermaiUserId: user.customerKey,
+                zoomUserId: user.userId,
+                timestamp: Date.now(),
+                source: 'zoom-sdk',
+                status: 'PROMOTED'
+              });
+            }
+          } catch (err) {
+            console.error('[Zoom Auto-Promotion] Failed:', err);
+            state.status = 'FAILED';
+          }
+        }
+
+        ZoomMtg.inMeetingServiceListener('onConnectionChange', function (eventData) {
+          console.log('[zoom-client-launch] onConnectionChange:', eventData.state);
+          if (eventData.state === 'Connected') {
+            console.log('STEP 2: Zoom connected, emitting MEETING_STARTED');
+            postBridgeEvent('MEETING_STARTED');
+
+            // Handle late joins / Reconciliation
+            if (data.canPromote) {
+              var attendees = ZoomMtg.getAttendeeslist({});
+              if (attendees && attendees.length) {
+                attendees.forEach(function(a) { attemptPromotion(a); });
+              }
+            }
+          } else if (eventData.state === 'Closed') {
+            postBridgeEvent('MEETING_ENDED');
+          }
+        });
+
+        ZoomMtg.inMeetingServiceListener('onUserJoin', function (users) {
+          if (Array.isArray(users)) {
+            users.forEach(function(u) { attemptPromotion(u); });
+          } else {
+            attemptPromotion(users);
+          }
+        });
+
+        ZoomMtg.inMeetingServiceListener('onUserUpdate', function (eventData) {
+          // If we just got upgraded to host mid-meeting
+          if (eventData.userRole === 1 || eventData.userRole === 'host') {
+             // In a real scenario we might re-evaluate data.canPromote, but data is static here.
+             // We'll run a sweep just in case we are allowed to promote now.
+             if (data.canPromote) {
+                var attendees = ZoomMtg.getAttendeeslist({});
+                if (attendees && attendees.length) {
+                  attendees.forEach(function(a) { attemptPromotion(a); });
+                }
+             }
+          }
+        });
+
+
+      } catch (err) {
+        var msg = err.reason || err.message || 'Failed to connect to the meeting.';
+        showError(msg);
+        postBridgeEvent('MEETING_ENDED');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

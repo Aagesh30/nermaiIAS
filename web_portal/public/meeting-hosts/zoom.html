@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Zoom Meeting Player</title>
+  <style>
+    body,
+    html,
+    #meeting-container,
+    #zoom-root {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: black;
+      overflow: hidden;
+      font-family: sans-serif;
+      color: white;
+    }
+
+    .loading-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid white;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    .error {
+      color: #ef4444;
+      text-align: center;
+      max-width: 400px;
+    }
+  </style>
+
+  <!--
+    Zoom Meeting SDK 6.2.0 — Official vendor dependency chain.
+    ALL scripts come from source.zoom.us/6.2.0 to avoid runtime mismatches.
+    Do NOT replace any of these with unpkg, jsDelivr, or npm CDN equivalents.
+  -->
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/lodash.min.js"></script>
+
+  <!-- Zoom Component View SDK — must come AFTER all vendor libs -->
+  <script src="https://source.zoom.us/6.2.0/zoom-meeting-embedded-6.2.0.min.js"></script>
+</head>
+
+<body>
+  <div id="loading" class="loading-container">
+    <div class="spinner"></div>
+    <div id="loading-text">Authenticating secure meeting session...</div>
+  </div>
+
+  <div id="meeting-container" style="display: none;">
+    <div id="zoom-root"></div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const sessionId = urlParams.get('sessionId') || '';
+    const provider = urlParams.get('provider') || 'zoom';
+    const apiUrl = urlParams.get('apiUrl') ?? window.location.origin;
+    let sessionRole = 'PARTICIPANT';
+
+    const instanceId = Math.random().toString(36).substring(7);
+    console.log('[zoom.html] Loaded', { 
+      instanceId, 
+      hasToken: !!token, 
+      timestamp: Date.now(),
+      sdkLoaded: typeof ZoomMtgEmbedded !== 'undefined',
+      canCreateClient: typeof ZoomMtgEmbedded !== 'undefined' && typeof ZoomMtgEmbedded.createClient === 'function'
+    });
+
+    function showError(msg) {
+      const loading = document.getElementById('loading');
+      loading.style.display = 'flex';
+      loading.innerHTML = '<div class="error"><h3>Error Joining Meeting</h3><p>' + msg + '</p></div>';
+      const viewport = document.getElementById('meeting-container');
+      if (viewport) viewport.style.display = 'none';
+    }
+
+    function emitEvent(eventName, payload) {
+      payload = payload || {};
+      var eventType = 'SDK_EVENT';
+      if (eventName === 'HostConnected') eventType = 'HOST_CONNECTED';
+      if (eventName === 'ParticipantJoined') eventType = 'PARTICIPANT_JOINED';
+      if (eventName === 'ParticipantLeft') eventType = 'PARTICIPANT_LEFT';
+      if (eventName === 'MeetingEnded') eventType = 'MEETING_ENDED';
+      if (eventName === 'ConnectionLost') eventType = 'CONNECTION_LOST';
+      if (eventName === 'HostDisconnected') eventType = 'HOST_DISCONNECTED';
+      if (eventName === 'JoinFailed') eventType = 'JOIN_FAILED';
+
+      var data = Object.assign({ type: eventType, role: sessionRole, sessionId: sessionId, provider: provider }, payload);
+      console.log('[zoom.html] Emitting event to parent:', data);
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(JSON.stringify(data), window.location.origin);
+      } else if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    }
+
+
+    var isInitializing = false;
+    var isJoined = false;
+    let client = null;
+    let destroyed = false;
+
+    window.addEventListener("beforeunload", async () => {
+      destroyed = true;
+      if (client) {
+        try {
+          await client.leaveMeeting();
+        } catch (e) {}
+        try {
+          client.destroy();
+        } catch (e) {}
+      }
+    });
+
+    async function init() {
+      if (isInitializing || isJoined) {
+        console.warn('[zoom.html] Already initializing or joined, skipping.', { instanceId });
+        return;
+      }
+      isInitializing = true;
+
+      if (!token) {
+        showError('No join token provided.');
+        isInitializing = false;
+        return;
+      }
+
+      try {
+        // 1. Fetch the full SDK payload from backend
+        let baseApiUrl = apiUrl;
+        if (baseApiUrl.endsWith('/api/v1')) baseApiUrl = baseApiUrl.replace(/\/api\/v1$/, '');
+
+        console.log('[zoom.html] Fetching join payload from', baseApiUrl);
+        var response = await fetch(baseApiUrl + '/api/v1/live-sessions/token/' + token);
+        if (destroyed) return;
+
+        const contentType = response.headers.get("content-type");
+        const raw = await response.text();
+
+        console.group("JOIN TOKEN RESPONSE");
+        console.log("URL:", response.url);
+        console.log("Status:", response.status);
+        console.log("StatusText:", response.statusText);
+        console.log("Content-Type:", contentType);
+        console.log("Body Preview:");
+        console.log(raw.substring(0, 1000));
+        console.groupEnd();
+
+        if (!response.ok) {
+          throw new Error('Invalid or expired join token (HTTP ' + response.status + '). Server preview: ' + raw.substring(0, 100));
+        }
+
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Expected JSON but received " + contentType + ". See console for preview.");
+        }
+
+        var json = JSON.parse(raw);
+        if (destroyed) return;
+        var data = json.data;
+
+        if (!data || !data.sdk) {
+          throw new Error('Invalid payload from server: missing sdk object.');
+        }
+
+        if (data.participantRole) {
+          sessionRole = data.participantRole;
+        }
+
+        console.log('[zoom.html] Payload received:', {
+          meetingId: data.meetingId,
+          role: data.participantRole,
+          hasSignature: !!data.sdk.signature,
+          hasZak: !!data.sdk.zak,
+          hasSdkKey: !!data.sdk.sdkKey
+        });
+
+        // 2. Log SDK environment
+        console.log('[zoom.html] SDK environment:', {
+          ZoomMtgEmbedded: typeof ZoomMtgEmbedded !== 'undefined',
+          createClient: typeof ZoomMtgEmbedded !== 'undefined' && typeof ZoomMtgEmbedded.createClient === 'function',
+          SharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+          crossOriginIsolated: window.crossOriginIsolated,
+          origin: window.location.origin,
+          reactVersion: window.React ? window.React.version : 'undefined',
+          reactDomVersion: window.ReactDOM ? window.ReactDOM.version : 'undefined',
+          sdkVersion: typeof ZoomMtgEmbedded !== 'undefined' ? ZoomMtgEmbedded.VERSION : 'undefined'
+        });
+
+        // 3. Create client
+        console.log('[zoom.html] createClient...');
+        client = ZoomMtgEmbedded.createClient();
+        console.log('[zoom.html] createClient OK');
+        
+        console.group('[zoom.html] client introspection');
+        console.log('client object:', client);
+        console.log('client keys:', Object.keys(client));
+        console.log('typeof client.on:', typeof client.on);
+        console.groupEnd();
+
+        // 4. Register SDK events (before init, per SDK recommendations)
+        const events = [
+          {
+            name: 'connection-change', fn: function (e) {
+              console.log('[zoom.html] connection-change:', e.state);
+              if (e.state === 'Connected') {
+                isJoined = true;
+                emitEvent(sessionRole === 'HOST' ? 'HostConnected' : 'ParticipantJoined', { connectionState: 'CONNECTED' });
+              } else if (e.state === 'Reconnecting') {
+                emitEvent('ConnectionLost', { connectionState: 'RECONNECTING' });
+              } else if (e.state === 'Closed') {
+                emitEvent(sessionRole === 'HOST' ? 'HostDisconnected' : 'ParticipantLeft', { connectionState: 'DISCONNECTED' });
+              }
+            }
+          },
+          {
+            name: 'user-added', fn: function (users) {
+              users.forEach(function (u) {
+                emitEvent('ParticipantJoined', { providerParticipantId: u.userId ? u.userId.toString() : null, displayName: u.userName, isRemote: true });
+              });
+            }
+          },
+          {
+            name: 'user-removed', fn: function (users) {
+              users.forEach(function (u) {
+                emitEvent('ParticipantLeft', { providerParticipantId: u.userId ? u.userId.toString() : null, displayName: u.userName, isRemote: true });
+              });
+            }
+          },
+          {
+            name: 'meeting-status', fn: function (e) {
+              if (e.meetingStatus === 3 || e.meetingStatus === 'ended') {
+                emitEvent('MeetingEnded');
+              }
+            }
+          },
+          { name: 'media-sdk-change', fn: (payload) => console.log('media-sdk-change', payload) },
+          { name: 'active-speaker', fn: (payload) => console.log('active-speaker', payload) },
+          { name: 'chat-on-message', fn: (payload) => console.log('chat-on-message', payload) },
+          { name: 'video-active-change', fn: (payload) => console.log('video-active-change', payload) },
+          { name: 'audio-active-change', fn: (payload) => console.log('audio-active-change', payload) },
+          { name: 'user-updated', fn: (payload) => console.log('user-updated', payload) },
+          { name: 'recording-change', fn: (payload) => console.log('recording-change', payload) }
+        ];
+
+        events.forEach(ev => {
+          console.log(`[zoom.html] Registering event: ${ev.name}`);
+          try {
+            client.on(ev.name, ev.fn);
+            console.log(`[zoom.html] Successfully registered: ${ev.name}`);
+          } catch (err) {
+            console.error(`[zoom.html] FAILED to register event ${ev.name}:`, err);
+          }
+        });
+
+        // 5. Init — Zoom SDK naturally fills the 100% / 100% responsive container
+        var container = document.getElementById('meeting-container');
+        var root = document.getElementById('zoom-root');
+        
+        // Show the container BEFORE init so the browser computes layout dimensions
+        document.getElementById('loading').style.display = 'none';
+        container.style.display = 'block';
+
+        // Wait 2 frames to ensure the browser has fully applied CSS and layout to the DOM
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        function logDimensions(stage) {
+            console.group(`[zoom.html] Layout Dimensions: ${stage}`);
+            const logEl = (name, el) => {
+                if (!el) {
+                    console.log(`${name}: null`);
+                    return;
+                }
+                const rect = el.getBoundingClientRect();
+                console.log(`${name}: ${Math.round(rect.width)}x${Math.round(rect.height)}`);
+            };
+            logEl('window (inner)', { getBoundingClientRect: () => ({ width: window.innerWidth, height: window.innerHeight }) });
+            logEl('html', document.documentElement);
+            logEl('body', document.body);
+            logEl('#meeting-container', container);
+            logEl('#zoom-root', root);
+            logEl('#zoom-root > firstChild', root.firstElementChild);
+            console.groupEnd();
+        }
+
+        logDimensions('BEFORE INIT');
+
+        const initConfig = {
+          zoomAppRoot: root,
+          language: 'en-US'
+        };
+
+        console.group('[zoom.html] client.init Config Audit');
+        console.log(initConfig);
+        function detectUndefined(obj, path = '') {
+          if (obj === undefined) console.error(`[zoom.html] UNDEFINED FOUND at ${path}`);
+          if (obj !== null && typeof obj === 'object') {
+            Object.keys(obj).forEach(k => detectUndefined(obj[k], path ? `${path}.${k}` : k));
+          }
+        }
+        detectUndefined(initConfig, 'initConfig');
+        console.groupEnd();
+
+        console.log('[zoom.html] client.init...');
+        await client.init(initConfig);
+        if (destroyed) return;
+        console.log('[zoom.html] client.init OK');
+
+        // 6. Build join options (no deprecated role field)
+        var joinOptions = {
+          signature: data.sdk.signature,
+          meetingNumber: data.meetingId.replace(/\D/g, ''),
+          password: data.sdk.passcode || '',
+          userName: data.displayName || 'Participant'
+        };
+        if (data.sdk.zak) {
+          joinOptions.zak = data.sdk.zak;
+        }
+
+        console.log('[zoom.html] join options:', {
+          meetingNumber: joinOptions.meetingNumber,
+          hasSignature: !!joinOptions.signature,
+          hasPassword: !!joinOptions.password,
+          hasZak: !!joinOptions.zak,
+          userName: joinOptions.userName
+        });
+
+        // 7. Join
+        console.log('[zoom.html] JOIN START');
+        await client.join(joinOptions);
+        if (destroyed) return;
+        console.log('[zoom.html] JOIN RESOLVED');
+        
+        await new Promise(r => setTimeout(r, 100));
+        console.log('[zoom.html] 100ms elapsed since join resolved');
+        
+        await new Promise(r => setTimeout(r, 400));
+        console.log('[zoom.html] 500ms elapsed since join resolved');
+        
+        await new Promise(r => setTimeout(r, 1000));
+        console.log('[zoom.html] 1000ms elapsed since join resolved');
+        
+        console.log('[zoom.html] DOM Identity Check (root matches?):', root === document.getElementById('zoom-root'));
+        logDimensions('AFTER JOIN');
+
+      } catch (err) {
+        var msg = err.reason || err.message || 'Failed to connect to meeting provider.';
+        console.error("Join Payload Error");
+        console.error(err);
+        console.error({
+            name: err?.name,
+            message: err?.message,
+            stack: err?.stack,
+            response: err?.response,
+            cause: err?.cause
+        });
+        showError(msg);
+        emitEvent('JoinFailed', { error: msg, errorCode: err.errorCode });
+      } finally {
+        isInitializing = false;
+      }
+    }
+
+    init();
+  </script>
+</body>
+
+</html>

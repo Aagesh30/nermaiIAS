@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveSessionContext } from '../../context/LiveSessionContext';
-import { LiveSessionApi } from '../../../../core/services';
+import { LiveSessionApi } from '@nermai/api';
 
 export const AttendanceWorkspace: React.FC = () => {
   const { session, role, capabilities } = useLiveSessionContext();
@@ -83,7 +83,7 @@ export const AttendanceWorkspace: React.FC = () => {
 
   const isAttendanceRunning = session.attendance?.status === 'RUNNING';
   const isSessionEnded = session.status === 'ENDED';
-  const attendanceEnabled = session.status === 'LIVE' && capabilities.canStartAttendance;
+  const attendanceEnabled = session.status === 'LIVE' && capabilities.includes('START_ATTENDANCE');
   const mode = session.attendanceMode || 'MANUAL';
   const startedAt = session.attendance?.startedAt;
   const startedBy = session.attendance?.startedBy;
@@ -202,4 +202,3 @@ export const AttendanceWorkspace: React.FC = () => {
     </div>
   );
 };
-

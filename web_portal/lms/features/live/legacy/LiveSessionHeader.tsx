@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLiveSessionContext } from '../context/LiveSessionContext';
 import { ArrowLeft, Clock, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { LiveSessionApi } from '../../../core/services';
+import { LiveSessionApi } from '@nermai/api';
 import { meetingLauncher } from '../services/MeetingLauncherService';
 
 // ── Attendance Timer ──────────────────────────────────────────────────────────

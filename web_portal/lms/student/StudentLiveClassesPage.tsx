@@ -76,6 +76,18 @@ const SessionCard = ({ cls, onJoin }: { cls: any; onJoin: (courseId: string, cla
         {/* Title & meta */}
         <div>
           <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 leading-snug">{cls.title || cls.className}</h3>
+          <div className="flex flex-wrap gap-2 items-center my-1.5">
+            {cls.courseName && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                Course: {cls.courseName}
+              </span>
+            )}
+            {cls.batchName && (
+              <span className="px-2 py-0.5 text-xs font-semibold rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                Batch: {cls.batchName}
+              </span>
+            )}
+          </div>
           {cls.subjectName && (
             <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase tracking-wide">{cls.subjectName}</p>
           )}

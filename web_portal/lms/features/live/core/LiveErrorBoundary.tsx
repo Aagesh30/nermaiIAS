@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -37,4 +37,3 @@ export class LiveErrorBoundary extends React.Component<{ children: React.ReactNo
     return this.props.children;
   }
 }
-

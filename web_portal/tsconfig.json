@@ -1,6 +1,16 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nermai/api": ["./lms/core/services"],
+      "@nermai/api/*": ["./lms/core/services"],
+      "@nermai/theme": ["./lms/core/theme"],
+      "@nermai/shared": ["./lms/core/shared/src"],
+      "@nermai/shared/*": ["./lms/core/shared/src/*"],
+      "@nermai/live-core": ["./lms/core/live-core/src"],
+      "@nermai/live-core/*": ["./lms/core/live-core/src/*"]
+    }
   }
 }

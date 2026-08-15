@@ -1,104 +1,217 @@
-﻿import React, { useRef, useEffect } from 'react';
-import { CommentData } from '../../core/shared/src';
+import React, { useState } from 'react';
+import { View, FlatList, StyleSheet, Text, ActivityIndicator } from 'react-native';
+import { CommentData, useLiveComments } from './useLiveComments';
 import { CommentItem } from './CommentItem';
+import { colors } from '@nermai/theme';
+import { ActionSheet } from '../../components/ui/ActionSheet';
+import { LiveCommentsApi } from '@nermai/api/services/liveComments';
+// TouchableOpacity imported from react-native above
 
 interface CommentListProps {
-  comments: CommentData[];
-  pinnedComments: CommentData[];
-  filterMode: 'CHAT' | 'DOUBTS';
-  setFilterMode: (mode: 'CHAT' | 'DOUBTS') => void;
+  liveSessionId: string;
   isAdmin?: boolean;
-  onRefresh: () => void;
-  onReply?: (commentId: string, userName: string) => void;
 }
 
-export const CommentList: React.FC<CommentListProps> = ({ 
-  comments, 
-  pinnedComments, 
-  filterMode, 
-  setFilterMode, 
-  isAdmin, 
-  onRefresh, 
-  onReply 
-}) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  
-  // Filter based on mode
-  const displayedComments = filterMode === 'DOUBTS'
+export const CommentList = ({ liveSessionId, isAdmin }: CommentListProps) => {
+  const { comments, pinnedComments, loading, error } = useLiveComments(liveSessionId);
+  const [selectedComment, setSelectedComment] = useState<CommentData | null>(null);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const [filterMode, setFilterMode] = useState<'CHAT' | 'DOUBTS'>('CHAT');
+
+  const handleLongPress = (comment: CommentData) => {
+    if (isAdmin) {
+      setSelectedComment(comment);
+      setActionSheetVisible(true);
+    }
+  };
+
+  const renderAdminActions = () => {
+    if (!selectedComment) return [];
+    
+    const actions: any[] = [];
+    
+    if (selectedComment.type === 'QUESTION') {
+      const isAnswered = selectedComment.status === 'ANSWERED';
+      actions.push({
+        label: isAnswered ? 'Mark Open' : 'Mark Answered',
+        onPress: () => {
+          LiveCommentsApi.updateStatus(selectedComment.id, isAnswered ? 'OPEN' : 'ANSWERED');
+          setActionSheetVisible(false);
+        }
+      });
+    }
+
+    actions.push({
+      label: selectedComment.isPinned ? 'Unpin' : 'Pin to Top',
+      onPress: () => {
+        LiveCommentsApi.togglePin(selectedComment.id, !selectedComment.isPinned);
+        setActionSheetVisible(false);
+      }
+    });
+
+    actions.push({
+      label: selectedComment.isHidden ? 'Unhide' : 'Hide from Students',
+      onPress: () => {
+        LiveCommentsApi.setHidden(selectedComment.id, !selectedComment.isHidden);
+        setActionSheetVisible(false);
+      }
+    });
+
+    actions.push({
+      label: 'Delete',
+      destructive: true,
+      onPress: () => {
+        LiveCommentsApi.deleteComment(selectedComment.id);
+        setActionSheetVisible(false);
+      }
+    });
+
+    return actions;
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>Failed to load comments.</Text>
+      </View>
+    );
+  }
+
+  const displayedComments = filterMode === 'DOUBTS' 
     ? comments.filter(c => c.type === 'QUESTION')
     : comments.filter(c => c.type !== 'QUESTION');
 
-  // Auto-scroll to bottom logic
-  useEffect(() => {
-    if (scrollRef.current) {
-      // In a more complex implementation, we'd only auto-scroll if already at the bottom
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [displayedComments]);
-
   return (
-    <div className="flex flex-col h-full bg-[#0F172A] border-l border-white/10">
-      
-      {/* Tabs */}
-      <div className="flex bg-[#1E293B] p-1 gap-1">
-        <button 
-          onClick={() => setFilterMode('CHAT')}
-          className={`flex-1 py-2 text-sm font-medium rounded transition-colors ${filterMode === 'CHAT' ? 'bg-[#334155] text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+    <View style={styles.container}>
+      {/* Filter Toggle */}
+      <View style={styles.filterBar}>
+        <TouchableOpacity 
+          style={[styles.filterBtn, filterMode === 'CHAT' && styles.filterBtnActive]}
+          onPress={() => setFilterMode('CHAT')}
         >
-          Live Chat
-        </button>
-        <button 
-          onClick={() => setFilterMode('DOUBTS')}
-          className={`flex-1 py-2 text-sm font-medium rounded transition-colors ${filterMode === 'DOUBTS' ? 'bg-[#334155] text-white shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+          <Text style={[styles.filterText, filterMode === 'CHAT' && styles.filterTextActive]}>Live Chat</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.filterBtn, filterMode === 'DOUBTS' && styles.filterBtnActive]}
+          onPress={() => setFilterMode('DOUBTS')}
         >
-          Q&A Doubts
-        </button>
-      </div>
+          <Text style={[styles.filterText, filterMode === 'DOUBTS' && styles.filterTextActive]}>Q&A Doubts</Text>
+        </TouchableOpacity>
+      </View>
 
-      {/* Pinned Messages */}
+      {/* Pinned Section */}
       {pinnedComments.length > 0 && (
-        <div className="flex-shrink-0 bg-yellow-900/20 border-b border-yellow-500/20">
-          <div className="px-3 py-1 bg-yellow-900/40 border-b border-yellow-500/10 text-[10px] font-bold text-yellow-500 uppercase tracking-wider flex items-center gap-1">
-            <span>📌 Pinned</span>
-          </div>
-          <div className="max-h-32 overflow-y-auto">
-            {pinnedComments.map(c => (
-              <CommentItem 
-                key={c.id} 
-                comment={c} 
-                isAdmin={isAdmin} 
-                onRefresh={onRefresh} 
-                onReply={onReply}
-              />
-            ))}
-          </div>
-        </div>
+        <View style={styles.pinnedSection}>
+          <Text style={styles.pinnedTitle}>📌 PINNED</Text>
+          {pinnedComments.map(comment => (
+            <CommentItem 
+              key={comment.id} 
+              comment={comment} 
+              isAdmin={isAdmin}
+              onLongPress={handleLongPress} 
+            />
+          ))}
+        </View>
       )}
 
-      {/* Messages List */}
-      <div 
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto custom-scrollbar flex flex-col-reverse"
-      >
-        {/* We reverse the mapping because the flex-col-reverse makes new items appear at bottom */}
-        {displayedComments.map(c => (
+      {/* Main List */}
+      <FlatList
+        data={displayedComments}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
           <CommentItem 
-            key={c.id} 
-            comment={c} 
-            isAdmin={isAdmin} 
-            onRefresh={onRefresh} 
-            onReply={onReply}
+            comment={item} 
+            isAdmin={isAdmin}
+            onLongPress={handleLongPress} 
           />
-        ))}
-        
-        {displayedComments.length === 0 && (
-          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-            {filterMode === 'CHAT' ? 'No messages yet.' : 'No doubts yet.'}
-          </div>
         )}
-      </div>
+        contentContainerStyle={styles.listContent}
+        inverted // Messages appear at bottom first usually, or ordered by date desc
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>No comments yet. Be the first!</Text>
+          </View>
+        }
+      />
 
-    </div>
+      <ActionSheet
+        visible={actionSheetVisible}
+        onClose={() => setActionSheetVisible(false)}
+        title="Moderate Comment"
+        items={renderAdminActions()}
+      />
+    </View>
   );
 };
 
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
+  filterBar: {
+    flexDirection: 'row',
+    padding: 8,
+    backgroundColor: '#111',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  filterBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  filterBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  filterText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterTextActive: {
+    color: colors.textPrimary,
+  },
+  pinnedSection: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(212,175,55,0.05)'
+  },
+  pinnedTitle: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  empty: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
+  errorText: {
+    color: colors.accent,
+  }
+});

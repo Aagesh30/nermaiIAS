@@ -72,7 +72,7 @@ export const ZoomMeetingPlayer: React.FC<{ joinPayload: any }> = ({ joinPayload 
       <iframe
         ref={iframeRef}
         key="iframe-static"
-        src={`/meeting-hosts/${process.env.EXPO_PUBLIC_ZOOM_RENDERER === 'client' ? 'zoom-client.html' : 'zoom.html'}?token=${joinPayload.token}&apiUrl=${encodeURIComponent('http://127.0.0.1:3000')}`}
+        src={`/meeting-hosts/${process.env.EXPO_PUBLIC_ZOOM_RENDERER === 'sdk' ? 'zoom-sdk-launch.html' : 'zoom-client-launch.html'}?token=${joinPayload.token}&apiUrl=${encodeURIComponent(typeof window !== 'undefined' ? window.location.origin : '')}`}
         className="w-full h-full border-none absolute inset-0 z-0"
         allow="camera; microphone; display-capture; fullscreen"
         onLoad={() => {

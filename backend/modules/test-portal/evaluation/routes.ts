@@ -21,9 +21,9 @@ const adminRoles = ['super_admin', 'admin', 'staff'];
 router.use(requireAuth);
 
 /**
- * Evaluate a submitted attempt (admin/staff only)
+ * Evaluate a submitted attempt (accessible by any authenticated user for their own attempt)
  */
-router.post("/evaluate/:attemptId", requireRole(adminRoles), EvaluationController.evaluateAttempt);
+router.post("/evaluate/:attemptId", EvaluationController.evaluateAttempt);
 
 /**
  * Get evaluation result (authenticated — ownership enforced in controller)

@@ -70,7 +70,9 @@ export const remove = async (req: Request, res: Response, next: NextFunction) =>
 
 export const getAccess = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await service.getResourceAccess(req.params.id as string, req.user!);
+    const protocol = req.headers['x-forwarded-proto'] as string || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] as string || req.get('host');
+    const data = await service.getResourceAccess(req.params.id as string, req.user!, protocol, host);
     res.json({ success: true, data });
   } catch (error) {
     next(error);

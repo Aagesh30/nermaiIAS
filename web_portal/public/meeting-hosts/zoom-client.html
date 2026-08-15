@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Zoom Meeting Player (Client View)</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: black;
+      font-family: sans-serif;
+      color: white;
+    }
+
+    .loading-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 2147483647;
+    }
+
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid white;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error {
+      color: #ef4444;
+      text-align: center;
+      max-width: 400px;
+    }
+  </style>
+
+  <link type="text/css" rel="stylesheet" href="https://source.zoom.us/6.2.0/css/bootstrap.css" />
+  <link type="text/css" rel="stylesheet" href="https://source.zoom.us/6.2.0/css/react-select.css" />
+
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/react-dom.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/redux-thunk.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/lib/vendor/lodash.min.js"></script>
+  <script src="https://source.zoom.us/6.2.0/zoom-meeting-6.2.0.min.js"></script>
+</head>
+
+<body>
+  <div id="loading" class="loading-container">
+    <div class="spinner"></div>
+    <div id="loading-text">Authenticating secure meeting session...</div>
+  </div>
+
+  <script>
+    // ── Preload Zoom WebAssembly ─────────────────────────────────────────────
+    ZoomMtg.setZoomJSLib('https://source.zoom.us/6.2.0/lib', '/av');
+    ZoomMtg.preLoadWasm();
+    ZoomMtg.prepareWebSDK();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const sessionId = urlParams.get('sessionId') || '';
+    const provider = urlParams.get('provider') || 'zoom';
+    const apiUrl = urlParams.get('apiUrl') ?? window.location.origin;
+    let sessionRole = 'PARTICIPANT';
+
+    const instanceId = Math.random().toString(36).substring(7);
+    console.log('[zoom-client.html] Loaded', { instanceId, hasToken: !!token });
+
+    function showError(msg) {
+      const loading = document.getElementById('loading');
+      loading.style.display = 'flex';
+      loading.innerHTML = '<div class="error"><h3>Error Joining Meeting</h3><p>' + msg + '</p></div>';
+      const zRoot = document.getElementById('zmmtg-root');
+      if (zRoot) zRoot.style.display = 'none';
+    }
+
+    function emitEvent(eventName, payload) {
+      payload = payload || {};
+      var eventType = 'SDK_EVENT';
+      if (eventName === 'HostConnected') eventType = 'HOST_CONNECTED';
+      if (eventName === 'ParticipantJoined') eventType = 'PARTICIPANT_JOINED';
+      if (eventName === 'ParticipantLeft') eventType = 'PARTICIPANT_LEFT';
+      if (eventName === 'MeetingEnded') eventType = 'MEETING_ENDED';
+      if (eventName === 'ConnectionLost') eventType = 'CONNECTION_LOST';
+      if (eventName === 'HostDisconnected') eventType = 'HOST_DISCONNECTED';
+      if (eventName === 'JoinFailed') eventType = 'JOIN_FAILED';
+
+      var data = Object.assign({ type: eventType, role: sessionRole, sessionId: sessionId, provider: provider }, payload);
+      console.log('[zoom-client.html] Emitting event to parent:', data);
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(JSON.stringify(data), window.location.origin);
+      } else if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    }
+
+    var isInitializing = false;
+    var isJoined = false;
+    let destroyed = false;
+
+    window.addEventListener("beforeunload", () => {
+      destroyed = true;
+      try { ZoomMtg.leaveMeeting({}); } catch (e) {}
+    });
+
+    async function init() {
+      if (isInitializing || isJoined) return;
+      isInitializing = true;
+
+      if (!token) {
+        showError('No join token provided.');
+        isInitializing = false;
+        return;
+      }
+
+      try {
+        let baseApiUrl = apiUrl;
+        if (baseApiUrl.endsWith('/api/v1')) baseApiUrl = baseApiUrl.replace(/\/api\/v1$/, '');
+
+        var response = await fetch(baseApiUrl + '/api/v1/live-sessions/token/' + token);
+        if (destroyed) return;
+
+        if (!response.ok) {
+          throw new Error('Invalid or expired join token (HTTP ' + response.status + ').');
+        }
+
+        var json = await response.json();
+        if (destroyed) return;
+        var data = json.data;
+
+        if (!data || !data.sdk) {
+          throw new Error('Invalid payload from server: missing sdk object.');
+        }
+
+        if (data.participantRole) {
+          sessionRole = data.participantRole;
+        }
+
+        console.log('[zoom-client.html] Payload received');
+        
+        var leaveUrl = apiUrl + '/meeting-hosts/close.html?sessionId=' + sessionId;
+
+        ZoomMtg.init({
+          leaveUrl: leaveUrl,
+          isSupportAV: true,
+          success: function () {
+            if (destroyed) return;
+            
+            document.getElementById('loading').style.display = 'none';
+
+            var joinOptions = {
+              signature: data.sdk.signature,
+              meetingNumber: data.meetingId.replace(/\D/g, ''),
+              passWord: data.sdk.passcode || '',
+              userName: data.displayName || 'Participant',
+              success: function (res) {
+                if (destroyed) return;
+                console.log('[zoom-client.html] JOIN RESOLVED');
+              },
+              error: function(err) {
+                if (destroyed) return;
+                console.error("Join Failed:", err);
+                showError(err.errorMessage || 'Failed to join the meeting.');
+                emitEvent('JoinFailed', { error: err.errorMessage });
+              }
+            };
+            if (data.sdk.zak) joinOptions.zak = data.sdk.zak;
+
+            ZoomMtg.join(joinOptions);
+          },
+          error: function(err) {
+            if (destroyed) return;
+            console.error("Init Failed:", err);
+            showError(err.errorMessage || 'Failed to initialize the meeting.');
+          }
+        });
+
+        // 4. Adapter: Map Client View events to NERMAI Bridge
+        ZoomMtg.inMeetingServiceListener('onConnectionChange', function (e) {
+          if (e.state === 'Connected') {
+            isJoined = true;
+            emitEvent(sessionRole === 'HOST' ? 'HostConnected' : 'ParticipantJoined', { connectionState: 'CONNECTED' });
+          } else if (e.state === 'Reconnecting') {
+            emitEvent('ConnectionLost', { connectionState: 'RECONNECTING' });
+          } else if (e.state === 'Closed') {
+            emitEvent(sessionRole === 'HOST' ? 'HostDisconnected' : 'ParticipantLeft', { connectionState: 'DISCONNECTED' });
+          }
+        });
+
+        ZoomMtg.inMeetingServiceListener('onUserJoin', function (e) {
+          // e could be an array of users or an object. Usually it's an array for onUserJoin.
+          var users = Array.isArray(e) ? e : (e.users || [e]);
+          users.forEach(function (u) {
+            emitEvent('ParticipantJoined', { providerParticipantId: u.userId ? u.userId.toString() : null, displayName: u.userName, isRemote: true });
+          });
+        });
+
+        ZoomMtg.inMeetingServiceListener('onUserLeave', function (e) {
+          var users = Array.isArray(e) ? e : (e.users || [e]);
+          users.forEach(function (u) {
+            emitEvent('ParticipantLeft', { providerParticipantId: u.userId ? u.userId.toString() : null, displayName: u.userName, isRemote: true });
+          });
+        });
+        
+        ZoomMtg.inMeetingServiceListener('onMeetingStatus', function (e) {
+          if (e.meetingStatus === 3 || e.meetingStatus === 'ended') {
+            emitEvent('MeetingEnded');
+          }
+        });
+
+      } catch (err) {
+        var msg = err.reason || err.message || 'Failed to connect to meeting provider.';
+        console.error(err);
+        showError(msg);
+        emitEvent('JoinFailed', { error: msg });
+      } finally {
+        isInitializing = false;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Meeting Ended</title>
+  <style>
+    body { font-family: sans-serif; background: #0a0a0a; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .box { text-align: center; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 2rem; border-radius: 12px; }
+  </style>
+  <script>
+    function notifyAndClose() {
+      // 1. Notify parent via window opener
+      if (window.opener && !window.opener.closed) {
+        var sessionId = new URLSearchParams(window.location.search).get("sessionId");
+        var msg = JSON.stringify({ type: "MEETING_ENDED", provider: "zoom", sessionId: sessionId });
+        try { window.opener.postMessage(msg, "*"); } catch (e) {}
+      }
+      // 2. Notify parent via iframe parent
+      if (window.parent && window.parent !== window) {
+        var msg2 = JSON.stringify({ type: "MEETING_ENDED", provider: "zoom" });
+        try { window.parent.postMessage(msg2, "*"); } catch (e) {}
+      }
+      
+      // 3. Close popup
+      setTimeout(function() {
+        window.close();
+      }, 500);
+    }
+    window.onload = notifyAndClose;
+  </script>
+</head>
+<body>
+  <div class="box">
+    <h3>Meeting Ended</h3>
+    <p>You can now close this window and return to the dashboard.</p>
+    <button onclick="window.close()" style="padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">Close Window</button>
+  </div>
+</body>
+</html>

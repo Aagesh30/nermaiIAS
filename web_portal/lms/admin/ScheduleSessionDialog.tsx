@@ -785,12 +785,12 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
               {showAdvanced && (
                 <div className="p-4 bg-background grid grid-cols-2 gap-4 text-sm">
                   <AdminSelect
-                    label="Access Level"
+                    label="Target Audience / Access"
                     value={formData.accessLevel}
                     onChange={(e: any) => setFormData({ ...formData, accessLevel: e.target.value })}
                     options={[
-                      { value: 'free', label: 'Free (Public)' },
-                      { value: 'premium', label: 'Premium (Any Batch)' },
+                      { value: 'premium', label: 'All Paid Students' },
+                      { value: 'free', label: 'All Students (Free & Paid)' },
                       { value: 'batch', label: 'Specific Batch' }
                     ]}
                   />      
