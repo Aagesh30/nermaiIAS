@@ -4,6 +4,7 @@ import { ContentHierarchyService } from '../../core/hierarchy/ContentHierarchySe
 import { AppError } from '../../core/errors/AppError';
 import { v4 as uuidv4 } from 'uuid';
 import { STUDENT_COLLECTIONS } from '../students/constants';
+import { FieldValue } from 'firebase-admin/firestore';
 
 export class AccessRequestService {
   private hierarchyService = new ContentHierarchyService();
@@ -97,8 +98,13 @@ export class AccessRequestService {
     // Enrich with student + batch info
     const enriched = await Promise.all(
       requests.map(async (req: any) => {
-        const studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
-        const student = studentDoc.exists ? studentDoc.data() : null;
+        let studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
+        let student = studentDoc.exists ? studentDoc.data() : null;
+        
+        if (!student) {
+          const userDoc = await db.collection('users').doc(req.studentId).get();
+          if (userDoc.exists) student = userDoc.data();
+        }
 
         let batchData = null;
         if (req.batchId) {
@@ -112,9 +118,13 @@ export class AccessRequestService {
           cost = await this.hierarchyService.calculateScopeCost(req.requestType, req.contentId);
         } catch (_) {}
 
+        const name = student?.displayName || student?.name || 'Unknown';
+        const regNo = student?.username || '';
+        const finalName = regNo ? `${name} (${regNo})` : name;
+
         return {
           ...req,
-          studentName: student?.displayName || 'Unknown',
+          studentName: finalName,
           studentEmail: student?.email || '',
           batchName: batchData?.name || null,
           batchType: batchData?.batchType || null,
@@ -250,6 +260,24 @@ export class AccessRequestService {
     return { success: true };
   }
 
+  // ─── Admin: Bulk Reject ──────────────────────────────────────────────────────
+
+  async bulkReject(requestIds: string[], adminId: string, reason: string) {
+    const results = await Promise.allSettled(
+      requestIds.map(async (id) => {
+        return this.rejectRequest(id, adminId, reason);
+      })
+    );
+
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    return {
+      success: true,
+      summary: `Successfully rejected ${successful} requests. Failed: ${failed}.`
+    };
+  }
+
   // ─── Admin: Bulk Approve ─────────────────────────────────────────────────────
 
   async bulkApprove(
@@ -271,10 +299,17 @@ export class AccessRequestService {
         const request = reqDoc.data() as any;
         if (request.status !== 'PENDING') throw new AppError('Request is not pending', 400);
 
+        const contentId = request.contentId || request.entityId;
+        const requestType = request.requestType || request.entityType;
+
+        if (!contentId || !requestType) {
+          throw new AppError('Request is missing content/entity ID or type', 400);
+        }
+
         // Conflict Detection: check if active permanent grant exists for this content
         const existingGrants = await db.collection('content_access')
           .where('studentId', '==', request.studentId)
-          .where('entityId', '==', request.contentId)
+          .where('entityId', '==', contentId)
           .where('status', '==', 'ACTIVE')
           .get();
         
@@ -288,7 +323,7 @@ export class AccessRequestService {
           throw new AppError('CONFLICT: Student already has permanent access', 409);
         }
 
-        const cost = await this.hierarchyService.calculateScopeCost(request.requestType, request.contentId);
+        const cost = await this.hierarchyService.calculateScopeCost(requestType, contentId);
         const unitsToDeduct = consumeMonthlyUnits ? cost.units : 0;
         const monthStr = this.getMonthString();
         const usageRef = db.collection('student_request_usage').doc(`${request.studentId}_${monthStr}`);
@@ -344,10 +379,42 @@ export class AccessRequestService {
             status: 'ACTIVE',
             sourceRequestId: id,
             permissionVersion: 1,
-            entityType: request.requestType,
-            entityId: request.contentId
+            entityType: requestType,
+            entityId: contentId
           });
         });
+
+        // ─── Also write to entity_permissions.temporaryGrants ─────────────────
+        // The SACS access evaluator (evaluateEntityAccess) reads temporaryGrants
+        // from entity_permissions, NOT from content_access. We must bridge both.
+        const entityPermRef = db.collection('entity_permissions').doc(contentId);
+        const entityPermDoc = await entityPermRef.get();
+        const existingTempGrants: any[] = entityPermDoc.exists
+          ? (entityPermDoc.data()?.temporaryGrants || [])
+          : [];
+        // Remove any old grant for this student, then add new one
+        const filteredGrants = existingTempGrants.filter((g: any) => g.studentId !== request.studentId);
+        const sacsGrant = {
+          studentId: request.studentId,
+          grantedAt: new Date().toISOString(),
+          expiresAt: expiresAt || undefined,
+          grantedBy: adminId,
+          requestId: id,
+        };
+        await entityPermRef.set(
+          { temporaryGrants: [...filteredGrants, sacsGrant], updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+
+        // Invalidate Redis caches to ensure immediate reflection on student side
+        try {
+          const { redisClient } = await import('../../infrastructure/redis');
+          await redisClient.del(`sacs:perm:${contentId}`);
+          const { invalidateAccessCache } = await import('../../core/security/AccessCache');
+          await invalidateAccessCache(request.studentId);
+        } catch (e) {
+          // ignore cache invalidation errors
+        }
 
         return id;
       })
@@ -396,15 +463,20 @@ export class AccessRequestService {
     // Enrich with student names
     const activeGrants = grants.filter(g => !g.expiresAt || g.expiresAt >= now);
     return Promise.all(activeGrants.map(async (grant) => {
-      const studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(grant.studentId).get();
-      const student = studentDoc.exists ? studentDoc.data() : null;
+      let studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(grant.studentId).get();
+      let student = studentDoc.exists ? studentDoc.data() : null;
+      if (!student) {
+        const userDoc = await db.collection('users').doc(grant.studentId).get();
+        if (userDoc.exists) student = userDoc.data();
+      }
+
       const hoursLeft = grant.expiresAt
         ? Math.max(0, Math.round((new Date(grant.expiresAt).getTime() - Date.now()) / 3600000))
         : null;
 
       return {
         ...grant,
-        studentName: student?.displayName || 'Unknown',
+        studentName: student?.displayName || student?.name || student?.username || 'Unknown',
         hoursLeft
       };
     }));
@@ -523,8 +595,12 @@ export class AccessRequestService {
 
     // Enrich with student info + active grant info for approved ones
     return Promise.all(requests.map(async (req: any) => {
-      const studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
-      const student = studentDoc.exists ? studentDoc.data() : null;
+      let studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
+      let student = studentDoc.exists ? studentDoc.data() : null;
+      if (!student) {
+        const userDoc = await db.collection('users').doc(req.studentId).get();
+        if (userDoc.exists) student = userDoc.data();
+      }
 
       let grant = null;
       if (req.status === 'APPROVED') {
@@ -540,9 +616,13 @@ export class AccessRequestService {
         ? Math.max(0, Math.round((new Date((grant as any).expiresAt).getTime() - Date.now()) / 3600000))
         : null;
 
+      const name = student?.displayName || student?.name || 'Unknown';
+      const regNo = student?.username || '';
+      const finalName = regNo ? `${name} (${regNo})` : name;
+
       return {
         ...req,
-        studentName: student?.displayName || 'Unknown',
+        studentName: finalName,
         studentEmail: student?.email || '',
         grant,
         hoursLeft
@@ -561,11 +641,16 @@ export class AccessRequestService {
     const grants = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
 
     return Promise.all(grants.map(async (grant) => {
-      const studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(grant.studentId).get();
-      const student = studentDoc.exists ? studentDoc.data() : null;
+      let studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(grant.studentId).get();
+      let student = studentDoc.exists ? studentDoc.data() : null;
+      if (!student) {
+        const userDoc = await db.collection('users').doc(grant.studentId).get();
+        if (userDoc.exists) student = userDoc.data();
+      }
+
       return {
         ...grant,
-        studentName: student?.displayName || 'Unknown',
+        studentName: student?.displayName || student?.name || student?.username || 'Unknown',
         studentEmail: student?.email || '',
       };
     }));

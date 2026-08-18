@@ -331,7 +331,7 @@ export class CourseService {
     const classes = await this.classRepo.findBySubtopicId(subtopicId);
     const enrichedClasses = [];
     for (const cls of classes) {
-      if (cls.classType === 'live') {
+      if (['live', 'zoom_live', 'youtube_live'].includes(cls.classType)) {
         const snapshot = await db.collection('live_sessions').where('classId', '==', cls.id).get();
         if (!snapshot.empty) {
           const validDocs = snapshot.docs.filter(d => d.data().isDeleted !== true);
@@ -388,7 +388,7 @@ export class CourseService {
     const classes = await this.classRepo.findByTopicId(topicId);
     const enrichedClasses = [];
     for (const cls of classes) {
-      if (cls.classType === 'live') {
+      if (['live', 'zoom_live', 'youtube_live'].includes(cls.classType)) {
         const snapshot = await db.collection('live_sessions').where('classId', '==', cls.id).get();
         if (!snapshot.empty) {
           const validDocs = snapshot.docs.filter(d => d.data().isDeleted !== true);
@@ -402,17 +402,12 @@ export class CourseService {
     return enrichedClasses;
   }
 
-  async listAllClasses(tenantId: string) {
-    const topics = await this.listAllTopics(tenantId);
-    if (topics.length === 0) return [];
-    
-    const classPromises = topics.map(t => this.classRepo.findByTopicId(t.id!));
-    const classesArrays = await Promise.all(classPromises);
-    const classes = classesArrays.flat();
+  async listAllClasses(tenantId: string, role?: string, userId?: string) {
+    const classes = await this.classRepo.findByTenantId(tenantId);
 
     const enrichedClasses = [];
     for (const cls of classes) {
-      if (cls.classType === 'live') {
+      if (['live', 'zoom_live', 'youtube_live'].includes(cls.classType)) {
         const snapshot = await db.collection('live_sessions').where('classId', '==', cls.id).get();
         if (!snapshot.empty) {
           const validDocs = snapshot.docs.filter(d => d.data().isDeleted !== true);
@@ -421,6 +416,17 @@ export class CourseService {
           }
         }
       }
+      
+      // Decrypt the raw YouTube URL ONLY for staff/admins so they can view it in the edit form.
+      // Students will NOT receive this field to prevent inspection extraction.
+      if (role && ['super_admin', 'admin', 'teacher', 'staff'].includes(role) && (cls.classType === 'recorded' || (cls.classType as string) === 'youtube_recorded') && (cls as any).encryptedVideoId) {
+        try {
+          (cls as any).recordingUrl = `https://youtube.com/watch?v=${decrypt((cls as any).encryptedVideoId)}`;
+        } catch (e) {
+          console.error("Failed to decrypt video ID for class:", cls.id);
+        }
+      }
+      
       enrichedClasses.push(cls);
     }
     return enrichedClasses;
@@ -538,24 +544,31 @@ export class CourseService {
     const topic = await this.topicRepo.findById(classDoc.topicId);
     const subject = await this.subjectRepo.findById(topic!.subjectId);
     const course = await this.courseRepo.findById(subject!.courseId);
-    if (!course || course.tenantId !== user.tenantId) throw new AppError('Tenant mismatch', 403);
     
-    // Use the new SAPE engine
+    // ================== DIAGNOSTICS ==================
+    console.log("=== WATCH RECORDING DIAGNOSTICS ===");
+    console.log("FIREBASE_PROJECT_ID:", process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || 'not-set');
+    console.log("authenticated role:", user.role);
+    console.log("authenticated user tenantId:", user.tenantId);
+    console.log("requested classId:", classId);
+    console.log("course/class tenantId:", course?.tenantId);
+    console.log("class exists:", !!classDoc);
+    console.log("encryptedVideoId exists:", !!(classDoc as any).encryptedVideoId);
+    console.log("=====================================");
+
+    if (!course || course.tenantId !== user.tenantId) throw new AppError('Tenant mismatch', 403);
+
+    // Determine if this user is a staff/admin previewing LMS content.
+    // The existing AccessPolicyEngine.evaluateAccess() already has a built-in
+    // isAdminOverride param (defaulting to false) that immediately returns allowed=true.
+    // We activate it here for authorized staff roles, which is the intended use.
+    const isStaffPreview = ['super_admin', 'admin', 'teacher', 'staff'].includes(user.role || '');
+
+    // Use the SAPE engine — with isAdminOverride for staff, without for students
     const sape = new AccessPolicyEngine();
-    let sapeDecision = await sape.evaluateAccess(user.userId || user.id, 'CLASS', classId);
+    let sapeDecision = await sape.evaluateAccess(user.userId || user.id, 'CLASS', classId, isStaffPreview);
     
     const isFreeCourse = course.isFree || course.price === 0;
-
-    console.log({
-        classId,
-        courseId: course.id,
-        provider: classDoc.classType,
-        isFree: course.isFree,
-        price: course.price,
-        batchType: sapeDecision.context?.batchType,
-        studentId: user.userId || user.id,
-        denialReason: sapeDecision.reason,
-    });
 
     if (isFreeCourse) {
         sapeDecision = {
@@ -565,13 +578,42 @@ export class CourseService {
         } as any;
     }
 
+    console.log("SAPE Decision:", sapeDecision.allowed, sapeDecision.reason, "| isStaffPreview:", isStaffPreview);
+
     if (!sapeDecision.allowed) {
       return {
         status: 'DENIED',
-        denialReason: sapeDecision.reason,
+        denialReason: 'SAPE: ' + sapeDecision.reason,
         allowedRequestScopes: sapeDecision.allowedRequestScopes,
         remainingRecordedUnits: sapeDecision.remainingRecordedUnits
       };
+    }
+
+    // Evaluate specific recorded class access via SACS (student only)
+    // Staff roles always have LMS preview access — SACS is a student batch/visibility system
+    if (!isStaffPreview) {
+      const { AccessRulesService } = require('../access-rules/service');
+      const accessRulesService = new AccessRulesService();
+      const tenantId = user.tenantId || 'default';
+      const sacsDecision = await accessRulesService.evaluateEntityAccess(
+        user.userId || user.id,
+        classId,
+        'class',
+        tenantId
+      );
+
+      console.log("SACS Decision:", sacsDecision.allowed, sacsDecision.lockMessage);
+
+      if (!sacsDecision.allowed) {
+        return {
+          status: 'DENIED',
+          denialReason: 'SACS: ' + (sacsDecision.lockMessage || 'Class Access Denied'),
+          // Instruct UI that a request can be made for this class
+          allowedRequestScopes: ['class']
+        };
+      }
+    } else {
+      console.log("SACS: Skipped — staff preview (isStaffPreview=true)");
     }
 
     if (classDoc.classType === 'recorded' || (classDoc.classType as string) === 'youtube_recorded') {

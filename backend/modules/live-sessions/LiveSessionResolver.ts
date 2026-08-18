@@ -12,6 +12,7 @@ export interface ResolvedLiveSession {
   moderators: string[];
   joinAllowed: boolean;
   waitingRoomEnabled: boolean;
+  actualStartTime?: string | null;
 }
 
 export class LiveSessionResolver {
@@ -79,7 +80,8 @@ export class LiveSessionResolver {
       },
       moderators: activeSession.assignedStaffIds || [],
       joinAllowed: isJoinAllowed,
-      waitingRoomEnabled: activeSession.waitingRoomEnabled !== false
+      waitingRoomEnabled: activeSession.waitingRoomEnabled !== false,
+      actualStartTime: activeSession.actualStartTime || null
     };
   }
 }

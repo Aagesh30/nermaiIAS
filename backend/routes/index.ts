@@ -32,7 +32,7 @@ import developerRouter from "../modules/developer";
 
 // Integrated LMS Modules
 import { StudentsRoutes, BatchRoutes } from "../modules/students";
-import { CoursesRoutes, SubjectRoutes, TopicRoutes, SubtopicRoutes, ClassRoutes } from "../modules/courses";
+import { CoursesRoutes, SubjectRoutes, TopicRoutes, SubtopicRoutes, ClassRoutes, renderPlayer, renderZoomPlayer } from "../modules/courses";
 import { resourceRoutes } from "../modules/resources";
 import { WatchHistoryRoutes } from "../modules/watch-history";
 import { AttendanceRoutes } from "../modules/attendance";
@@ -96,6 +96,10 @@ router.use("/test-portal/question-bank", questionBankRouter);
 
 // Developer Portal Routes
 router.use("/developer", developerRouter);
+
+// Player Routes (Auth via token)
+router.get("/player/:token", renderPlayer);
+router.get("/player/zoom/:token", renderZoomPlayer);
 
 // Integrated LMS 2nd Batch Routes (API v1)
 router.use("/students", StudentsRoutes);

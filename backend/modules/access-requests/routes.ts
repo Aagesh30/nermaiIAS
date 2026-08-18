@@ -12,6 +12,7 @@ router.get('/my-requests', requireAuth, ctrl.getMyRequests);
 const adminRoles = ['super_admin', 'admin', 'staff'];
 router.get('/admin/pending', requireAuth, requireRole(adminRoles), ctrl.listPendingRequests);
 router.post('/admin/bulk-approve', requireAuth, requireRole(adminRoles), ctrl.bulkApprove);
+router.post('/admin/bulk-reject', requireAuth, requireRole(adminRoles), ctrl.bulkReject);
 router.post('/admin/:requestId/approve', requireAuth, requireRole(adminRoles), ctrl.approveRequest);
 router.post('/admin/:requestId/reject', requireAuth, requireRole(adminRoles), ctrl.rejectRequest);
 

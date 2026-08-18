@@ -33,6 +33,8 @@ const DEFAULT_CAPABILITIES: Record<BatchType, IBatchCapabilities> = {
     canAccessAssignments: true,
     canAccessTests: true,
     canRequestRecording: true,
+    requestLimit: 5,
+    requestWindowDays: 30,
   },
   offline: {
     tenantId: '',
@@ -43,6 +45,8 @@ const DEFAULT_CAPABILITIES: Record<BatchType, IBatchCapabilities> = {
     canAccessAssignments: true,
     canAccessTests: true,
     canRequestRecording: true,
+    requestLimit: 5,
+    requestWindowDays: 30,
   },
   recorded: {
     tenantId: '',
@@ -53,6 +57,8 @@ const DEFAULT_CAPABILITIES: Record<BatchType, IBatchCapabilities> = {
     canAccessAssignments: true,
     canAccessTests: true,
     canRequestRecording: false,
+    requestLimit: 5,
+    requestWindowDays: 30,
   },
   free: {
     tenantId: '',
@@ -202,40 +208,23 @@ export class AccessRulesService {
       };
     }
 
-    // 3. Check temporary grants on the DIRECT permission doc (not inherited)
-    if (permDoc?.temporaryGrants) {
-      const now = new Date();
-      const grant = permDoc.temporaryGrants.find(
-        g => g.studentId === userId && (!g.expiresAt || new Date(g.expiresAt) > now),
-      );
-      if (grant) {
-        return {
-          allowed: true,
-          hasTemporaryGrant: true,
-          grantExpiresAt: grant.expiresAt,
-        };
-      }
-    }
-
-    // 4. Batch capability check (for entity types that depend on batch type)
+    // 3. Evaluate Default Batch Capabilities
+    let defaultCapabilityAllows = true;
     if (accessCtx.batchIds.length > 0) {
-      // Fetch capability for the student's first active batch (all batches should have same type per student)
-      // In practice, most students belong to a single batch.
       const studentBatchId = accessCtx.batchIds[0];
       const caps = await repo.getBatchCapabilities(studentBatchId);
       const batchType: BatchType = (caps?.batchType ?? 'free');
       const defaults = DEFAULT_CAPABILITIES[batchType];
       const effectiveCaps = { ...defaults, ...(caps ?? {}) };
 
-      if (entityType === 'class' || entityType === 'live_session') {
-        // For recorded classes, rely on visibility rule below
-        // For live classes, the batch capability is the gate
-        // (actual live/recorded distinction handled by the video player service)
+      if (entityType === 'live_session') {
+        defaultCapabilityAllows = !!effectiveCaps.canAccessLiveClasses;
+      } else if (entityType === 'class') {
+        // Assuming 'class' entity type refers to recorded classes
+        defaultCapabilityAllows = !!effectiveCaps.canAccessRecordedClasses;
       }
-      // Future: check per-entityType cap here (e.g., 'test' requires canAccessTests)
     } else {
-      // No batch membership → free student
-      // Free students only see 'public' content
+      // Free student: Only sees 'public' content
       if (perm.visibility !== 'public') {
         return {
           allowed: false,
@@ -243,6 +232,40 @@ export class AccessRulesService {
           lockMessage: buildLockMessage('capability_blocked', perm),
         };
       }
+    }
+
+    // 4. Temporary grants check (Exception Override)
+    let hasTemporaryGrant = false;
+    let grantExpiresAt = undefined;
+    if (permDoc?.temporaryGrants) {
+      const now = new Date();
+      const grant = permDoc.temporaryGrants.find(
+        g => g.studentId === userId && (!g.expiresAt || new Date(g.expiresAt) > now),
+      );
+      if (grant) {
+        hasTemporaryGrant = true;
+        grantExpiresAt = grant.expiresAt;
+      }
+    }
+
+    // 5. Final capability resolution
+    if (accessCtx.batchIds.length > 0 && (entityType === 'live_session' || entityType === 'class')) {
+      if (!defaultCapabilityAllows) {
+        if (hasTemporaryGrant) {
+          return { allowed: true, hasTemporaryGrant: true, grantExpiresAt };
+        } else {
+          return {
+            allowed: false,
+            lockReason: 'capability_blocked',
+            lockMessage: buildLockMessage('capability_blocked', perm),
+          };
+        }
+      }
+    }
+
+    // If there is a temporary grant, it overrides general visibility too!
+    if (hasTemporaryGrant) {
+      return { allowed: true, hasTemporaryGrant: true, grantExpiresAt };
     }
 
     // 5. Visibility rule evaluation
@@ -424,12 +447,46 @@ export class AccessRulesService {
     reason: AccessRequestReason,
     customReason: string | undefined,
     tenantId: string,
+    scheduledDate?: string,
   ): Promise<string> {
-    // Prevent duplicate pending requests
-    const existing = await repo.getStudentPendingRequest(studentId, entityId);
-    if (existing) throw new AppError('You already have a pending request for this content.', 409);
+    // Prevent duplicate active requests (pending or approved)
+    const existing = await repo.getStudentActiveRequest(studentId, entityId, scheduledDate);
+    if (existing) throw new AppError('You already have an active request for this content.', 409);
 
-    const now = new Date().toISOString();
+    const now = new Date();
+    
+    // Check quota
+    const { getAccessContext } = await import('../../core/security/AccessCache');
+    const accessCtx = await getAccessContext(studentId, tenantId);
+    let requestLimit = 0;
+    let requestWindowDays = 30;
+    let used = 0;
+    
+    if (accessCtx.batchIds.length > 0) {
+      const caps = await repo.getBatchCapabilities(accessCtx.batchIds[0]);
+      const batchType: BatchType = caps?.batchType ?? 'free';
+      const defaults = DEFAULT_CAPABILITIES[batchType];
+      const effectiveCaps = { ...defaults, ...(caps ?? {}) };
+      
+      // Enforce batch eligibility for making requests
+      if (!effectiveCaps.canRequestRecording) {
+        throw new AppError('Your batch type is not eligible to request content.', 403);
+      }
+
+      if (effectiveCaps.requestLimit !== undefined) {
+        requestLimit = effectiveCaps.requestLimit;
+      }
+      if (effectiveCaps.requestWindowDays !== undefined) {
+        requestWindowDays = effectiveCaps.requestWindowDays;
+      }
+      
+      const sinceDate = new Date(now.getTime() - requestWindowDays * 24 * 60 * 60 * 1000).toISOString();
+      used = await repo.getStudentRequestUsage(studentId, sinceDate);
+    }
+    
+    const exceeded = requestLimit > 0 ? used >= requestLimit : true; // If limit is 0 or undefined, they have no quota
+    const status = 'PENDING'; // ALWAYS PENDING so the old SACS admin can see it. We still store exceeded in quotaSnapshot.
+
     const requestId = await repo.createAccessRequest({
       tenantId,
       studentId,
@@ -438,9 +495,11 @@ export class AccessRulesService {
       entityName,
       reason,
       customReason,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
+      scheduledDate,
+      status,
+      quotaSnapshot: { limit: requestLimit, used, exceeded },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
       createdBy: studentId,
       updatedBy: studentId,
       isDeleted: false,
@@ -469,8 +528,11 @@ export class AccessRulesService {
     const request = await repo.getAccessRequest(requestId);
     if (!request) throw new AppError('Request not found', 404);
     if (request.tenantId !== tenantId) throw new AppError('Tenant mismatch', 403);
-    if (request.status !== 'pending') throw new AppError('Request is no longer pending', 400);
+    if (request.status !== 'PENDING' && request.status !== 'LIMIT_EXCEEDED') {
+      throw new AppError('Request is no longer pending or awaiting override', 400);
+    }
 
+    const approvalType = request.status === 'LIMIT_EXCEEDED' ? 'limit_override' : 'normal';
     const now = new Date().toISOString();
 
     // Write temporary grant to entity_permissions
@@ -495,7 +557,8 @@ export class AccessRulesService {
 
     // Update request status
     await repo.updateAccessRequest(requestId, {
-      status: 'approved',
+      status: 'APPROVED',
+      approvalType,
       reviewedBy: adminId,
       reviewedAt: now,
       grantExpiresAt,
@@ -528,7 +591,7 @@ export class AccessRulesService {
 
     const now = new Date().toISOString();
     await repo.updateAccessRequest(requestId, {
-      status: 'rejected',
+      status: 'REJECTED',
       reviewedBy: adminId,
       reviewedAt: now,
     });
@@ -712,7 +775,7 @@ export class AccessRulesService {
   }
 
   async listAccessRequests(tenantId: string, filters: {
-    status?: 'pending' | 'approved' | 'rejected';
+    status?: 'PENDING' | 'APPROVED' | 'REJECTED';
     entityId?: string;
     studentId?: string;
     limit?: number;
@@ -738,7 +801,7 @@ export class AccessRulesService {
     const [decision, effectivePerm, pendingRequest] = await Promise.all([
       this.evaluateEntityAccess(userId, entityId, entityType, tenantId),
       this.resolveEffectivePermission(entityId, entityType, tenantId),
-      repo.getStudentPendingRequest(userId, entityId),
+      repo.getStudentActiveRequest(userId, entityId),
     ]);
     return { decision, effectivePerm, pendingRequest };
   }

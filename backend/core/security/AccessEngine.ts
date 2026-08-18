@@ -49,8 +49,8 @@ export class AccessEngine {
         case 'batch': {
           const hasBatchAccess = 
             targetBatchIds?.includes('all') ||
-            (targetBatchIds?.includes('all_paid') && accessCtx.accessProfiles.includes('premium')) ||
-            (targetBatchIds?.includes('all_free') && !accessCtx.accessProfiles.includes('premium')) ||
+            (targetBatchIds?.includes('all_paid') && accessCtx.accessProfiles.includes('batch')) ||
+            (targetBatchIds?.includes('all_free') && !accessCtx.accessProfiles.includes('batch')) ||
             accessCtx.batchIds.some(id => targetBatchIds?.includes(id));
 
           if (!hasBatchAccess) {
@@ -61,7 +61,7 @@ export class AccessEngine {
 
         case 'premium': {
           // Any student who has paid and joined any batch gets premium access
-          if (!accessCtx.accessProfiles.includes('premium')) {
+          if (!accessCtx.accessProfiles.includes('batch')) {
             throw new AppError('Access denied: You must be enrolled in a batch to access premium resources', 403);
           }
           break;

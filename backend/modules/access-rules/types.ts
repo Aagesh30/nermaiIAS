@@ -22,7 +22,8 @@ export type AccessRequestReason =
   | 'purchased_later'
   | 'other';
 
-export type AccessRequestStatus = 'pending' | 'approved' | 'rejected';
+export type AccessRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'LIMIT_EXCEEDED' | 'CANCELLED' | 'EXPIRED';
+export type AccessApprovalType = 'normal' | 'limit_override';
 
 export type BatchType = 'online' | 'offline' | 'recorded' | 'free';
 
@@ -119,6 +120,18 @@ export interface IAccessRequest extends BaseAuditFields {
 
   /** Populated by admin on approval — if set, access is temporary. */
   grantExpiresAt?: string; // ISO
+
+  /** Set if request is tied to a specific scheduled occurrence/date (e.g., live classes) */
+  scheduledDate?: string; // ISO
+
+  approvalType?: AccessApprovalType;
+
+  /** Quota state at the time of the request */
+  quotaSnapshot?: {
+    limit: number;
+    used: number;
+    exceeded: boolean;
+  };
 }
 
 // ─── Batch Capabilities Document ─────────────────────────────────────────────
@@ -135,6 +148,11 @@ export interface IBatchCapabilities {
   canAccessTests: boolean;
   /** Allows students to file a "Request Access" for recorded content they don't own. */
   canRequestRecording: boolean;
+
+  /** Maximum number of content requests a student in this batch can make in the rolling window */
+  requestLimit?: number;
+  /** The rolling window duration (in days) for request limit evaluation */
+  requestWindowDays?: number;
 }
 
 // ─── Permission Template Document ────────────────────────────────────────────

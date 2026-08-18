@@ -13,6 +13,12 @@ studentRoutes.post('/me/request-qr', requireAuth, StudentController.requestStude
 studentRoutes.post('/me/payment-acknowledgements', requireAuth, StudentController.submitPaymentAcknowledgement);
 studentRoutes.get('/me/payment-acknowledgements', requireAuth, StudentController.getStudentPaymentAcknowledgements);
 
+// Student LMS Discovery — batch-filtered content with SACS access decisions
+// requireRole(['student']) is intentional: these endpoints must not be accessible to admin/teacher/staff
+studentRoutes.get('/me/lms-classes', requireAuth, requireRole(['student']), StudentController.getMyLmsClassesHandler);
+studentRoutes.get('/me/lms-resources', requireAuth, requireRole(['student']), StudentController.getMyLmsResourcesHandler);
+
+
 // QR Code Permissions settings (Admin only)
 studentRoutes.get('/qr-settings', adminAuth, StudentController.getQrSettings);
 studentRoutes.put('/qr-settings', adminAuth, StudentController.updateQrSettings);

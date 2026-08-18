@@ -227,7 +227,7 @@ export class DailyQuizController {
                     .get();
 
                 if (todaySnapshot.empty) {
-                    return res.status(404).json({ success: false, message: "No quiz available for today" });
+                    return res.status(200).json({ success: true, data: null, message: "No quiz available for today" });
                 }
 
                 const quizDoc = todaySnapshot.docs[0];

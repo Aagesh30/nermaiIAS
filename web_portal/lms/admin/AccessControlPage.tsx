@@ -70,9 +70,10 @@ const RequestsTab: React.FC = () => {
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Bulk Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [grantDurationDays, setGrantDurationDays] = useState<string>('7');
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+  const [overrideLimit, setOverrideLimit] = useState<boolean>(false);
 
   useEffect(() => {
     let mounted = true;
@@ -107,22 +108,95 @@ const RequestsTab: React.FC = () => {
     else setSelectedIds(new Set(requests.map(r => r.id)));
   };
 
-  const handleBulkApprove = async () => {
-    if (!window.confirm(`Approve ${selectedIds.size} requests?`)) return;
+  const durationHours = grantDurationDays === '0' ? null : parseInt(grantDurationDays) * 24;
+
+  const handleIndividualApprove = async (reqId: string) => {
+    const daysStr = window.prompt('Enter duration in days (0 for permanent):', grantDurationDays);
+    if (daysStr === null) return;
+    const days = parseInt(daysStr, 10);
+    if (isNaN(days) || days < 0) {
+      alert('Invalid duration');
+      return;
+    }
+    const individualDurationHours = days === 0 ? null : days * 24;
+
+    setProcessingIds(prev => new Set(prev).add(reqId));
     try {
-      await AccessRulesApi.bulkApprove({
-        requestIds: Array.from(selectedIds),
-        grantType: 'TEMPORARY',
-        durationHours: 48,
+      const res = await AccessRulesApi.bulkApprove({
+        requestIds: [reqId],
+        grantType: days === 0 ? 'PERMANENT' : 'TEMPORARY',
+        durationHours: individualDurationHours,
         consumeMonthlyUnits: true,
-        respectMonthlyLimit: true,
+        respectMonthlyLimit: !overrideLimit,
         presetId: null,
-        overrideLimit: false
+        overrideLimit: overrideLimit
+      });
+      const data = res.data?.data || res.data;
+      if (data && data.failed > 0) {
+        alert(`Approval failed: ${data.errors?.join(', ') || 'Unknown error'}`);
+      } else {
+        setRequests(prev => prev.filter(r => r.id !== reqId));
+      }
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Approval failed');
+    } finally {
+      setProcessingIds(prev => { const s = new Set(prev); s.delete(reqId); return s; });
+    }
+  };
+
+  const handleIndividualReject = async (reqId: string) => {
+    const reason = window.prompt('Enter rejection reason:', 'Rejected by admin');
+    if (reason === null) return;
+    setProcessingIds(prev => new Set(prev).add(reqId));
+    try {
+      await AccessRulesApi.bulkReject({ requestIds: [reqId], reason });
+      setRequests(prev => prev.filter(r => r.id !== reqId));
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Rejection failed');
+    } finally {
+      setProcessingIds(prev => { const s = new Set(prev); s.delete(reqId); return s; });
+    }
+  };
+
+  const handleBulkApprove = async () => {
+    if (!window.confirm(`Approve ${selectedIds.size} requests with ${grantDurationDays === '0' ? 'permanent' : grantDurationDays + '-day'} access?`)) return;
+    try {
+      const res = await AccessRulesApi.bulkApprove({
+        requestIds: Array.from(selectedIds),
+        grantType: grantDurationDays === '0' ? 'PERMANENT' : 'TEMPORARY',
+        durationHours,
+        consumeMonthlyUnits: true,
+        respectMonthlyLimit: !overrideLimit,
+        presetId: null,
+        overrideLimit: overrideLimit
+      });
+      const data = res.data?.data || res.data;
+      if (data && data.failed > 0) {
+        alert(`Approved ${data.approved}, Failed ${data.failed}. Errors: ${data.errors?.join(', ') || 'Unknown error'}`);
+        // Fetch fresh list to make sure we stay consistent
+        const fetchRes = await AccessRulesApi.listAccessRequests();
+        setRequests(fetchRes.data?.data || fetchRes.data || []);
+      } else {
+        setRequests(prev => prev.filter(req => !selectedIds.has(req.id)));
+      }
+      setSelectedIds(new Set());
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Approval failed');
+    }
+  };
+
+  const handleBulkReject = async () => {
+    const reason = window.prompt(`Reject ${selectedIds.size} requests? Please enter a reason:`, 'Rejected by admin');
+    if (reason === null) return;
+    try {
+      await AccessRulesApi.bulkReject({
+        requestIds: Array.from(selectedIds),
+        reason
       });
       setRequests(prev => prev.filter(req => !selectedIds.has(req.id)));
       setSelectedIds(new Set());
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Approval failed');
+      alert(e?.response?.data?.message || 'Rejection failed');
     }
   };
 
@@ -131,14 +205,44 @@ const RequestsTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center mb-4">
+      {/* Header with duration selector */}
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">Pending ({requests.length})</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Grant Duration */}
+          <div className="flex items-center gap-2 bg-white dark:bg-[#1a1a2e] border border-gray-200 dark:border-[#8B0000]/30 rounded-xl px-3 py-1.5">
+            <span className="text-xs text-gray-500 dark:text-gray-400 font-semibold whitespace-nowrap">Grant Duration:</span>
+            <select
+              value={grantDurationDays}
+              onChange={e => setGrantDurationDays(e.target.value)}
+              className="bg-transparent text-xs font-bold text-gray-900 dark:text-white outline-none cursor-pointer"
+            >
+              <option value="1">24 Hours</option>
+              <option value="3">3 Days</option>
+              <option value="7">7 Days</option>
+              <option value="14">14 Days</option>
+              <option value="30">30 Days</option>
+              <option value="0">Permanent</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <input 
+              type="checkbox" 
+              id="overrideLimit" 
+              checked={overrideLimit} 
+              onChange={e => setOverrideLimit(e.target.checked)} 
+              className="cursor-pointer"
+            />
+            <label htmlFor="overrideLimit" className="text-xs text-gray-500 dark:text-gray-400 font-semibold cursor-pointer">Override Quota Limit</label>
+          </div>
           <Button variant="secondary" className="px-3 py-1.5 text-xs font-bold" onClick={handleSelectAll}>
             {selectedIds.size === requests.length ? 'Deselect All' : 'Select All'}
           </Button>
           {selectedIds.size > 0 && (
-            <Button className="px-3 py-1.5 text-xs font-bold bg-[#8B0000] hover:bg-[#8B0000]/90" onClick={handleBulkApprove}>Approve ({selectedIds.size})</Button>
+            <div className="flex gap-2">
+              <Button className="px-3 py-1.5 text-xs font-bold bg-[#8B0000] hover:bg-[#8B0000]/90 text-white" onClick={handleBulkApprove}>Approve ({selectedIds.size})</Button>
+              <Button className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white" onClick={handleBulkReject}>Reject ({selectedIds.size})</Button>
+            </div>
           )}
         </div>
       </div>
@@ -148,23 +252,53 @@ const RequestsTab: React.FC = () => {
       <div className="grid grid-cols-1 gap-4">
         {requests.map((req, i) => {
           const isSelected = selectedIds.has(req.id);
+          const isProcessing = processingIds.has(req.id);
+          const studentReason = req.customReason || req.reason || '';
           return (
-            <div 
-              key={req.id || i} 
-              className={`bg-white dark:bg-[#1a1a2e] border shadow-sm rounded-2xl cursor-pointer transition-all ${isSelected ? 'border-[#8B0000] bg-[#8B0000]/5 dark:border-[#ff8a80] dark:bg-[#8B0000]/10' : 'border-gray-200 dark:border-[#8B0000]/30 hover:border-[#8B0000]/50'}`}
-              onClick={() => toggleSelect(req.id)}
+            <div
+              key={req.id || i}
+              className={`bg-white dark:bg-[#1a1a2e] border shadow-sm rounded-2xl transition-all ${isSelected ? 'border-[#8B0000] bg-[#8B0000]/5 dark:border-[#ff8a80] dark:bg-[#8B0000]/10' : 'border-gray-200 dark:border-[#8B0000]/30 hover:border-[#8B0000]/50'}`}
             >
-              <div className="p-5 flex items-center gap-4">
-                <div className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 ${isSelected ? 'bg-[#8B0000] dark:bg-[#ff8a80] border-[#8B0000] dark:border-[#ff8a80]' : 'border-gray-300 dark:border-gray-700'}`}>
+              <div className="p-5 flex items-start gap-4">
+                {/* Checkbox */}
+                <div
+                  className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 cursor-pointer ${isSelected ? 'bg-[#8B0000] dark:bg-[#ff8a80] border-[#8B0000] dark:border-[#ff8a80]' : 'border-gray-300 dark:border-gray-700'}`}
+                  onClick={() => toggleSelect(req.id)}
+                >
                   {isSelected && <CheckCircle2 size={14} className="text-white" />}
                 </div>
-                <div className="flex-1">
+                {/* Info */}
+                <div className="flex-1 min-w-0">
                   <div className="font-bold text-gray-900 dark:text-white text-sm">{req.studentName || req.studentId || 'Unknown Student'}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{req.contentName || req.entityName || req.contentId || 'Unknown Content'}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{req.contentName || req.entityName || req.contentId || 'Unknown Content'}</div>
+                  {studentReason && (
+                    <div className="mt-2 text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-[#252525] rounded-lg px-3 py-2 border border-gray-200 dark:border-white/10">
+                      <span className="font-semibold text-gray-400 dark:text-gray-500 mr-1">Reason:</span>{studentReason}
+                    </div>
+                  )}
                   <div className="flex gap-2 mt-2.5">
                     <Badge variant="outline" className="border-[#8B0000] text-[#8B0000] dark:border-[#ff8a80] dark:text-[#ff8a80] font-bold">{(req.requestType || req.entityType || 'Resource').toUpperCase()}</Badge>
-                    <Badge variant="secondary" className="font-semibold">{req.reason || 'General'}</Badge>
+                    {req.reason && req.reason !== 'other' && <Badge variant="secondary" className="font-semibold">{req.reason}</Badge>}
                   </div>
+                </div>
+                {/* Individual Actions */}
+                <div className="flex flex-col gap-2 shrink-0">
+                  <button
+                    disabled={isProcessing}
+                    onClick={() => handleIndividualApprove(req.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    <CheckCircle2 size={13} />
+                    {isProcessing ? '...' : 'Approve'}
+                  </button>
+                  <button
+                    disabled={isProcessing}
+                    onClick={() => handleIndividualReject(req.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-500/20 disabled:opacity-50 transition-colors"
+                  >
+                    <XCircle size={13} />
+                    {isProcessing ? '...' : 'Reject'}
+                  </button>
                 </div>
               </div>
             </div>

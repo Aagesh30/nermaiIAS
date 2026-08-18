@@ -6,6 +6,7 @@ import { AppError } from '../../core/errors/AppError';
 import { ClassRepository } from '../courses/repository';
 import { interactionEventBus } from '../interaction-engine/eventBus';
 import { NotificationService } from '../notifications/service';
+import { LiveSessionResolver } from './LiveSessionResolver';
 
 const notificationService = new NotificationService();
 
@@ -35,12 +36,21 @@ export class LiveSessionService {
     });
 
     // Query all live classes from 'classes' collection
-    const classesSnap = await db.collection('classes')
+    const liveClassesSnap = await db.collection('classes')
        .where('classType', '==', 'live')
        .get();
+       
+    const convertedClassesSnap = await db.collection('classes')
+       .where('convertedFromLive', '==', true)
+       .get();
+       
+    const allClassDocsMap = new Map();
+    liveClassesSnap.docs.forEach(doc => allClassDocsMap.set(doc.id, doc));
+    convertedClassesSnap.docs.forEach(doc => allClassDocsMap.set(doc.id, doc));
+    const classesDocs = Array.from(allClassDocsMap.values());
 
     const enriched = [];
-    for (const doc of classesSnap.docs) {
+    for (const doc of classesDocs) {
        const cls = { id: doc.id, ...doc.data() } as any;
        if (cls.isDeleted === true) continue;
 
@@ -75,23 +85,14 @@ export class LiveSessionService {
 
        const endTimeMs = startTimeMs + durationMinutes * 60 * 1000;
 
-       // AUTO DELETE / AUTO END IF DURATION HAS PASSED
-       if (startTimeMs > 0 && now > endTimeMs) {
-         db.collection('classes').doc(cls.id).update({ isDeleted: true, updatedAt: new Date().toISOString() }).catch(() => {});
-         if (liveSession?.id) {
-           db.collection(this.collection).doc(liveSession.id).update({ isDeleted: true, status: 'ENDED', updatedAt: new Date().toISOString() }).catch(() => {});
-         }
-         continue; // Exclude expired/passed session from listing
-       }
+       // AUTO DELETE logic removed based on user request - duration is approximate.
 
        const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
        const targetBatchIds: string[] = cls.targetBatchIds || cls.targetBatches || [];
-       const accessLevel = cls.accessLevel || 'premium';
+       const accessLevel = cls.accessLevel || '';
        let batchName = '';
        if (targetBatchIds.length > 0) {
          batchName = targetBatchIds.map(bId => batchMap.get(bId) || bId).join(', ');
-       } else if (accessLevel === 'premium' || accessLevel === 'all_paid') {
-         batchName = 'All Paid Students';
        } else if (accessLevel === 'free' || accessLevel === 'all') {
          batchName = 'All Students';
        } else {
@@ -120,19 +121,24 @@ export class LiveSessionService {
          liveSession
        });
     }
-
+    console.log('DEBUG: Returning enriched sessions, count:', enriched.length);
     return (enriched as any[]).sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
   }
   
-  static async getStudentLiveSessions(studentId: string, tenantId: string): Promise<any[]> {
+  static async getStudentLiveSessions(userId: string, tenantId: string): Promise<any[]> {
+    console.log('DEBUG: getStudentLiveSessions started', userId);
     const now = Date.now();
 
     // Cache courses and batches
+    console.log('DEBUG: Fetching courses...');
     const coursesSnap = await db.collection('courses').get();
+    console.log('DEBUG: Fetched courses, count:', coursesSnap.docs.length);
     const courseMap = new Map<string, string>();
     coursesSnap.docs.forEach(d => {
       courseMap.set(d.id, d.data().title || d.data().name || '');
     });
+
+    console.log('DEBUG: Fetching student_batches...');
 
     const batchesSnap = await db.collection('student_batches').get();
     const batchMap = new Map<string, string>();
@@ -140,36 +146,87 @@ export class LiveSessionService {
       batchMap.set(d.id, d.data().name || d.data().code || d.data().batchName || d.id);
     });
 
-    // 1. Fetch student memberships from 'students' and 'student_profiles' collections
-    const rawBatchIds: string[] = [];
-    let userCourseIds: string[] = [];
-    
+    // 1. Fetch user to resolve studentId
+    let studentId = userId;
+    let studentType = 'offline';
+
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists) {
+      const userData = userDoc.data();
+      if (userData?.studentId) {
+        studentId = userData.studentId;
+      }
+      if (userData?.type) studentType = userData.type;
+      if (userData?.studentType) studentType = userData.studentType;
+    }
+
+    // 2. Fetch student
+    console.log('DEBUG: Fetching studentDoc...');
     const studentDoc = await db.collection('students').doc(studentId).get();
+    console.log('DEBUG: Fetched studentDoc. exists?', studentDoc.exists);
     let studentData: any = studentDoc.exists ? studentDoc.data() : null;
     
     if (!studentData) {
-      const byUserId = await db.collection('students').where('userId', '==', studentId).limit(1).get();
+      console.log('DEBUG: Fetching student by userId...');
+      const byUserId = await db.collection('students').where('userId', '==', userId).limit(1).get();
       if (!byUserId.empty) {
         studentData = byUserId.docs[0].data();
+      } else {
+        const byUsername = await db.collection('students').where('loginUsername', '==', userDoc.data()?.username || '').limit(1).get();
+        if (!byUsername.empty) {
+          studentData = byUsername.docs[0].data();
+        }
       }
     }
     
+    const rawBatchIds: string[] = [];
+    let userCourseIds: string[] = [];
+    
     if (studentData) {
+      if (studentData.type) studentType = studentData.type;
+      if (studentData.studentType) studentType = studentData.studentType;
+
       if (studentData.batchId) rawBatchIds.push(studentData.batchId);
-      if (studentData.batch) rawBatchIds.push(studentData.batch);
+      if (studentData.batch) {
+        rawBatchIds.push(studentData.batch);
+        // Legacy support: map human-readable batch name to UUID
+        for (const [id, name] of batchMap.entries()) {
+          if (name === studentData.batch) {
+            rawBatchIds.push(id);
+          }
+        }
+      }
+      
       if (studentData.courseId) userCourseIds.push(studentData.courseId);
+      if (studentData.course) {
+        userCourseIds.push(studentData.course);
+        // Legacy support: map human-readable course name to UUID
+        for (const [id, name] of courseMap.entries()) {
+          if (name === studentData.course) {
+            userCourseIds.push(id);
+          }
+        }
+      }
+      
       if (studentData.enrolledCourseIds && Array.isArray(studentData.enrolledCourseIds)) {
         userCourseIds.push(...studentData.enrolledCourseIds);
       }
     }
 
+    console.log('DEBUG: Fetching profileDoc...');
     let profileDoc = await db.collection('student_profiles').doc(studentId).get();
+    console.log('DEBUG: Fetched profileDoc. exists?', profileDoc.exists);
     if (!profileDoc.exists) {
+      console.log('DEBUG: Fetching profile by userId...');
       const pByUserId = await db.collection('student_profiles').where('userId', '==', studentId).limit(1).get();
       if (!pByUserId.empty) profileDoc = pByUserId.docs[0] as any;
     }
     if (profileDoc.exists) {
       const pData = profileDoc.data();
+      
+      if (pData?.type) studentType = pData.type;
+      if (pData?.studentType) studentType = pData.studentType;
+      
       (pData?.programMemberships || []).forEach((m: any) => { 
         if (m.batchId) rawBatchIds.push(m.batchId); 
         if (m.courseId) userCourseIds.push(m.courseId);
@@ -190,81 +247,85 @@ export class LiveSessionService {
     }
 
     const uniqueUserCourseIds = Array.from(new Set(userCourseIds.filter(Boolean)));
+    console.log('DEBUG: Fetched student data, uniqueUserCourseIds:', uniqueUserCourseIds);
 
     // 2. Fetch all live classes
-    const classesSnap = await db.collection('classes')
+    const liveClassesSnap = await db.collection('classes')
        .where('classType', '==', 'live')
        .where('isDeleted', '==', false)
        .get();
+       
+    const convertedClassesSnap = await db.collection('classes')
+       .where('convertedFromLive', '==', true)
+       .where('isDeleted', '==', false)
+       .get();
+
+    const allClassDocsMap = new Map();
+    liveClassesSnap.docs.forEach(doc => allClassDocsMap.set(doc.id, doc));
+    convertedClassesSnap.docs.forEach(doc => allClassDocsMap.set(doc.id, doc));
+    const classesDocs = Array.from(allClassDocsMap.values());
+    console.log('DEBUG: Fetched classesDocs, count:', classesDocs.length);
 
     const result = [];
-    for (const doc of classesSnap.docs) {
+    for (const doc of classesDocs) {
       const cls = { id: doc.id, ...doc.data() } as any;
       const targetBatches: string[] = cls.targetBatchIds || cls.targetBatches || [];
-      const accessLevel = cls.accessLevel || 'premium';
+      const accessLevel = cls.accessLevel || '';
 
-      // Check access: free, all, premium, all_paid, batch, course matching
+      // Check access: free, all, batch, course matching
       let hasAccess = false;
+      const isEnrolled = userBatchIds.length > 0 || uniqueUserCourseIds.length > 0;
+      const isOffline = studentType?.toLowerCase() === 'offline';
+      
+      const targetCourses = cls.targetCourses || (cls.courseId ? [cls.courseId] : []);
+      const isTargeted = targetBatches.length > 0 || targetCourses.length > 0;
+      const matchBatch = targetBatches.length > 0 ? targetBatches.some((bId: string) => userBatchIds.includes(bId)) : false;
+      const matchCourse = targetCourses.length > 0 ? targetCourses.some((cId: string) => uniqueUserCourseIds.includes(cId)) : false;
+
       if (
         accessLevel === 'free' || 
         accessLevel === 'all' || 
-        accessLevel === 'premium' || 
-        accessLevel === 'all_paid' ||
         targetBatches.includes('all') || 
-        targetBatches.includes('all_paid') || 
         targetBatches.includes('all_free')
       ) {
         hasAccess = true;
-      } else if (targetBatches.length > 0) {
-        hasAccess = targetBatches.some(bId => userBatchIds.includes(bId));
-      } else if (cls.courseId) {
-        hasAccess = uniqueUserCourseIds.length === 0 || uniqueUserCourseIds.includes(cls.courseId);
+      } else if (!isEnrolled) {
+        hasAccess = false;
+      } else if (isOffline) {
+        hasAccess = false; // Offline must request access
+      } else if (isTargeted) {
+        // Online/Recorded student: must match either batch OR course
+        hasAccess = matchBatch || matchCourse;
       } else {
+        // Not targeted to anyone specifically, but student is enrolled
         hasAccess = true;
       }
 
       if (hasAccess) {
-        // Find active live session for this class
-        const liveSessionSnap = await db.collection(this.collection)
-          .where('classId', '==', cls.id)
-          .get();
-
-        const validDocs = liveSessionSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as any))
-          .filter(d => d.isDeleted !== true)
-          .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-
-        const liveSession = validDocs.length > 0 ? validDocs[0] : null;
-
-        const scheduledStartTime = liveSession?.scheduledStartTime || cls.scheduledStartTime;
-        const durationMinutes = liveSession?.expectedDurationMinutes || cls.expectedDurationMinutes || 60;
-
-        let startTimeMs = 0;
-        if (scheduledStartTime) {
-          if (typeof scheduledStartTime === 'object' && (scheduledStartTime as any)._seconds) {
-            startTimeMs = (scheduledStartTime as any)._seconds * 1000;
-          } else {
-            startTimeMs = new Date(scheduledStartTime).getTime();
-          }
+        console.log('DEBUG: Resolving session for classId:', cls.id);
+         const resolvedSession = await LiveSessionResolver.resolveActiveSession(cls.id, cls);
+        const liveStatus = resolvedSession.status;
+        let isJoinAllowed = resolvedSession.joinAllowed;
+        
+        let derivedStatus: string = liveStatus;
+        if (derivedStatus === 'SCHEDULED' && resolvedSession.actualStartTime) {
+          derivedStatus = 'LIVE'; // Fallback if webhook failed
+          isJoinAllowed = true;
+        }
+        
+        if (derivedStatus === 'ENDED' && !cls.encryptedRecordingId) {
+            derivedStatus = 'NOT_UPLOADED';
+        } else if (derivedStatus === 'ENDED' && cls.encryptedRecordingId) {
+            derivedStatus = 'RECORDED_AVAILABLE';
         }
 
-        const endTimeMs = startTimeMs + durationMinutes * 60 * 1000;
-
-        // AUTO DELETE / AUTO END IF DURATION HAS PASSED
-        if (startTimeMs > 0 && now > endTimeMs) {
-          db.collection('classes').doc(cls.id).update({ isDeleted: true, updatedAt: new Date().toISOString() }).catch(() => {});
-          if (liveSession?.id) {
-            db.collection(this.collection).doc(liveSession.id).update({ isDeleted: true, status: 'ENDED', updatedAt: new Date().toISOString() }).catch(() => {});
-          }
-          continue; // Exclude expired/passed session
-        }
+        const scheduledStartTime = cls.scheduledStartTime || null;
+        const durationMinutes = cls.expectedDurationMinutes || 60;
 
         const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
         let batchName = '';
         if (targetBatches.length > 0) {
           batchName = targetBatches.map(bId => batchMap.get(bId) || bId).join(', ');
-        } else if (accessLevel === 'premium' || accessLevel === 'all_paid') {
-          batchName = 'All Paid Students';
         } else if (accessLevel === 'free' || accessLevel === 'all') {
           batchName = 'All Students';
         } else {
@@ -272,23 +333,75 @@ export class LiveSessionService {
         }
 
         result.push({
-          id: liveSession?.id || cls.id,
+          id: resolvedSession.sessionId || cls.id,
           classId: cls.id,
           title: cls.title,
-          status: liveSession?.status || 'SCHEDULED',
+          status: derivedStatus,
+          liveStatus: derivedStatus,
+          joinAllowed: isJoinAllowed,
           scheduledStartTime,
           expectedDurationMinutes: durationMinutes,
-          provider: liveSession?.provider || 'zoom',
+          provider: resolvedSession.provider || 'zoom',
           teacherName: cls.teacherName || 'Teacher',
+          subjectId: cls.subjectId || '',
           subjectName: cls.subjectName || 'Subject',
+          topicId: cls.topicId || '',
+          topicName: cls.topicName || '',
           courseId: cls.courseId || '',
           courseName,
-          batchName
+          batchName,
+          accessDenied: false
         });
+      } else {
+        // NEW: Include SCHEDULED upcoming classes without access so students can request access
+        const resolvedSession = await LiveSessionResolver.resolveActiveSession(cls.id, cls);
+        const sessionStatus = resolvedSession.status;
+        
+        let derivedStatus: string = sessionStatus;
+        if (derivedStatus === 'ENDED' && !cls.encryptedRecordingId) {
+            derivedStatus = 'NOT_UPLOADED';
+        } else if (derivedStatus === 'ENDED' && cls.encryptedRecordingId) {
+            derivedStatus = 'RECORDED_AVAILABLE';
+        }
+
+        // Only show denied-access classes if they are still upcoming/scheduled (not ended)
+        const endedStatuses = ['ENDED', 'CANCELLED', 'EXPIRED', 'ARCHIVED', 'NOT_UPLOADED', 'RECORDED_AVAILABLE'];
+        if (!endedStatuses.includes(derivedStatus)) {
+          const scheduledStartTime = cls.scheduledStartTime || null;
+          const durationMinutes = cls.expectedDurationMinutes || 60;
+          const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
+          let batchName = '';
+          if (targetBatches.length > 0) {
+            batchName = targetBatches.map(bId => batchMap.get(bId) || bId).join(', ');
+          } else if (accessLevel === 'free' || accessLevel === 'all') {
+            batchName = 'All Students';
+          } else {
+            batchName = 'All Batches';
+          }
+          result.push({
+            id: resolvedSession.sessionId || cls.id,
+            classId: cls.id,
+            title: cls.title,
+            status: derivedStatus,
+            liveStatus: derivedStatus,
+            joinAllowed: false,
+            scheduledStartTime,
+            expectedDurationMinutes: durationMinutes,
+            provider: resolvedSession.provider || 'zoom',
+            teacherName: cls.teacherName || 'Teacher',
+            subjectId: cls.subjectId || '',
+            subjectName: cls.subjectName || 'Subject',
+            topicId: cls.topicId || '',
+            topicName: cls.topicName || '',
+            courseId: cls.courseId || '',
+            courseName,
+            batchName,
+            accessDenied: true // Explicit flag for frontend to show "Request Access"
+          });
+        }
       }
     }
 
-    // Sort by scheduledStartTime desc
     return result.sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
   }
   
@@ -364,8 +477,23 @@ export class LiveSessionService {
       const decision = await sape.evaluateAccess(user.userId || user.id, 'CLASS', classId);
 
       if (!decision.allowed) {
-        // You could also return this as a graceful payload, but throwing AppError is standard here
         throw new AppError(decision.reason || 'Access denied by policy engine', 403);
+      }
+
+      if (session) {
+        const { AccessRulesService } = require('../access-rules/service');
+        const accessRulesService = new AccessRulesService();
+        const tenantId = user.tenantId || 'default';
+        const sessionDecision = await accessRulesService.evaluateEntityAccess(
+          user.userId || user.id, 
+          session.id!, 
+          'live_session', 
+          tenantId
+        );
+
+        if (!sessionDecision.allowed) {
+          throw new AppError(sessionDecision.lockMessage || 'Live Session Access Denied', 403);
+        }
       }
 
       if (!session) {
@@ -1251,4 +1379,109 @@ Reason:     ${verifyResult.state}
       console.error('Failed to invalidate cached payloads', e);
     }
   }
+
+  /**
+   * End a live session and optionally convert it to a YouTube Recorded Class.
+   * This is strictly additive — it calls the existing endSession internally and
+   * then (optionally) updates the class record. The Zoom module is NOT affected.
+   */
+  static async endSessionWithConversion(
+    sessionId: string,
+    user: any,
+    convertToYoutube: boolean = false,
+    youtubeUrl?: string
+  ) {
+    // 1. End the session using the existing method (no changes to existing logic)
+    await this.endSession(sessionId, user);
+
+    if (!convertToYoutube || !youtubeUrl) {
+      return { success: true, converted: false };
+    }
+
+    // 2. Fetch the session to get classId
+    const session = await this.getSession(sessionId);
+    if (!session?.classId) {
+      return { success: true, converted: false, warning: 'classId not found; could not convert.' };
+    }
+
+    // 3. Update the class record to become a recorded class
+    try {
+      await db.collection('classes').doc(session.classId).update({
+        classType: 'recorded',
+        recordingUrl: youtubeUrl,
+        playbackUrl: youtubeUrl,
+        convertedFromLive: true,
+        convertedAt: new Date().toISOString(),
+        convertedBy: user?.userId || user?.id || 'system',
+        updatedAt: new Date().toISOString()
+      });
+
+      // Also mark the live session as converted
+      await db.collection(this.collection).doc(sessionId).update({
+        convertedToRecorded: true,
+        recordingUrl: youtubeUrl,
+        updatedAt: new Date().toISOString()
+      });
+
+      return { success: true, converted: true, classId: session.classId };
+    } catch (err: any) {
+      console.error('[LiveSessionService] Failed to convert to recorded class:', err);
+      return { success: true, converted: false, warning: err.message };
+    }
+  }
+
+  /**
+   * Fetch ended/history sessions with class info for the admin history view.
+   * Returns sessions with status ENDED, CANCELLED, EXPIRED, ARCHIVED.
+   */
+  static async getEndedSessionHistory(): Promise<any[]> {
+    const snap = await db.collection(this.collection)
+      .where('isDeleted', '!=', true)
+      .get();
+
+    const endedStatuses = ['ENDED', 'CANCELLED', 'EXPIRED', 'ARCHIVED'];
+    const docs = snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as any))
+      .filter(d => d.isDeleted !== true && endedStatuses.includes(d.status));
+
+    // Enrich with class info
+    const enriched = await Promise.all(docs.map(async (session: any) => {
+      let classTitle = session.classTitle || '';
+      let provider = session.provider || 'zoom';
+      let convertedToRecorded = session.convertedToRecorded || false;
+      let recordingUrl = session.recordingUrl || '';
+
+      if (session.classId && !classTitle) {
+        try {
+          const classDoc = await db.collection('classes').doc(session.classId).get();
+          if (classDoc.exists) {
+            const cls = classDoc.data() as any;
+            classTitle = cls.title || cls.name || '';
+          }
+        } catch (_) {}
+      }
+
+      return {
+        id: session.id,
+        classId: session.classId,
+        classTitle,
+        provider,
+        status: session.status,
+        scheduledStartTime: session.scheduledStartTime,
+        actualStartTime: session.actualStartTime,
+        actualEndTime: session.actualEndTime,
+        sessionEndedBy: session.sessionEndedBy,
+        convertedToRecorded,
+        recordingUrl,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt
+      };
+    }));
+
+    return enriched.sort((a, b) =>
+      new Date(b.actualEndTime || b.updatedAt || 0).getTime() -
+      new Date(a.actualEndTime || a.updatedAt || 0).getTime()
+    );
+  }
 }
+

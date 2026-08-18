@@ -40,6 +40,7 @@ export class QuestionBankController {
                 .collection(COLLECTION)
                 .where("isDeleted", "==", false)
                 .orderBy("createdAt", "desc")
+                .limit(300)
                 .get();
 
             const questions = snapshot.docs.map(doc => doc.data());

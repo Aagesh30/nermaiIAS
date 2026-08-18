@@ -116,17 +116,47 @@ export class AccessRulesRepository {
     });
   }
 
-  async getStudentPendingRequest(studentId: string, entityId: string): Promise<IAccessRequest | null> {
-    const snap = await db
+  async getStudentActiveRequest(studentId: string, entityId: string, scheduledDate?: string): Promise<IAccessRequest | null> {
+    const query = db
       .collection(COL_REQUESTS)
       .where('studentId', '==', studentId)
-      .where('entityId', '==', entityId)
-      .where('status', '==', 'pending')
-      .limit(1)
-      .get();
+      .where('entityId', '==', entityId);
+      
+    const snap = await query.get();
     if (snap.empty) return null;
-    const d = snap.docs[0];
-    return { id: d.id, ...(d.data() as IAccessRequest) };
+    
+    let docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as IAccessRequest) }));
+    
+    // Filter in memory: ONLY a true PENDING request should block the student from re-requesting.
+    // REJECTED, APPROVED (may have expired), limit_exceeded (old), EXPIRED, CANCELLED — all allow re-requesting.
+    docs = docs.filter(d => ['PENDING', 'pending'].includes(d.status));
+    
+    if (scheduledDate) {
+      docs = docs.filter(d => d.scheduledDate === scheduledDate);
+    }
+    
+    return docs.length > 0 ? docs[0] : null;
+  }
+
+  async getStudentRequestUsage(studentId: string, sinceDate: string): Promise<number> {
+    const snap = await db.collection(COL_REQUESTS)
+      .where('studentId', '==', studentId)
+      .get();
+    
+    const uniqueRequests = new Set<string>();
+    snap.docs.forEach(d => {
+       const data = d.data();
+       if (data.createdAt && data.createdAt < sinceDate) return;
+       
+       const status = data.status;
+       // The rule states: count pending, approved, and expired (if it originated from approved).
+       // Here we assume any expired request that wasn't cancelled/rejected was approved.
+       if (['PENDING', 'APPROVED', 'EXPIRED'].includes(status)) {
+         const key = `${data.entityId}_${data.scheduledDate || 'no_date'}`;
+         uniqueRequests.add(key);
+       }
+    });
+    return uniqueRequests.size;
   }
 
   async getPendingRequestsByEntity(entityId: string, tenantId: string): Promise<IAccessRequest[]> {
@@ -134,7 +164,7 @@ export class AccessRulesRepository {
       .collection(COL_REQUESTS)
       .where('entityId', '==', entityId)
       .where('tenantId', '==', tenantId)
-      .where('status', '==', 'pending')
+      .where('status', '==', 'PENDING')
       .get();
     return snap.docs.map(d => ({ id: d.id, ...(d.data() as IAccessRequest) }));
   }

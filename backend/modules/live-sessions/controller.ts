@@ -481,4 +481,39 @@ export class LiveSessionController {
       res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Server error' });
     }
   }
+
+  /**
+   * NEW: End session with optional conversion to YouTube Recorded Class.
+   * Does NOT touch Zoom SDK logic — delegates to endSession internally.
+   */
+  static async endSessionWithConversion(req: Request, res: Response) {
+    try {
+      const sessionId = req.params.id as string;
+      const { convertToYoutube, youtubeUrl } = req.body;
+      const result = await LiveSessionService.endSessionWithConversion(
+        sessionId,
+        req.user,
+        !!convertToYoutube,
+        youtubeUrl
+      );
+      res.status(200).json({ success: true, data: result });
+    } catch (error: any) {
+      logger.error('Error ending session with conversion:', error);
+      res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Server error' });
+    }
+  }
+
+  /**
+   * NEW: Get history of ended/archived sessions for admin history view.
+   */
+  static async getSessionHistory(req: Request, res: Response) {
+    try {
+      const history = await LiveSessionService.getEndedSessionHistory();
+      res.status(200).json({ success: true, data: history });
+    } catch (error: any) {
+      logger.error('Error fetching session history:', error);
+      res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Server error' });
+    }
+  }
 }
+

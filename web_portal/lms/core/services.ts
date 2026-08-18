@@ -89,10 +89,21 @@ export const LiveSessionApi = {
   blockStudent: (studentId: string, data?: { reason?: string; displayName?: string }) => api.post(`/live-sessions/blocks/${studentId}`, data),
   unblockStudent: (studentId: string) => api.delete(`/live-sessions/blocks/${studentId}`),
   recordPromotion: (sessionId: string, data: any) => api.post(`/live-sessions/${sessionId}/promotions/cohost`, data),
+  // NEW: End session with optional YouTube conversion
+  endSessionWithConversion: (sessionId: string, data: { convertToYoutube?: boolean; youtubeUrl?: string }) =>
+    api.post(`/live-sessions/${sessionId}/end-with-conversion`, data),
+  // NEW: Get session history (ended sessions)
+  getSessionHistory: () => api.get('/live-sessions/history/ended'),
 };
 
 export const LiveClassesApi = {
+  getStudentLiveSessions: () => api.get('/live-sessions'),
   leaveSession: (sessionId: string) => api.post(`/live-sessions/${sessionId}/participants/leave`),
+  // NEW: Student requests access to a live class they are not enrolled in
+  requestLiveClassAccess: (classId: string, reason: string) =>
+    api.post('/access-requests', { requestType: 'CLASS', contentId: classId, contentName: '', reason }),
+  // NEW: Student checks their own access request status for a class
+  getMyAccessRequests: () => api.get('/access-requests/my-requests'),
 };
 
 // ─── Provider Accounts ───────────────────────────────────────────────────────
@@ -229,6 +240,7 @@ export const AccessRulesApi = {
   approveRequest: (requestId: string, grantExpiresAt?: string) => api.post(`/access-requests/admin/${requestId}/approve`, { grantExpiresAt }),
   rejectRequest: (requestId: string, reason?: string) => api.post(`/access-requests/admin/${requestId}/reject`, { reason }),
   bulkApprove: (data: any) => api.post('/access-requests/admin/bulk-approve', data),
+  bulkReject: (data: any) => api.post('/access-requests/admin/bulk-reject', data),
   listTemporaryGrants: () => api.get('/access-requests/admin/temporary-grants'),
   extendGrant: (grantId: string, additionalHours: number) => api.post(`/access-requests/admin/grants/${grantId}/extend`, { additionalHours }),
   revokeGrant: (grantId: string, reason: string) => api.post(`/access-requests/admin/grants/${grantId}/revoke`, { reason }),

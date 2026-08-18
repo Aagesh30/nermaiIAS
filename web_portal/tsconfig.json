@@ -1,16 +1,30 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "./node_modules/expo/tsconfig.base.json",
   "compilerOptions": {
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@nermai/api": ["./lms/core/services"],
-      "@nermai/api/*": ["./lms/core/services"],
-      "@nermai/theme": ["./lms/core/theme"],
-      "@nermai/shared": ["./lms/core/shared/src"],
-      "@nermai/shared/*": ["./lms/core/shared/src/*"],
-      "@nermai/live-core": ["./lms/core/live-core/src"],
-      "@nermai/live-core/*": ["./lms/core/live-core/src/*"]
+      "@nermai/api": [
+        "./lms/core/services"
+      ],
+      "@nermai/api/*": [
+        "./lms/core/services"
+      ],
+      "@nermai/theme": [
+        "./lms/core/theme"
+      ],
+      "@nermai/shared": [
+        "./lms/core/shared/src"
+      ],
+      "@nermai/shared/*": [
+        "./lms/core/shared/src/*"
+      ],
+      "@nermai/live-core": [
+        "./lms/core/live-core/src"
+      ],
+      "@nermai/live-core/*": [
+        "./lms/core/live-core/src/*"
+      ]
     }
   }
 }

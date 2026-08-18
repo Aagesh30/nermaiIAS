@@ -78,7 +78,7 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
     // 3. Live Classes
     // Fetch all live classes across the platform
     const liveClassesSnapshot = await db.collection('classes')
-      .where('classType', '==', 'live')
+      .where('classType', 'in', ['live', 'zoom_live', 'youtube_live'])
       .where('isDeleted', '==', false)
       .get();
 
@@ -100,7 +100,7 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
       if (courseDoc.exists && courseDoc.data()?.isDeleted) continue;
       const isPublic = !courseDoc.exists || courseDoc.data()?.visibility !== 'private';
       
-      if (isPublic || userCourseIds.includes(courseId)) {
+      if (isPublic || userCourseIds.includes(courseId) || (courseDoc.exists && Policies.hasBatchAccess(courseDoc.data()?.batchIds || [], userBatchIds))) {
         // Use LiveSessionResolver as single source of truth
         const { LiveSessionResolver } = require('../live-sessions/LiveSessionResolver');
         const resolvedSession = await LiveSessionResolver.resolveActiveSession(session.id, session);
@@ -292,7 +292,7 @@ export const getAdminDashboardMetrics = async (req: Request, res: Response, next
     
     classesSnap.docs.forEach(doc => {
       const data = doc.data();
-      if (data.classType === 'live') {
+      if (['live', 'zoom_live', 'youtube_live'].includes(data.classType)) {
         totalLiveSessions++;
       }
       if (data.scheduledStartTime >= startOfDay.toISOString() && data.scheduledStartTime <= endOfDay.toISOString()) {

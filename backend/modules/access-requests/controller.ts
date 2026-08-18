@@ -76,6 +76,17 @@ export const rejectRequest = handle(async (req) => {
   return service.rejectRequest(requestIdStr, adminId, reason as string);
 });
 
+// ─── Admin: Bulk Reject ──────────────────────────────────────────────────────
+
+export const bulkReject = handle(async (req) => {
+  const { requestIds, reason } = req.body;
+  const adminId = (req as any).user?.id || 'admin';
+  if (!requestIds || !Array.isArray(requestIds)) throw new AppError('requestIds array is required', 400);
+  if (!reason) throw new AppError('Rejection reason is required', 400);
+
+  return service.bulkReject(requestIds, adminId, reason as string);
+});
+
 // ─── Admin: Bulk Approve ─────────────────────────────────────────────────────
 
 export const bulkApprove = handle(async (req) => {

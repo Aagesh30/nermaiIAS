@@ -45,4 +45,10 @@ router.delete('/blocks/:studentId', requireAuth, requireRole(['super_admin', 'ad
 // Diagnostic Route
 router.get('/:id/zoom-diagnostics', requireAuth, requireRole(['super_admin', 'admin', 'staff', 'teacher']), LiveSessionController.getZoomDiagnostics);
 
+// NEW: End session with optional YouTube conversion
+router.post('/:id/end-with-conversion', requireAuth, requireRole(['super_admin', 'admin', 'staff', 'teacher']), LiveSessionController.endSessionWithConversion);
+
+// NEW: Get history of ended sessions for admin
+router.get('/history/ended', requireAuth, requireRole(['super_admin', 'admin', 'staff', 'teacher']), LiveSessionController.getSessionHistory);
+
 export default router;

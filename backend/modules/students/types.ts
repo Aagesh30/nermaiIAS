@@ -58,4 +58,9 @@ export interface IBatchCapabilities {
   canRequestTopic: boolean;
   canRequestSubject: boolean;
   canRequestCourse: boolean;
+  
+  /** Maximum number of content requests a student in this batch can make in the rolling window */
+  requestLimit?: number;
+  /** The rolling window duration (in days) for request limit evaluation */
+  requestWindowDays?: number;
 }

@@ -189,8 +189,8 @@ export const listClassesByTopic = async (req: Request, res: Response, next: Next
 
 export const listAllClasses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { tenantId } = req.user!;
-    const classes = await courseService.listAllClasses(tenantId);
+    const { tenantId, role, userId } = req.user!;
+    const classes = await courseService.listAllClasses(tenantId, role, userId);
     res.status(200).json({ status: 'success', data: classes });
   } catch (error) { next(error); }
 };

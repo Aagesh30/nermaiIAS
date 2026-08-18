@@ -9,8 +9,8 @@ const applyAuth = (router: Router) => {
 export const courseRoutes = Router();
 courseRoutes.use(requireAuth);
 
-// Admin only list all courses
-courseRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.listCourses);
+// Allow students to list all courses for dropdowns
+courseRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher', 'student']), CourseController.listCourses);
 courseRoutes.post('/', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.createCourse);
 courseRoutes.post('/syllabus/sync', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.syncSyllabusFromExcel);
 
@@ -28,7 +28,7 @@ courseRoutes.get('/:id/staff', requireRole(['super_admin', 'admin', 'staff', 'te
 
 export const subjectRoutes = Router();
 subjectRoutes.use(requireAuth);
-subjectRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.listAllSubjects);
+subjectRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher', 'student']), CourseController.listAllSubjects);
 subjectRoutes.get('/:subjectId/topics', requireRole(['super_admin', 'staff', 'teacher', 'student']), CourseController.listTopicsBySubject);
 
 subjectRoutes.put('/:id', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.updateSubject);
@@ -37,7 +37,7 @@ subjectRoutes.post('/:subjectId/topics', requireRole(['super_admin', 'admin', 's
 
 export const topicRoutes = Router();
 topicRoutes.use(requireAuth);
-topicRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.listAllTopics);
+topicRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher', 'student']), CourseController.listAllTopics);
 topicRoutes.get('/:topicId/classes', requireRole(['super_admin', 'staff', 'teacher', 'student']), CourseController.listClassesByTopic);
 topicRoutes.get('/:topicId/subtopics', requireRole(['super_admin', 'staff', 'teacher', 'student']), CourseController.listSubtopicsByTopic);
 topicRoutes.post('/:topicId/subtopics', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.createSubtopic);
@@ -58,7 +58,7 @@ classRoutes.use(requireAuth);
 // Access route available to all authenticated users (students)
 classRoutes.get('/:id/access', requireRole(['super_admin', 'staff', 'teacher', 'student']), CourseController.getClassPlaybackAccess);
 
-classRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.listAllClasses);
+classRoutes.get('/', requireRole(['super_admin', 'admin', 'staff', 'teacher', 'student']), CourseController.listAllClasses);
 classRoutes.put('/:id', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.updateClass);
 classRoutes.put('/:id/recording', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.uploadClassRecording);
 classRoutes.delete('/:id', requireRole(['super_admin', 'admin', 'staff', 'teacher']), CourseController.deleteClass);

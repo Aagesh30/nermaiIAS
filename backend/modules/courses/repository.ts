@@ -381,6 +381,15 @@ export class ClassRepository extends BaseRepository {
     return classes.sort((a, b) => (a.order || 0) - (b.order || 0));
   }
 
+  async findByTenantId(tenantId: string): Promise<IClass[]> {
+    const snapshot = await this.collection
+      .where('tenantId', '==', tenantId)
+      .where('isDeleted', '==', false)
+      .get();
+    const classes = snapshot.docs.map((doc: any) => doc.data() as IClass);
+    return classes.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+
   async findByTitleAndTopic(title: string, topicId: string): Promise<IClass[]> {
     const snapshot = await this.collection
       .where('topicId', '==', topicId)

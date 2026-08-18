@@ -101,7 +101,7 @@ if (Platform.OS === "web" && typeof document !== "undefined") {
     const iconFontStyles = `
       @font-face {
         font-family: 'Ionicons';
-        src: url('https://cdnjs.cloudflare.com/ajax/libs/ionicons/7.1.2/ionicons.ttf') format('truetype'),
+        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype'),
              url('https://unpkg.com/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype'),
              url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype');
       }
@@ -1216,6 +1216,10 @@ function MainApp() {
   const [lmsLoading, setLmsLoading] = useState(false);
   const [liveSessionsLoading, setLiveSessionsLoading] = useState(false);
   const [recordedClassesLoading, setRecordedClassesLoading] = useState(false);
+  const [requestingAccessIds, setRequestingAccessIds] = useState<Set<string>>(new Set());
+  const [submittedAccessIds, setSubmittedAccessIds] = useState<Set<string>>(new Set());
+  const [accessRequestFormId, setAccessRequestFormId] = useState<string | null>(null); // classId showing reason form
+  const [accessRequestReason, setAccessRequestReason] = useState<string>(""); // typed reason
   const [lmsResourceError, setLmsResourceError] = useState<string | null>(null);
   const [lmsCourses, setLmsCourses] = useState<any[]>([]);
   const [erpBatches, setErpBatches] = useState<any[]>([]);
@@ -1343,6 +1347,12 @@ function MainApp() {
   const [showStudentForm, setShowStudentForm] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [videoPlayerModal, setVideoPlayerModal] = useState<{ visible: boolean, playerToken: string }>({ visible: false, playerToken: "" });
+  const [expandedCourses, setExpandedCourses] = useState<Record<string, boolean>>({});
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+  const [expandedLiveCourses, setExpandedLiveCourses] = useState<Record<string, boolean>>({});
+  const [expandedLiveSubjects, setExpandedLiveSubjects] = useState<Record<string, boolean>>({});
+  const [liveClassesTab, setLiveClassesTab] = useState<'upcoming' | 'live' | 'ended'>('upcoming');
   const [profileForm, setProfileForm] = useState({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
   const [showDocModal, setShowDocModal] = useState(false);
   const [showConstituencyModal, setShowConstituencyModal] = useState(false);
@@ -2983,7 +2993,7 @@ function MainApp() {
       loadLiveSessions();
     } else if (lmsSub === "recorded") {
       loadRecordedClasses();
-      loadLmsCourses();
+      loadLmsLookups();
     } else if (lmsSub === "daily-content") {
       loadLmsDailyContent();
     }
@@ -3018,8 +3028,10 @@ function MainApp() {
     if (!user || activeTab !== "test" || testSub !== "available") return;
     loadTests(true); // Silent reload initially on focus
     const interval = setInterval(() => {
+      // Do not poll if the tab is hidden
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       loadTests(true);
-    }, 8000);
+    }, 60000); // 60 seconds
     return () => clearInterval(interval);
   }, [user, activeTab, testSub]);
 
@@ -3445,9 +3457,12 @@ function MainApp() {
     }
   };
 
+  const loadTestsInProgressRef = useRef(false);
   const [studentAttempts, setStudentAttempts] = useState<any[]>([]);
 
   const loadTests = async (isSilent = false) => {
+    if (loadTestsInProgressRef.current) return;
+    loadTestsInProgressRef.current = true;
     if (!isSilent) {
       setTestsLoading(true);
     }
@@ -3506,6 +3521,7 @@ function MainApp() {
         setTests([]);
       }
     } finally {
+      loadTestsInProgressRef.current = false;
       if (!isSilent) {
         setTestsLoading(false);
       }
@@ -3582,9 +3598,9 @@ function MainApp() {
     if (!user) return;
     try {
       const res = await api.get(`/lms/daily-quiz/today?studentId=${user.userId}`);
-      const quiz = res.data || res;
-      setTodayQuiz(quiz);
-      if (quiz.existingAttempt) {
+      const quiz = res?.data !== undefined ? res.data : res;
+      setTodayQuiz(quiz || null);
+      if (quiz && quiz.existingAttempt) {
         setQuizScore(quiz.existingAttempt.correctCount);
         const attemptAnswers = quiz.existingAttempt.answers || quiz.existingAttempt.results || [];
         const feedback = quiz.questions.map((q: any, idx: number) => {
@@ -3672,8 +3688,15 @@ function MainApp() {
     setLmsLoading(true);
     setLmsResourceError(null);
     try {
-      const res = await api.get("/resources");
-      setLmsResources(res?.data || res || []);
+      if (user.role === "student") {
+        // Student path: backend filters by batch membership and appends SACS access decision
+        const res = await api.get("/students/me/lms-resources");
+        setLmsResources(res?.data || res || []);
+      } else {
+        // Admin / teacher / staff path: unchanged
+        const res = await api.get("/resources");
+        setLmsResources(res?.data || res || []);
+      }
     } catch (e: any) {
       console.log("Failed loading LMS resources:", e);
       setLmsResourceError(e?.message || "Failed to load resources. Check your connection.");
@@ -3682,6 +3705,7 @@ function MainApp() {
       setLmsLoading(false);
     }
   };
+
 
   const loadLiveSessions = async () => {
     if (!user || user.role === "guest") return;
@@ -3701,12 +3725,19 @@ function MainApp() {
     if (!user || user.role === "guest") return;
     setRecordedClassesLoading(true);
     try {
-      // Fetch all classes from courses module (includes recording links)
-      const res = await api.get("/classes");
-      const allClasses = res?.data || res || [];
-      // Filter only those with a recording URL
-      const recorded = allClasses.filter((c: any) => c.recordingUrl || c.playbackUrl || c.videoUrl);
-      setLmsRecordedClasses(recorded);
+      if (user.role === "student") {
+        // Student path: backend filters by batch membership and appends SACS access decision
+        const res = await api.get("/students/me/lms-classes");
+        const allClasses = res?.data || res || [];
+        setLmsRecordedClasses(allClasses);
+      } else {
+        // Admin / teacher / staff path: unchanged
+        const res = await api.get("/classes");
+        const allClasses = res?.data || res || [];
+        // Filter only those with a recording URL or an encrypted video ID
+        const recorded = allClasses.filter((c: any) => c.encryptedVideoId || c.recordingUrl || c.playbackUrl || c.videoUrl);
+        setLmsRecordedClasses(recorded);
+      }
     } catch (e) {
       console.log("Failed loading recorded classes:", e);
       setLmsRecordedClasses([]);
@@ -3714,6 +3745,7 @@ function MainApp() {
       setRecordedClassesLoading(false);
     }
   };
+
 
   const loadLmsDailyContent = async () => {
     if (!user) return;
@@ -3836,7 +3868,7 @@ function MainApp() {
   };
 
   const loadLmsCourses = async () => {
-    if (!user || user.role === "guest" || user.role === "student") return;
+    if (!user || user.role === "guest") return;
     try {
       const res = await api.get("/courses");
       setLmsCourses(res?.data || res || []);
@@ -3865,24 +3897,38 @@ function MainApp() {
 
   const loadLmsLookups = async () => {
     console.log("[loadLmsLookups] Fetching LMS data for dropdowns...");
-    if (!user || !isAdmin) {
-      console.warn("[loadLmsLookups] Blocked. user:", !!user, "isAdmin:", !!isAdmin);
+    if (!user) {
       return;
     }
     try {
-      const [courseRes, subjRes, topicRes, classRes, batchRes] = await Promise.all([
+      // Students need courses, subjects, topics to render hierarchy. Admins need everything.
+      const promises = [
         api.get("/courses").catch((err) => { console.error("[loadLmsLookups] /courses failed:", err); return []; }),
         api.get("/subjects").catch((err) => { console.error("[loadLmsLookups] /subjects failed:", err); return []; }),
-        api.get("/topics").catch((err) => { console.error("[loadLmsLookups] /topics failed:", err); return []; }),
-        api.get("/classes").catch((err) => { console.error("[loadLmsLookups] /classes failed:", err); return []; }),
-        api.get("/batches").catch((err) => { console.error("[loadLmsLookups] /batches failed:", err); return []; })
-      ]);
-      console.log("[loadLmsLookups] Loaded courses:", courseRes?.length, "batches:", batchRes?.length);
+        api.get("/topics").catch((err) => { console.error("[loadLmsLookups] /topics failed:", err); return []; })
+      ];
+
+      if (isAdmin) {
+        promises.push(api.get("/classes").catch((err) => { console.error("[loadLmsLookups] /classes failed:", err); return []; }));
+        promises.push(api.get("/erp/batch").catch((err) => { console.error("[loadLmsLookups] /erp/batch failed:", err); return []; }));
+      }
+
+      const results = await Promise.all(promises);
+      
+      const courseRes = results[0];
+      const subjRes = results[1];
+      const topicRes = results[2];
+      
       setLmsCourses(courseRes?.data || courseRes || []);
       setLmsSubjects(subjRes?.data || subjRes || []);
       setLmsTopics(topicRes?.data || topicRes || []);
-      setLmsClassesList(classRes?.data || classRes || []);
-      setErpBatches(batchRes?.data || batchRes || []);
+      
+      if (isAdmin) {
+        const classRes = results[3];
+        const batchRes = results[4];
+        setLmsClassesList(classRes?.data || classRes || []);
+        setErpBatches(batchRes?.data || batchRes || []);
+      }
     } catch (e) {
       console.error("[loadLmsLookups] Failed loading LMS lookups:", e);
     }
@@ -3892,8 +3938,8 @@ function MainApp() {
     if (!user || !isAdmin) return;
     setSacsLoading(true);
     try {
-      const res = await api.get("/access-requests/admin/pending");
-      setSacsRequests(res?.data || res || []);
+      const res = await api.get("/access-rules/admin/requests?status=pending");
+      setSacsRequests(res?.data?.data || res?.data || []);
     } catch (e) {
       console.log("Failed loading SACS requests:", e);
       setSacsRequests([]);
@@ -3906,8 +3952,10 @@ function MainApp() {
     if (!user || !isAdmin) return;
     setSacsLoading(true);
     try {
-      const res = await api.get("/access-requests/admin/history");
-      setSacsHistory(res?.data || res || []);
+      const res = await api.get("/access-rules/admin/requests");
+      // Filter out pending in UI if backend returns all
+      const history = (res?.data?.data || res?.data || []).filter((r: any) => r.status !== 'pending' && r.status !== 'PENDING');
+      setSacsHistory(history);
     } catch (e) {
       console.log("Failed loading SACS history:", e);
       setSacsHistory([]);
@@ -3950,14 +3998,9 @@ function MainApp() {
   const handleSacsBulkApprove = async () => {
     if (sacsSelectedIds.length === 0) return;
     try {
-      await api.post("/access-requests/admin/bulk-approve", {
+      await api.post("/access-rules/admin/requests/bulk-approve", {
         requestIds: sacsSelectedIds,
-        grantType: "TEMPORARY",
-        durationHours: 48,
-        consumeMonthlyUnits: true,
-        respectMonthlyLimit: true,
-        presetId: null,
-        overrideLimit: false
+        grantExpiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
       });
       Alert.alert("Success", `Approved ${sacsSelectedIds.length} requests successfully.`);
       setSacsSelectedIds([]);
@@ -3969,7 +4012,7 @@ function MainApp() {
 
   const handleSacsApprove = async (requestId: string) => {
     try {
-      await api.post(`/access-requests/admin/${requestId}/approve`, {
+      await api.post(`/access-rules/admin/requests/${requestId}/approve`, {
         grantExpiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
       });
       Alert.alert("Success", "Request approved successfully.");
@@ -3981,7 +4024,7 @@ function MainApp() {
 
   const handleSacsReject = async (requestId: string) => {
     try {
-      await api.post(`/access-requests/admin/${requestId}/reject`, {
+      await api.post(`/access-rules/admin/requests/${requestId}/reject`, {
         reason: "Rejected by Administrator"
       });
       Alert.alert("Success", "Request rejected successfully.");
@@ -4201,9 +4244,17 @@ function MainApp() {
   };
 
   const handleSaveLiveClass = async () => {
-    const { title, description, topicId, provider, accessLevel, batchTargetType, selectedBatchIds, startDate, startTime, expectedDurationMinutes, meetingMode, providerAccountId, customProviderId, providerPasscode, hostUrl, participantUrl, hostKey, meetingCode } = liveClassForm;
-    if (!title || !description || !topicId) {
+    const { title, description, topicId, provider, accessLevel, batchTargetType, selectedBatchIds, startDate, startTime, expectedDurationMinutes, meetingMode, providerAccountId, customProviderId, providerPasscode, hostUrl, participantUrl, hostKey, meetingCode, youtubeUrl } = liveClassForm;
+    if (!editingLiveClass && (!title || !description || !topicId)) {
       Alert.alert("Required", "Please provide Title, Description, and select a Topic.");
+      return;
+    } else if (editingLiveClass && (!title || !topicId)) {
+      Alert.alert("Required", "Please provide Title and select a Topic.");
+      return;
+    }
+
+    if (provider === "youtube" && !youtubeUrl) {
+      Alert.alert("Required", "Please provide YouTube Video URL.");
       return;
     }
 
@@ -4241,7 +4292,13 @@ function MainApp() {
             scheduledStartTime: scheduledStartTimeIso,
             expectedDurationMinutes: Number(expectedDurationMinutes)
           };
-          if (meetingMode === "use_existing") {
+          if (provider === "youtube") {
+            updates.providerSessionId = "youtube";
+            updates.launchPayload = {
+              ...(editingLiveClass.launchPayload || editingLiveClass.liveSession?.launchPayload || {}),
+              join_url: youtubeUrl
+            };
+          } else if (meetingMode === "use_existing") {
             updates.providerSessionId = customProviderId;
             updates.launchPayload = {
               ...(editingLiveClass.launchPayload || editingLiveClass.liveSession?.launchPayload || {}),
@@ -4274,12 +4331,12 @@ function MainApp() {
           provider,
           scheduledStartTime: localDate.toISOString(),
           expectedDurationMinutes: Number(expectedDurationMinutes),
-          meetingMode,
+          meetingMode: provider === "youtube" ? "use_existing" : meetingMode,
           providerAccountId,
           customProviderId,
           providerPasscode,
           hostUrl,
-          participantUrl,
+          participantUrl: provider === "youtube" ? youtubeUrl : participantUrl,
           hostKey,
           meetingCode
         });
@@ -4295,8 +4352,11 @@ function MainApp() {
 
   const handleSaveRecordedClass = async () => {
     const { title, description, topicId, uploadMode, youtubeUrl, file, accessLevel, batchTargetType, selectedBatchIds } = recordedClassForm;
-    if (!title || !description || !topicId) {
+    if (!editingRecordedClass && (!title || !description || !topicId)) {
       Alert.alert("Required", "Please fill in Title, Description, and select a Topic.");
+      return;
+    } else if (editingRecordedClass && (!title || !topicId)) {
+      Alert.alert("Required", "Please fill in Title, and select a Topic.");
       return;
     }
 
@@ -4339,7 +4399,8 @@ function MainApp() {
           title,
           description,
           topicId,
-          classType: "youtube_recorded",
+          classType: "recorded",
+          youtubeUrl,
           accessLevel,
           targetBatchIds: batchIds,
           minimumAttendancePercentage: 50
@@ -8029,44 +8090,73 @@ function MainApp() {
                   </View>
 
                   {resourceForm.visibility === "batch" && (
-                    <View style={{ backgroundColor: darkMode ? "#222" : "#f9f9f9", padding: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0" }}>
+                    <View style={{ marginTop: 8, backgroundColor: darkMode ? "#222" : "#f9f9f9", padding: 12, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0" }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 6 }]}>Select Target Batches</Text>
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                        {erpBatches.length === 0 ? (
-                          <Text style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>No ERP batches found. Asset will be accessible to all batch students.</Text>
-                        ) : (
-                          erpBatches.map((b: any) => {
-                            const batchId = b.id || b._id;
-                            const batchName = b.batchName || b.name || "Unnamed Batch";
-                            const currentBatchList = (resourceForm.targetBatchIds || "").split(",").map(s => s.trim()).filter(Boolean);
-                            const isSelected = currentBatchList.includes(batchId) || resourceForm.targetBatchIds === "all";
-                            const toggleBatch = () => {
-                              let updated: string[];
-                              if (isSelected) {
-                                updated = currentBatchList.filter(id => id !== batchId && id !== "all");
-                              } else {
-                                updated = [...currentBatchList.filter(id => id !== "all"), batchId];
-                              }
-                              setResourceForm({ ...resourceForm, targetBatchIds: updated.join(",") });
-                            };
-                            return (
-                              <TouchableOpacity
-                                key={batchId}
-                                onPress={toggleBatch}
-                                style={{
-                                  paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6,
-                                  borderWidth: 1, borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#ccc"),
-                                  backgroundColor: isSelected ? (darkMode ? "#3e1c1c" : "#ffebee") : (darkMode ? "#1a1a1a" : "#fff")
-                                }}
-                              >
-                                <Text style={{ fontSize: 11, fontWeight: isSelected ? "bold" : "normal", color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#333") }}>
-                                  {isSelected ? "✓ " : ""}{batchName}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })
-                        )}
-                      </View>
+                      <TouchableOpacity 
+                        style={{
+                          flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                          borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8, padding: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#fff"
+                        }}
+                        onPress={() => setResourceForm({ ...resourceForm, isBatchDropdownOpen: !resourceForm.isBatchDropdownOpen })}
+                      >
+                        <Text style={{ color: (resourceForm.targetBatchIds && resourceForm.targetBatchIds !== "all") ? (darkMode ? "#fff" : "#212121") : (darkMode ? "#666" : "#999") }}>
+                          {(resourceForm.targetBatchIds && resourceForm.targetBatchIds !== "all")
+                            ? `${resourceForm.targetBatchIds.split(",").length} batch(es) selected` 
+                            : "Select Batches..."}
+                        </Text>
+                        <Ionicons name={resourceForm.isBatchDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={darkMode ? "#aaa" : "#555"} />
+                      </TouchableOpacity>
+
+                      {resourceForm.isBatchDropdownOpen && (
+                        <View style={{
+                          marginTop: 4, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#fff", maxHeight: 200, overflow: "hidden"
+                        }}>
+                          {erpBatches.length === 0 ? (
+                            <Text style={{ padding: 10, fontSize: 12, color: "#888", fontStyle: "italic" }}>No ERP batches found.</Text>
+                          ) : (
+                            <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }}>
+                              {erpBatches.map((b: any) => {
+                                const batchId = b.id || b._id;
+                                const batchName = b.batchName || b.name || "Unnamed Batch";
+                                const currentBatchList = (resourceForm.targetBatchIds || "").split(",").map((s: string) => s.trim()).filter(Boolean);
+                                const isSelected = currentBatchList.includes(batchId) || resourceForm.targetBatchIds === "all";
+                                const toggleBatch = () => {
+                                  let updated: string[];
+                                  if (isSelected) {
+                                    updated = currentBatchList.filter((id: string) => id !== batchId && id !== "all");
+                                  } else {
+                                    updated = [...currentBatchList.filter((id: string) => id !== "all"), batchId];
+                                  }
+                                  if (updated.length === 0) updated = ["all"];
+                                  setResourceForm({ ...resourceForm, targetBatchIds: updated.join(",") });
+                                };
+                                return (
+                                  <TouchableOpacity
+                                    key={batchId}
+                                    onPress={toggleBatch}
+                                    style={{
+                                      flexDirection: "row", alignItems: "center", padding: 10,
+                                      borderBottomWidth: 1, borderBottomColor: darkMode ? "#444" : "#eee"
+                                    }}
+                                  >
+                                    <View style={{
+                                      width: 18, height: 18, borderRadius: 3, borderWidth: 1,
+                                      borderColor: isSelected ? "#c62828" : (darkMode ? "#666" : "#ccc"),
+                                      backgroundColor: isSelected ? "#c62828" : "transparent",
+                                      marginRight: 10, justifyContent: "center", alignItems: "center"
+                                    }}>
+                                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                                    </View>
+                                    <Text style={{ color: darkMode ? "#eee" : "#333", fontSize: 13 }}>{batchName}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
                     </View>
                   )}
 
@@ -8254,37 +8344,68 @@ function MainApp() {
                   </View>
 
                   {liveClassForm.accessLevel === "batch" && liveClassForm.batchTargetType === "select" && (
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                      {erpBatches.length === 0 ? (
-                        <Text style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>No batches available</Text>
-                      ) : (
-                        erpBatches.map(b => {
-                          const batchId = b.id || b._id;
-                          const batchName = b.batchName || b.name;
-                          const isSelected = (liveClassForm.selectedBatchIds || []).includes(batchId);
-                          const toggleSelect = () => {
-                            const currentIds = liveClassForm.selectedBatchIds || [];
-                            const updatedIds = isSelected
-                              ? currentIds.filter((id: string) => id !== batchId)
-                              : [...currentIds, batchId];
-                            setLiveClassForm({ ...liveClassForm, selectedBatchIds: updatedIds });
-                          };
-                          return (
-                            <TouchableOpacity
-                              key={batchId}
-                              onPress={toggleSelect}
-                              style={{
-                                paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4,
-                                borderWidth: 1, borderColor: isSelected ? "#c62828" : "#ccc",
-                                backgroundColor: isSelected ? "#ffebee" : "transparent"
-                              }}
-                            >
-                              <Text style={{ fontSize: 10, color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#333") }}>
-                                {batchName}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Select Specific Batches *</Text>
+                      <TouchableOpacity 
+                        style={{
+                          flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                          borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8, padding: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5"
+                        }}
+                        onPress={() => setLiveClassForm({ ...liveClassForm, isBatchDropdownOpen: !liveClassForm.isBatchDropdownOpen })}
+                      >
+                        <Text style={{ color: liveClassForm.selectedBatchIds?.length ? (darkMode ? "#fff" : "#212121") : (darkMode ? "#666" : "#999") }}>
+                          {liveClassForm.selectedBatchIds?.length 
+                            ? `${liveClassForm.selectedBatchIds.length} batch(es) selected` 
+                            : "Select Batches..."}
+                        </Text>
+                        <Ionicons name={liveClassForm.isBatchDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={darkMode ? "#aaa" : "#555"} />
+                      </TouchableOpacity>
+
+                      {liveClassForm.isBatchDropdownOpen && (
+                        <View style={{
+                          marginTop: 4, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#fff", maxHeight: 200, overflow: "hidden"
+                        }}>
+                          {erpBatches.length === 0 ? (
+                            <Text style={{ padding: 10, fontSize: 12, color: "#888", fontStyle: "italic" }}>No batches available</Text>
+                          ) : (
+                            <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }}>
+                              {erpBatches.map(b => {
+                                const batchId = b.id || b._id;
+                                const batchName = b.batchName || b.name;
+                                const isSelected = (liveClassForm.selectedBatchIds || []).includes(batchId);
+                                const toggleSelect = () => {
+                                  const currentIds = liveClassForm.selectedBatchIds || [];
+                                  const updatedIds = isSelected
+                                    ? currentIds.filter((id: string) => id !== batchId)
+                                    : [...currentIds, batchId];
+                                  setLiveClassForm({ ...liveClassForm, selectedBatchIds: updatedIds });
+                                };
+                                return (
+                                  <TouchableOpacity
+                                    key={batchId}
+                                    onPress={toggleSelect}
+                                    style={{
+                                      flexDirection: "row", alignItems: "center", padding: 10,
+                                      borderBottomWidth: 1, borderBottomColor: darkMode ? "#444" : "#eee"
+                                    }}
+                                  >
+                                    <View style={{
+                                      width: 18, height: 18, borderRadius: 3, borderWidth: 1,
+                                      borderColor: isSelected ? "#c62828" : (darkMode ? "#666" : "#ccc"),
+                                      backgroundColor: isSelected ? "#c62828" : "transparent",
+                                      marginRight: 10, justifyContent: "center", alignItems: "center"
+                                    }}>
+                                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                                    </View>
+                                    <Text style={{ color: darkMode ? "#eee" : "#333", fontSize: 13 }}>{batchName}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
                       )}
                     </View>
                   )}
@@ -8375,40 +8496,54 @@ function MainApp() {
                     </View>
                   </View>
 
-                  {/* Meeting Mode */}
-                  <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Link Zoom / Meet Mode</Text>
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TouchableOpacity
-                      onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "create_new" })}
-                      style={[styles.roleBtn, liveClassForm.meetingMode === "create_new" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
-                    >
-                      <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "create_new" && styles.roleBtnTxtActive]}>Auto Create Link</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "use_existing" })}
-                      style={[styles.roleBtn, liveClassForm.meetingMode === "use_existing" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
-                    >
-                      <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "use_existing" && styles.roleBtnTxtActive]}>Paste Custom Link</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {liveClassForm.meetingMode === "use_existing" && (
-                    <View style={{ gap: 8 }}>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Participant URL (Join Link)</Text>
+                  {/* Meeting Mode or YouTube URL */}
+                  {liveClassForm.provider === "youtube" ? (
+                    <View style={{ gap: 8, marginTop: 12 }}>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>YouTube Live Video URL *</Text>
                       <TextInput
                         style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="https://..."
-                        value={liveClassForm.participantUrl}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, participantUrl: txt })}
-                      />
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Host URL (Start Link)</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="https://..."
-                        value={liveClassForm.hostUrl}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, hostUrl: txt })}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        value={liveClassForm.youtubeUrl || ""}
+                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, youtubeUrl: txt })}
                       />
                     </View>
+                  ) : (
+                    <>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Link Zoom / Meet Mode</Text>
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        <TouchableOpacity
+                          onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "create_new" })}
+                          style={[styles.roleBtn, liveClassForm.meetingMode === "create_new" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
+                        >
+                          <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "create_new" && styles.roleBtnTxtActive]}>Auto Create Link</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "use_existing" })}
+                          style={[styles.roleBtn, liveClassForm.meetingMode === "use_existing" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
+                        >
+                          <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "use_existing" && styles.roleBtnTxtActive]}>Paste Custom Link</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {liveClassForm.meetingMode === "use_existing" && (
+                        <View style={{ gap: 8 }}>
+                          <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Participant URL (Join Link)</Text>
+                          <TextInput
+                            style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                            placeholder="https://..."
+                            value={liveClassForm.participantUrl}
+                            onChangeText={txt => setLiveClassForm({ ...liveClassForm, participantUrl: txt })}
+                          />
+                          <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Host URL (Start Link)</Text>
+                          <TextInput
+                            style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                            placeholder="https://..."
+                            value={liveClassForm.hostUrl}
+                            onChangeText={txt => setLiveClassForm({ ...liveClassForm, hostUrl: txt })}
+                          />
+                        </View>
+                      )}
+                    </>
                   )}
                 </ScrollView>
 
@@ -8540,37 +8675,68 @@ function MainApp() {
                   </View>
 
                   {recordedClassForm.accessLevel === "batch" && recordedClassForm.batchTargetType === "select" && (
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                      {erpBatches.length === 0 ? (
-                        <Text style={{ fontSize: 11, color: "#888", fontStyle: "italic" }}>No batches available</Text>
-                      ) : (
-                        erpBatches.map(b => {
-                          const batchId = b.id || b._id;
-                          const batchName = b.batchName || b.name;
-                          const isSelected = (recordedClassForm.selectedBatchIds || []).includes(batchId);
-                          const toggleSelect = () => {
-                            const currentIds = recordedClassForm.selectedBatchIds || [];
-                            const updatedIds = isSelected
-                              ? currentIds.filter((id: string) => id !== batchId)
-                              : [...currentIds, batchId];
-                            setRecordedClassForm({ ...recordedClassForm, selectedBatchIds: updatedIds });
-                          };
-                          return (
-                            <TouchableOpacity
-                              key={batchId}
-                              onPress={toggleSelect}
-                              style={{
-                                paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4,
-                                borderWidth: 1, borderColor: isSelected ? "#c62828" : "#ccc",
-                                backgroundColor: isSelected ? "#ffebee" : "transparent"
-                              }}
-                            >
-                              <Text style={{ fontSize: 10, color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#333") }}>
-                                {batchName}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Select Specific Batches *</Text>
+                      <TouchableOpacity 
+                        style={{
+                          flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                          borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8, padding: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5"
+                        }}
+                        onPress={() => setRecordedClassForm({ ...recordedClassForm, isBatchDropdownOpen: !recordedClassForm.isBatchDropdownOpen })}
+                      >
+                        <Text style={{ color: recordedClassForm.selectedBatchIds?.length ? (darkMode ? "#fff" : "#212121") : (darkMode ? "#666" : "#999") }}>
+                          {recordedClassForm.selectedBatchIds?.length 
+                            ? `${recordedClassForm.selectedBatchIds.length} batch(es) selected` 
+                            : "Select Batches..."}
+                        </Text>
+                        <Ionicons name={recordedClassForm.isBatchDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={darkMode ? "#aaa" : "#555"} />
+                      </TouchableOpacity>
+
+                      {recordedClassForm.isBatchDropdownOpen && (
+                        <View style={{
+                          marginTop: 4, borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0", borderRadius: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#fff", maxHeight: 200, overflow: "hidden"
+                        }}>
+                          {erpBatches.length === 0 ? (
+                            <Text style={{ padding: 10, fontSize: 12, color: "#888", fontStyle: "italic" }}>No batches available</Text>
+                          ) : (
+                            <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }}>
+                              {erpBatches.map(b => {
+                                const batchId = b.id || b._id;
+                                const batchName = b.batchName || b.name;
+                                const isSelected = (recordedClassForm.selectedBatchIds || []).includes(batchId);
+                                const toggleSelect = () => {
+                                  const currentIds = recordedClassForm.selectedBatchIds || [];
+                                  const updatedIds = isSelected
+                                    ? currentIds.filter((id: string) => id !== batchId)
+                                    : [...currentIds, batchId];
+                                  setRecordedClassForm({ ...recordedClassForm, selectedBatchIds: updatedIds });
+                                };
+                                return (
+                                  <TouchableOpacity
+                                    key={batchId}
+                                    onPress={toggleSelect}
+                                    style={{
+                                      flexDirection: "row", alignItems: "center", padding: 10,
+                                      borderBottomWidth: 1, borderBottomColor: darkMode ? "#444" : "#eee"
+                                    }}
+                                  >
+                                    <View style={{
+                                      width: 18, height: 18, borderRadius: 3, borderWidth: 1,
+                                      borderColor: isSelected ? "#c62828" : (darkMode ? "#666" : "#ccc"),
+                                      backgroundColor: isSelected ? "#c62828" : "transparent",
+                                      marginRight: 10, justifyContent: "center", alignItems: "center"
+                                    }}>
+                                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                                    </View>
+                                    <Text style={{ color: darkMode ? "#eee" : "#333", fontSize: 13 }}>{batchName}</Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
                       )}
                     </View>
                   )}
@@ -8578,7 +8744,7 @@ function MainApp() {
                   <Text style={[styles.label, darkMode && { color: "#aaa" }]}>YouTube Video URL *</Text>
                   <TextInput
                     style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder={editingRecordedClass ? "Leave blank to keep existing video, or paste new URL..." : "https://www.youtube.com/watch?v=..."}
                     placeholderTextColor={darkMode ? "#666" : "#999"}
                     value={recordedClassForm.youtubeUrl}
                     onChangeText={txt => setRecordedClassForm({ ...recordedClassForm, youtubeUrl: txt })}
@@ -9281,40 +9447,54 @@ function MainApp() {
                     </View>
                   </View>
 
-                  {/* Meeting Mode */}
-                  <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Link Zoom / Meet Mode</Text>
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TouchableOpacity
-                      onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "create_new" })}
-                      style={[styles.roleBtn, liveClassForm.meetingMode === "create_new" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
-                    >
-                      <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "create_new" && styles.roleBtnTxtActive]}>Auto Create Link</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "use_existing" })}
-                      style={[styles.roleBtn, liveClassForm.meetingMode === "use_existing" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
-                    >
-                      <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "use_existing" && styles.roleBtnTxtActive]}>Paste Custom Link</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {liveClassForm.meetingMode === "use_existing" && (
-                    <View style={{ gap: 8 }}>
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Participant URL (Join Link)</Text>
+                  {/* Meeting Mode or YouTube URL */}
+                  {liveClassForm.provider === "youtube" ? (
+                    <View style={{ gap: 8, marginTop: 12 }}>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>YouTube Live Video URL *</Text>
                       <TextInput
                         style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="https://..."
-                        value={liveClassForm.participantUrl}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, participantUrl: txt })}
-                      />
-                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Host URL (Start Link)</Text>
-                      <TextInput
-                        style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                        placeholder="https://..."
-                        value={liveClassForm.hostUrl}
-                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, hostUrl: txt })}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        value={liveClassForm.youtubeUrl || ""}
+                        onChangeText={txt => setLiveClassForm({ ...liveClassForm, youtubeUrl: txt })}
                       />
                     </View>
+                  ) : (
+                    <>
+                      <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Link Zoom / Meet Mode</Text>
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        <TouchableOpacity
+                          onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "create_new" })}
+                          style={[styles.roleBtn, liveClassForm.meetingMode === "create_new" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
+                        >
+                          <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "create_new" && styles.roleBtnTxtActive]}>Auto Create Link</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setLiveClassForm({ ...liveClassForm, meetingMode: "use_existing" })}
+                          style={[styles.roleBtn, liveClassForm.meetingMode === "use_existing" && styles.roleBtnActive, darkMode && styles.roleBtnDark]}
+                        >
+                          <Text style={[styles.roleBtnTxt, liveClassForm.meetingMode === "use_existing" && styles.roleBtnTxtActive]}>Paste Custom Link</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {liveClassForm.meetingMode === "use_existing" && (
+                        <View style={{ gap: 8 }}>
+                          <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Participant URL (Join Link)</Text>
+                          <TextInput
+                            style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                            placeholder="https://..."
+                            value={liveClassForm.participantUrl}
+                            onChangeText={txt => setLiveClassForm({ ...liveClassForm, participantUrl: txt })}
+                          />
+                          <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Host URL (Start Link)</Text>
+                          <TextInput
+                            style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                            placeholder="https://..."
+                            value={liveClassForm.hostUrl}
+                            onChangeText={txt => setLiveClassForm({ ...liveClassForm, hostUrl: txt })}
+                          />
+                        </View>
+                      )}
+                    </>
                   )}
                 </ScrollView>
 
@@ -9407,7 +9587,7 @@ function MainApp() {
                   <Text style={[styles.label, darkMode && { color: "#aaa" }]}>YouTube Video URL *</Text>
                   <TextInput
                     style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                    placeholder="https://www.youtube.com/watch?v=..."
+                    placeholder={editingRecordedClass ? "Leave blank to keep existing video, or paste new URL..." : "https://www.youtube.com/watch?v=..."}
                     placeholderTextColor={darkMode ? "#666" : "#999"}
                     value={recordedClassForm.youtubeUrl}
                     onChangeText={txt => setRecordedClassForm({ ...recordedClassForm, youtubeUrl: txt })}
@@ -16778,8 +16958,8 @@ PASTED QUESTION PAPER TEXT:
                                       {editingStaff.role === "super_admin" ? "Super Admin" :
                                         editingStaff.role === "admin" ? "Admin" :
                                           editingStaff.role === "editor" ? "Editor" :
-                                            editingStaff.role === "contributor" ? "Contributor" :
-                                              editingStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                                              editingStaff.role === "contributor" ? "Contributor" :
+                                                editingStaff.role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
                                     </Text>
                                     <Ionicons name={showEditRoleDropdown ? "chevron-up" : "chevron-down"} size={16} color="#757575" />
                                   </TouchableOpacity>
@@ -16949,7 +17129,7 @@ PASTED QUESTION PAPER TEXT:
                                         newStaff.role === "admin" ? "Admin" :
                                           newStaff.role === "editor" ? "Editor" :
                                             newStaff.role === "contributor" ? "Contributor" :
-                                              newStaff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                                              newStaff.role.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
                                     </Text>
                                     <Ionicons name={showCreateRoleDropdown ? "chevron-up" : "chevron-down"} size={16} color="#757575" />
                                   </TouchableOpacity>
@@ -20415,7 +20595,7 @@ PASTED QUESTION PAPER TEXT:
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>LEARNING</Text> : null}
                     {renderSidebarItem("quiz", (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "quiz" : lmsSub, "Quiz", "help-circle-outline", () => changeLmsSub("quiz"), "lms-quiz", undefined, lmsTabsCollapsed && !isMobile)}
                     {renderSidebarItem("daily-content", lmsSub, "Daily Content", "calendar-outline", () => changeLmsSub("daily-content"), "lms-daily-content", undefined, lmsTabsCollapsed && !isMobile)}
-                    {renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile)}
                     {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile)}
                     {/* Student: My Courses & Live page */}
                     {!isAdmin && Platform.OS === 'web' && renderSidebarItem("my-courses", lmsSub, "My Courses", "school-outline", () => changeLmsSub("my-courses"), "lms-my-courses", undefined, lmsTabsCollapsed && !isMobile)}
@@ -20889,36 +21069,73 @@ PASTED QUESTION PAPER TEXT:
                                     {resSubject ? <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#757575", fontWeight: "500" }}>{resSubject}</Text> : null}
                                     <Text style={{ fontSize: 10, color: darkMode ? "#777" : "#9e9e9e" }}>{[resSize, resDate].filter(Boolean).join(" • ")}</Text>
                                   </View>
-                                  <TouchableOpacity
-                                    onPress={async () => {
-                                      const resId = res.id || res._id;
-                                      try {
-                                        const accessRes = await api.get(`/resources/${resId}/access`);
-                                        const hasAccess = accessRes?.hasAccess ?? accessRes?.data?.hasAccess ?? true;
-                                        if (!hasAccess) {
-                                          Alert.alert("Access Restricted", "You do not have permission to view or download this resource.");
-                                          return;
+                                  {/* SACS 3-state: access field only present for student from /students/me/lms-resources */}
+                                  {res.access && !res.access.allowed ? (
+                                    res.access.pendingRequest ? (
+                                      <View style={{ backgroundColor: darkMode ? "#2a2a2a" : "#fff3e0", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: "#ff9800" }}>
+                                        <Text style={{ color: "#ff9800", fontSize: 11, fontWeight: "bold" }}>⏳ Pending</Text>
+                                      </View>
+                                    ) : (
+                                      <TouchableOpacity
+                                        onPress={async () => {
+                                          const resId = res.id || res._id;
+                                          try {
+                                            await api.post(`/access-rules/student/entity/${resId}/request`, {
+                                              entityType: "resource",
+                                              entityName: resTitle,
+                                              reason: "other",
+                                            });
+                                            alert("Access request submitted! Admin will review shortly.");
+                                            loadLmsResources();
+                                          } catch (err: any) {
+                                            const msg = err.response?.data?.message || err.message;
+                                            if (msg?.includes("already") || msg?.includes("pending")) {
+                                              alert("You already have a pending request for this resource.");
+                                            } else {
+                                              alert("Failed to request access: " + msg);
+                                            }
+                                          }
+                                        }}
+                                        style={{ backgroundColor: "#1565c0", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
+                                      >
+                                        <Ionicons name="lock-open-outline" size={14} color="#fff" />
+                                        <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Request Access</Text>
+                                      </TouchableOpacity>
+                                    )
+                                  ) : (
+                                    // Access granted (or admin/staff with no access field) — existing Open PDF/Open
+                                    <TouchableOpacity
+                                      onPress={async () => {
+                                        const resId = res.id || res._id;
+                                        try {
+                                          const accessRes = await api.get(`/resources/${resId}/access`);
+                                          const hasAccess = accessRes?.hasAccess ?? accessRes?.data?.hasAccess ?? true;
+                                          if (!hasAccess) {
+                                            Alert.alert("Access Restricted", "You do not have permission to view or download this resource.");
+                                            return;
+                                          }
+                                          const fullUrl = `${getBaseUrl()}/resources/${resId}/content?token=${user?.token || ""}`;
+                                          if (isPdf) {
+                                            console.log("[LMS Debug] Open PDF clicked, setting selectedResourceId to:", resId);
+                                            setSelectedResourceId(resId);
+                                            return;
+                                          }
+                                          if (typeof window !== "undefined") {
+                                            window.open(fullUrl, "_blank");
+                                          } else {
+                                            Alert.alert("Open Resource", `Opening: ${resTitle}`);
+                                          }
+                                        } catch (err: any) {
+                                          Alert.alert("Access Restricted", err.message || "You do not have permission to access this resource.");
                                         }
-                                        const fullUrl = `${getBaseUrl()}/resources/${resId}/content?token=${user?.token || ""}`;
-                                        if (isPdf) {
-                                          console.log("[LMS Debug] Open PDF clicked, setting selectedResourceId to:", resId);
-                                          setSelectedResourceId(resId);
-                                          return;
-                                        }
-                                        if (typeof window !== "undefined") {
-                                          window.open(fullUrl, "_blank");
-                                        } else {
-                                          Alert.alert("Open Resource", `Opening: ${resTitle}`);
-                                        }
-                                      } catch (err: any) {
-                                        Alert.alert("Access Restricted", err.message || "You do not have permission to access this resource.");
-                                      }
-                                    }}
-                                    style={{ backgroundColor: "#c62828", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
-                                  >
-                                    <Ionicons name={isPdf ? "cloud-download-outline" : "play-outline"} size={14} color="#fff" />
-                                    <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>{isPdf ? "Open PDF" : "Open"}</Text>
-                                  </TouchableOpacity>
+                                      }}
+                                      style={{ backgroundColor: "#c62828", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
+                                    >
+                                      <Ionicons name={isPdf ? "cloud-download-outline" : "play-outline"} size={14} color="#fff" />
+                                      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>{isPdf ? "Open PDF" : "Open"}</Text>
+                                    </TouchableOpacity>
+                                  )}
+
                                 </View>
                               </View>
                             );
@@ -20989,46 +21206,32 @@ PASTED QUESTION PAPER TEXT:
                           Loading live classes...
                         </Text>
                       </View>
-                    ) : lmsLiveSessions.length === 0 ? (
-                      <View style={styles.emptyContainer}>
-                        <Ionicons name="videocam-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
-                        <Text style={[styles.emptyText, darkMode && styles.emptyTextDark]}>No live sessions scheduled yet.</Text>
-                        {isAdmin && (
-                          <TouchableOpacity
-                            onPress={() => {
-                              setEditingLiveClass(null);
-                              setLiveClassForm({
-                                title: "",
-                                description: "",
-                                courseId: "",
-                                subjectId: "",
-                                topicId: "",
-                                provider: "zoom",
-                                accessLevel: "premium",
-                                startDate: new Date().toISOString().split("T")[0],
-                                startTime: "10:00",
-                                expectedDurationMinutes: 60,
-                                meetingMode: "create_new",
-                                providerAccountId: "auto",
-                                hostUrl: "",
-                                participantUrl: "",
-                                customProviderId: "",
-                                providerPasscode: "",
-                                hostKey: "",
-                                meetingCode: ""
-                              });
-                              setShowLiveClassModal(true);
-                              loadLmsLookups();
-                            }}
-                            style={[styles.outlineBtn, { marginTop: 10 }]}
-                          >
-                            <Text style={styles.outlineBtnTxt}>Schedule Live Class</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
                     ) : (
                       <View style={{ gap: 12 }}>
-                        {lmsLiveSessions.map((session: any) => {
+                        {(() => {
+                           const upcomingSessions: any[] = [];
+                           const onLiveSessions: any[] = [];
+                           const endedSessions: any[] = [];
+
+                           lmsLiveSessions.forEach((session: any) => {
+                             const sessionStatus = session.status || 'scheduled';
+                             const scheduledTimeObj = session.scheduledStartTime
+                               ? new Date(session.scheduledStartTime._seconds ? session.scheduledStartTime._seconds * 1000 : session.scheduledStartTime)
+                               : null;
+                             const startTimeMs = scheduledTimeObj ? scheduledTimeObj.getTime() : 0;
+                             const durationMins = session.expectedDurationMinutes || session.liveSession?.expectedDurationMinutes || 60;
+                             const endTimeMs = startTimeMs + durationMins * 60 * 1000;
+                             const isExpired = startTimeMs > 0 && Date.now() > endTimeMs;
+
+                             const isEnded = sessionStatus === 'ENDED' || sessionStatus === 'CANCELLED' || sessionStatus === 'EXPIRED' || sessionStatus === 'ARCHIVED' || sessionStatus === 'ended' || isExpired;
+                             const isLive = !isEnded && (sessionStatus === 'live' || sessionStatus === 'active' || sessionStatus === 'in_progress' || sessionStatus === 'LIVE' || sessionStatus === 'JOINING' || sessionStatus === 'HOST_CONNECTED' || sessionStatus === 'ATTENDANCE_RUNNING');
+
+                             if (isEnded) endedSessions.push(session);
+                             else if (isLive) onLiveSessions.push(session);
+                             else upcomingSessions.push(session);
+                           });
+
+                           const renderLiveClassCard = (session: any, topicTitle?: string) => {
                           const sessionTitle = session.title || session.className || session.topicName || "Live Session";
                           const sessionStatus = session.status || "scheduled";
 
@@ -21040,19 +21243,18 @@ PASTED QUESTION PAPER TEXT:
                           const endTimeMs = startTimeMs + durationMins * 60 * 1000;
                           const isExpired = startTimeMs > 0 && Date.now() > endTimeMs;
 
-                          // If expired, do not display as active or live
-                          if (isExpired) {
-                            return null;
-                          }
+                          const isEnded = sessionStatus === 'ENDED' || sessionStatus === 'CANCELLED' || sessionStatus === 'EXPIRED' || sessionStatus === 'ARCHIVED';
 
-                          const isLive = !isExpired && (sessionStatus === "live" || sessionStatus === "active" || sessionStatus === "in_progress" || sessionStatus === "LIVE" || sessionStatus === "JOINING" || sessionStatus === "HOST_CONNECTED");
+                          const isLive = !isEnded && (sessionStatus === "live" || sessionStatus === "active" || sessionStatus === "in_progress" || sessionStatus === "LIVE" || sessionStatus === "JOINING" || sessionStatus === "HOST_CONNECTED" || sessionStatus === "ATTENDANCE_RUNNING");
+                          const isEndable = isAdmin && !isEnded;
                           const isCancelled = sessionStatus === "cancelled" || sessionStatus === "canceled" || sessionStatus === "CANCELLED";
                           const faculty = session.teacherName || session.staffName || session.instructorName || "";
                           const scheduledTime = scheduledTimeObj
                             ? scheduledTimeObj.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
                             : session.scheduledAt || "Time not set";
-                          const statusColor = isLive ? "#2e7d32" : isCancelled ? "#c62828" : "#1565c0";
-                          const statusLabel = isLive ? "LIVE NOW" : isCancelled ? "CANCELLED" : sessionStatus.toUpperCase();
+                          // 🟡 Yellow=Upcoming, 🟢 Green=Live, 🔴 Red=Ended/Cancelled
+                          const statusColor = isLive ? "#2e7d32" : isCancelled || isEnded ? "#c62828" : "#f59e0b";
+                          const statusLabel = isLive ? "🟢 LIVE NOW" : isCancelled ? "🔴 CANCELLED" : isEnded ? "🔴 ENDED" : "🟡 " + sessionStatus.toUpperCase();
 
                           const courseName = session.courseName || session.courseTitle || (lmsCourses.find((c: any) => c.id === session.courseId)?.title || lmsCourses.find((c: any) => c.id === session.courseId)?.name || "");
                           let batchName = session.batchName || session.targetBatchName || "";
@@ -21141,75 +21343,152 @@ PASTED QUESTION PAPER TEXT:
                                 </View>
                               )}
 
-                              <View style={{ flexDirection: "row", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+                                <View style={{ flexDirection: "row", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
                                 {isAdmin ? (
-                                  <TouchableOpacity
-                                    onPress={async () => {
-                                      try {
-                                        Alert.alert("Starting Class", "Initializing meeting links, please wait...");
-                                        const sessionId = session.id || session._id;
-                                        await api.post(`/live-sessions/${sessionId}/start`, {});
+                                    <React.Fragment>
+                                      {/* Show Start Class ONLY if not ended */}
+                                      {!isEnded && (
+                                        <TouchableOpacity
+                                          onPress={async () => {
+                                            try {
+                                              Alert.alert("Starting Class", "Initializing meeting links, please wait...");
+                                              const sessionId = session.id || session._id;
+                                              await api.post(`/live-sessions/${sessionId}/start`, {});
 
-                                        // 1. Try secure standalone zoom-client-launch.html window
-                                        let launched = false;
-                                        try {
-                                          const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
-                                          const token = tokenRes.data?.token || tokenRes.token;
-                                          if (token) {
-                                            const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
-                                            const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(baseOrigin)}`;
-                                            if (typeof window !== "undefined") {
-                                              window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+                                              // 1. Try secure standalone zoom-client-launch.html window (Skip for youtube)
+                                              let launched = false;
+                                              if (session.provider !== 'youtube') {
+                                                try {
+                                                  const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
+                                                  const token = tokenRes.data?.token || tokenRes.token;
+                                                  if (token) {
+                                                    const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
+                                                    const apiBase = getBaseUrl().replace(/\/api$/, "");
+                                                    const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(apiBase)}`;
+                                                    if (typeof window !== "undefined") {
+                                                      window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+                                                    }
+                                                    launched = true;
+                                                  }
+                                                } catch (tokErr) {
+                                                  console.warn("Join token resolution failed, checking join API:", tokErr);
+                                                }
+                                              }
+
+                                              if (!launched) {
+                                                const freshSession = session.liveSession || session;
+                                                const launchUrl = freshSession?.hostUrl || freshSession?.launchPayload?.start_url || freshSession?.launchPayload?.hostUrl || freshSession?.participantUrl || freshSession?.launchPayload?.join_url || freshSession?.launchPayload?.participantUrl || freshSession?.joinUrl || freshSession?.meetingUrl || null;
+
+                                              if (launchUrl) {
+                                                if (typeof window !== "undefined") {
+                                                  window.open(launchUrl, "_blank");
+                                                }
+                                              }
                                             }
-                                            launched = true;
+                                            loadLiveSessions();
+                                          } catch (err: any) {
+                                            console.error("Failed to start session:", err);
+                                            Alert.alert("Error", err.response?.data?.message || err.message || "Failed to start live session.");
                                           }
-                                        } catch (tokErr) {
-                                          console.warn("Join token resolution failed, checking join API:", tokErr);
-                                        }
+                                        }}
+                                        style={[styles.primaryBtn, { backgroundColor: "#2e7d32", paddingVertical: 8, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 6 }]}
+                                      >
+                                        <Ionicons name="play-circle-outline" size={16} color="#fff" />
+                                        <Text style={styles.primaryBtnTxt}>Start Class</Text>
+                                      </TouchableOpacity>
+                                      )}
 
-                                        if (!launched) {
-                                          const sessionRes = await api.get(`/live-sessions/${sessionId}`);
-                                          const freshSession = sessionRes.data?.data || sessionRes.data;
-                                          const launchUrl = freshSession?.hostUrl || freshSession?.launchPayload?.start_url || freshSession?.launchPayload?.hostUrl || freshSession?.participantUrl || freshSession?.launchPayload?.join_url || freshSession?.launchPayload?.participantUrl || freshSession?.joinUrl || freshSession?.meetingUrl || null;
-
-                                          if (launchUrl) {
-                                            if (typeof window !== "undefined") {
-                                              window.open(launchUrl, "_blank");
-                                            }
+                                    {/* 🔴 END CLASS BUTTON — shown only for live/active sessions */}
+                                    {isEndable && (
+                                      <TouchableOpacity
+                                        onPress={() => {
+                                          const sessionId = session.id || session._id;
+                                          if (typeof window !== 'undefined') {
+                                            const choice = window.confirm(
+                                              `End "${sessionTitle}"?\n\nPress OK to end class only.\nPress Cancel to stay.`
+                                            );
+                                            if (!choice) return;
                                           }
-                                        }
-                                        loadLiveSessions();
-                                      } catch (err: any) {
-                                        console.error("Failed to start session:", err);
-                                        Alert.alert("Error", err.response?.data?.message || err.message || "Failed to start live session.");
-                                      }
-                                    }}
-                                    style={[styles.primaryBtn, { backgroundColor: "#2e7d32", paddingVertical: 8, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 6 }]}
-                                  >
-                                    <Ionicons name="play-circle-outline" size={16} color="#fff" />
-                                    <Text style={styles.primaryBtnTxt}>Start Class</Text>
-                                  </TouchableOpacity>
+                                          // Ask about YouTube conversion
+                                          const convertYt = typeof window !== 'undefined'
+                                            ? window.confirm('Convert to YouTube Recorded Class?\n\nOK = Yes (you will enter a URL)\nCancel = No, just end it.')
+                                            : false;
+                                          const ytUrl = convertYt && typeof window !== 'undefined'
+                                            ? window.prompt('Paste the YouTube recording URL:', 'https://www.youtube.com/watch?v=')
+                                            : null;
+                                          api.post(`/live-sessions/${sessionId}/end-with-conversion`, {
+                                            convertToYoutube: convertYt && !!ytUrl,
+                                            youtubeUrl: ytUrl || undefined
+                                          })
+                                            .then(() => {
+                                              Alert.alert('Done', convertYt && ytUrl ? 'Session ended & converted to recorded class!' : 'Session ended successfully.');
+                                              loadLiveSessions();
+                                            })
+                                            .catch((err: any) => {
+                                              Alert.alert('Error', err?.response?.data?.message || 'Failed to end session');
+                                            });
+                                        }}
+                                        style={{ backgroundColor: "#c62828", paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                                      >
+                                        <Ionicons name="stop-circle-outline" size={16} color="#fff" />
+                                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>End Class</Text>
+                                      </TouchableOpacity>
+                                    )}
+
+                                    {/* CONVERT TO YOUTUBE BUTTON - shown only when session is already ended */}
+                                    {isEnded && (
+                                      <TouchableOpacity
+                                        onPress={() => {
+                                          const sessionId = session.id || session._id;
+                                          const ytUrl = typeof window !== 'undefined'
+                                            ? window.prompt('Paste the YouTube recording URL:', 'https://www.youtube.com/watch?v=')
+                                            : null;
+                                          
+                                          if (!ytUrl) return; // cancelled
+
+                                          api.post(`/live-sessions/${sessionId}/end-with-conversion`, {
+                                            convertToYoutube: true,
+                                            youtubeUrl: ytUrl
+                                          })
+                                            .then(() => {
+                                              Alert.alert('Done', 'Session converted to recorded class!');
+                                              loadLiveSessions();
+                                            })
+                                            .catch((err: any) => {
+                                              Alert.alert('Error', err?.response?.data?.message || 'Failed to convert session');
+                                            });
+                                        }}
+                                        style={{ backgroundColor: "#1565c0", paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                                      >
+                                        <Ionicons name="logo-youtube" size={16} color="#fff" />
+                                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>Convert to Youtube</Text>
+                                      </TouchableOpacity>
+                                    )}
+                                    </React.Fragment>
                                 ) : (
                                   <TouchableOpacity
                                     onPress={async () => {
                                       try {
                                         const sessionId = session.id || session._id || session.classId;
 
-                                        // 1. Try secure standalone zoom-client-launch.html window
+                                        // 1. Try secure standalone zoom-client-launch.html window (Skip for youtube)
                                         let launched = false;
-                                        try {
-                                          const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
-                                          const token = tokenRes.data?.token || tokenRes.token;
-                                          if (token) {
-                                            const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
-                                            const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(baseOrigin)}`;
-                                            if (typeof window !== "undefined") {
-                                              window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+                                        if (session.provider !== 'youtube') {
+                                          try {
+                                            const tokenRes = await api.post(`/live-sessions/${sessionId}/join-token`, {});
+                                            const token = tokenRes.data?.token || tokenRes.token;
+                                            if (token) {
+                                              const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
+                                              const apiBase = getBaseUrl().replace(/\/api$/, "");
+                                              const popupUrl = `${baseOrigin}/meeting-hosts/zoom-client-launch.html?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sessionId)}&apiUrl=${encodeURIComponent(apiBase)}`;
+                                              if (typeof window !== "undefined") {
+                                                window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
+                                              }
+                                              launched = true;
                                             }
-                                            launched = true;
+                                          } catch (tokErr) {
+                                            console.warn("Join token resolution failed, checking join API:", tokErr);
                                           }
-                                        } catch (tokErr) {
-                                          console.warn("Join token resolution failed, checking join API:", tokErr);
                                         }
 
                                         if (launched) return;
@@ -21248,13 +21527,187 @@ PASTED QUESTION PAPER TEXT:
                               </View>
                             </View>
                           );
-                        })}
+                           };
+
+                           const endedCoursesMap = new Map();
+                           const endedUnassigned: any[] = [];
+                           
+                           endedSessions.forEach((cls: any) => {
+                             const courseId = typeof cls.courseId === 'object' ? (cls.courseId?.id || cls.courseId?._id) : cls.courseId;
+                             const subjectId = typeof cls.subjectId === 'object' ? (cls.subjectId?.id || cls.subjectId?._id) : cls.subjectId;
+                             const topicId = typeof cls.topicId === 'object' ? (cls.topicId?.id || cls.topicId?._id) : cls.topicId;
+                         
+                             if (!courseId) {
+                               endedUnassigned.push(cls);
+                               return;
+                             }
+                         
+                             if (!endedCoursesMap.has(courseId)) {
+                               const c = lmsCourses.find((x:any) => x.id === courseId || x._id === courseId);
+                               endedCoursesMap.set(courseId, {
+                                 id: courseId,
+                                 title: c?.title || c?.name || 'Unknown Course',
+                                 subjects: new Map()
+                               });
+                             }
+                         
+                             const courseNode = endedCoursesMap.get(courseId);
+                         
+                             let finalSubjectId = subjectId || 'unassigned_subject';
+                             if (!courseNode.subjects.has(finalSubjectId)) {
+                               const s = lmsSubjects.find((x:any) => x.id === finalSubjectId || x._id === finalSubjectId);
+                               courseNode.subjects.set(finalSubjectId, {
+                                 id: finalSubjectId,
+                                 title: finalSubjectId === 'unassigned_subject' ? 'Unassigned Subject' : (s?.title || s?.name || 'Unknown Subject'),
+                                 topics: new Map()
+                               });
+                             }
+                         
+                             const subjectNode = courseNode.subjects.get(finalSubjectId);
+                         
+                             let finalTopicId = topicId || 'unassigned_topic';
+                             if (!subjectNode.topics.has(finalTopicId)) {
+                               const t = lmsTopics.find((x:any) => x.id === finalTopicId || x._id === finalTopicId);
+                               subjectNode.topics.set(finalTopicId, {
+                                 id: finalTopicId,
+                                 title: finalTopicId === 'unassigned_topic' ? 'Unassigned Topic' : (t?.title || t?.name || 'Unknown Topic'),
+                                 classes: []
+                               });
+                             }
+                         
+                             subjectNode.topics.get(finalTopicId).classes.push(cls);
+                           });
+
+                           return (
+                                                          <View style={{ width: "100%", gap: 20 }}>
+                               {/* Tab Bar */}
+                               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
+                               <View style={{ flexDirection: "row", gap: 30, borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#ddd", paddingBottom: 0 }}>
+                                 <TouchableOpacity onPress={() => setLiveClassesTab('upcoming')} style={{ paddingBottom: 10 }}>
+                                   <Text style={{ fontSize: 15, fontWeight: "bold", color: liveClassesTab === 'upcoming' ? (darkMode ? "#fff" : "#000") : (darkMode ? "#888" : "#666") }}>
+                                     Upcoming Classes ({upcomingSessions.length})
+                                   </Text>
+                                   {liveClassesTab === 'upcoming' && <View style={{ height: 3, backgroundColor: "#f59e0b", position: "absolute", bottom: -1.5, left: 0, right: 0, borderRadius: 2 }} />}
+                                 </TouchableOpacity>
+
+                                 <TouchableOpacity onPress={() => setLiveClassesTab('live')} style={{ paddingBottom: 10 }}>
+                                   <Text style={{ fontSize: 15, fontWeight: "bold", color: liveClassesTab === 'live' ? (darkMode ? "#fff" : "#000") : (darkMode ? "#888" : "#666") }}>
+                                     Live Now ({onLiveSessions.length})
+                                   </Text>
+                                   {liveClassesTab === 'live' && <View style={{ height: 3, backgroundColor: "#00e676", position: "absolute", bottom: -1.5, left: 0, right: 0, borderRadius: 2 }} />}
+                                 </TouchableOpacity>
+
+                                 <TouchableOpacity onPress={() => setLiveClassesTab('ended')} style={{ paddingBottom: 10 }}>
+                                   <Text style={{ fontSize: 15, fontWeight: "bold", color: liveClassesTab === 'ended' ? (darkMode ? "#fff" : "#000") : (darkMode ? "#888" : "#666") }}>
+                                     Ended Classes ({endedSessions.length})
+                                   </Text>
+                                   {liveClassesTab === 'ended' && <View style={{ height: 3, backgroundColor: "#c62828", position: "absolute", bottom: -1.5, left: 0, right: 0, borderRadius: 2 }} />}
+                                 </TouchableOpacity>
+                               </View>
+                               </ScrollView>
+
+                               {/* Tab Content */}
+                               <View style={{ width: "100%" }}>
+                                 {liveClassesTab === 'upcoming' && (
+                                   <View style={{ gap: 12 }}>
+                                     {upcomingSessions.length === 0 ? (
+                                       <Text style={{ color: darkMode ? "#777" : "#aaa", fontStyle: "italic", marginTop: 10 }}>No upcoming classes.</Text>
+                                     ) : (
+                                       upcomingSessions.map(s => renderLiveClassCard(s))
+                                     )}
+                                   </View>
+                                 )}
+
+                                 {liveClassesTab === 'live' && (
+                                   <View style={{ gap: 12 }}>
+                                     {onLiveSessions.length === 0 ? (
+                                       <Text style={{ color: darkMode ? "#777" : "#aaa", fontStyle: "italic", marginTop: 10 }}>No live classes currently.</Text>
+                                     ) : (
+                                       onLiveSessions.map(s => renderLiveClassCard(s))
+                                     )}
+                                   </View>
+                                 )}
+
+                                 {liveClassesTab === 'ended' && (
+                                   <View style={{ gap: 12 }}>
+                                     {endedSessions.length === 0 ? (
+                                       <Text style={{ color: darkMode ? "#777" : "#aaa", fontStyle: "italic", marginTop: 10 }}>No ended classes.</Text>
+                                     ) : (
+                                       <View style={{ gap: 12 }}>
+                                         {Array.from(endedCoursesMap.values()).map(courseNode => {
+                                           const isCourseExpanded = expandedLiveCourses[courseNode.id] !== false;
+                                           return (
+                                             <View key={courseNode.id} style={{ gap: 12 }}>
+                                               <TouchableOpacity 
+                                                 onPress={() => setExpandedLiveCourses(prev => ({ ...prev, [courseNode.id]: !isCourseExpanded }))}
+                                                 style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#1a1a1a" : "#eee", padding: 12, borderRadius: 8 }}
+                                               >
+                                                 <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#333" }}>📚 {courseNode.title}</Text>
+                                                 <Ionicons name={isCourseExpanded ? "chevron-up" : "chevron-down"} size={20} color={darkMode ? "#ccc" : "#666"} />
+                                               </TouchableOpacity>
+
+                                               {isCourseExpanded && (
+                                                 <View style={{ paddingLeft: 12, gap: 12, borderLeftWidth: 2, borderLeftColor: darkMode ? "#333" : "#ddd", marginLeft: 6 }}>
+                                                   {Array.from(courseNode.subjects.values()).map((subjectNode: any) => {
+                                                     const isSubjectExpanded = expandedLiveSubjects[subjectNode.id] !== false;
+                                                     return (
+                                                       <View key={subjectNode.id} style={{ gap: 12 }}>
+                                                         <TouchableOpacity 
+                                                           onPress={() => setExpandedLiveSubjects(prev => ({ ...prev, [subjectNode.id]: !isSubjectExpanded }))}
+                                                           style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#222" : "#f5f5f5", padding: 10, borderRadius: 8 }}
+                                                         >
+                                                           <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#ddd" : "#444" }}>📘 {subjectNode.title}</Text>
+                                                           <Ionicons name={isSubjectExpanded ? "chevron-up" : "chevron-down"} size={18} color={darkMode ? "#ccc" : "#666"} />
+                                                         </TouchableOpacity>
+
+                                                         {isSubjectExpanded && (
+                                                           <View style={{ paddingLeft: 12, paddingTop: 10 }}>
+                                                             <View style={{ gap: 12 }}>
+                                                               {Array.from(subjectNode.topics.values()).flatMap((topicNode: any) => 
+                                                                 topicNode.classes.map((cls: any) => (
+                                                                   <View key={cls.id || cls._id} style={{ padding: 8, backgroundColor: darkMode ? "#1c1c1c" : "#fff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#333" : "#ddd" }}>
+                                                                     <Text style={{ fontSize: 11, color: "#c62828", fontWeight: "bold", marginBottom: 4 }}>{topicNode.title}</Text>
+                                                                     {renderLiveClassCard(cls, topicNode.title)}
+                                                                   </View>
+                                                                 ))
+                                                               )}
+                                                             </View>
+                                                           </View>
+                                                         )}
+                                                       </View>
+                                                     );
+                                                   })}
+                                                 </View>
+                                               )}
+                                             </View>
+                                           );
+                                         })}
+
+                                         {endedUnassigned.length > 0 && (
+                                           <View style={{ gap: 12 }}>
+                                             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#1a1a1a" : "#eee", padding: 12, borderRadius: 8 }}>
+                                               <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#333" }}>❓ Unassigned Classes</Text>
+                                             </View>
+                                             <View style={{ gap: 12 }}>
+                                               {endedUnassigned.map((cls: any) => renderLiveClassCard(cls))}
+                                             </View>
+                                           </View>
+                                         )}
+                                       </View>
+                                     )}
+                                   </View>
+                                 )}
+                               </View>
+                             </View>
+                           );
+                        })()}
+
                       </View>
                     )}
                   </View>
                 )}
 
-                {/* ── LMS Recorded Classes Tab (Real API Data) ───────────────────── */}
+                {/* ── LMS Recorded Classes Tab                {/* ── LMS Recorded Classes Tab (Real API Data) ───────────────────── */}
                 {lmsSub === "recorded" && (
                   <View style={{ gap: 16 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -21280,7 +21733,9 @@ PASTED QUESTION PAPER TEXT:
                                 youtubeUrl: "",
                                 file: null,
                                 fileName: "",
-                                accessLevel: "premium"
+                                accessLevel: "premium",
+                                batchTargetType: "all",
+                                selectedBatchIds: []
                               });
                               setShowRecordedClassModal(true);
                               loadLmsLookups();
@@ -21326,7 +21781,9 @@ PASTED QUESTION PAPER TEXT:
                                 youtubeUrl: "",
                                 file: null,
                                 fileName: "",
-                                accessLevel: "premium"
+                                accessLevel: "premium",
+                                batchTargetType: "all",
+                                selectedBatchIds: []
                               });
                               setShowRecordedClassModal(true);
                               loadLmsLookups();
@@ -21338,89 +21795,319 @@ PASTED QUESTION PAPER TEXT:
                         )}
                       </View>
                     ) : (
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
-                        {lmsRecordedClasses.map((cls: any) => {
-                          const title = cls.title || cls.name || cls.topicName || "Recorded Lecture";
-                          const subject = cls.subjectName || cls.subject || "";
-                          const duration = cls.duration ? `${Math.floor(cls.duration / 60)}h ${cls.duration % 60}m` : cls.durationText || "";
-                          const recordedAt = cls.recordedAt || cls.updatedAt
-                            ? new Date((cls.recordedAt || cls.updatedAt)?._seconds ? (cls.recordedAt || cls.updatedAt)._seconds * 1000 : (cls.recordedAt || cls.updatedAt)).toLocaleDateString("en-IN")
-                            : "";
-                          const videoUrl = cls.recordingUrl || cls.playbackUrl || cls.videoUrl || null;
+                      <View style={{ gap: 16 }}>
+                        {(() => {
+                           const coursesMap = new Map();
+                           const unassigned: any[] = [];
+                           
+                           lmsRecordedClasses.forEach(cls => {
+                             const courseId = typeof cls.courseId === 'object' ? (cls.courseId?.id || cls.courseId?._id) : cls.courseId;
+                             const subjectId = typeof cls.subjectId === 'object' ? (cls.subjectId?.id || cls.subjectId?._id) : cls.subjectId;
+                             const topicId = typeof cls.topicId === 'object' ? (cls.topicId?.id || cls.topicId?._id) : cls.topicId;
+                         
+                             if (!courseId) {
+                               unassigned.push(cls);
+                               return;
+                             }
+                         
+                             if (!coursesMap.has(courseId)) {
+                               const c = lmsCourses.find((x:any) => x.id === courseId || x._id === courseId);
+                               coursesMap.set(courseId, {
+                                 id: courseId,
+                                 title: c?.title || c?.name || "Unknown Course",
+                                 subjects: new Map()
+                               });
+                             }
+                         
+                             const courseNode = coursesMap.get(courseId);
+                         
+                             let finalSubjectId = subjectId || "unassigned_subject";
+                             if (!courseNode.subjects.has(finalSubjectId)) {
+                               const s = lmsSubjects.find((x:any) => x.id === finalSubjectId || x._id === finalSubjectId);
+                               courseNode.subjects.set(finalSubjectId, {
+                                 id: finalSubjectId,
+                                 title: finalSubjectId === "unassigned_subject" ? "Unassigned Subject" : (s?.title || s?.name || "Unknown Subject"),
+                                 topics: new Map()
+                               });
+                             }
+                         
+                             const subjectNode = courseNode.subjects.get(finalSubjectId);
+                         
+                             let finalTopicId = topicId || "unassigned_topic";
+                             if (!subjectNode.topics.has(finalTopicId)) {
+                               const t = lmsTopics.find((x:any) => x.id === finalTopicId || x._id === finalTopicId);
+                               subjectNode.topics.set(finalTopicId, {
+                                 id: finalTopicId,
+                                 title: finalTopicId === "unassigned_topic" ? "Unassigned Topic" : (t?.title || t?.name || "Unknown Topic"),
+                                 classes: []
+                               });
+                             }
+                         
+                             subjectNode.topics.get(finalTopicId).classes.push(cls);
+                           });
 
-                          return (
-                            <View key={cls.id || cls._id} style={[styles.card, darkMode && styles.cardDark, { width: "100%", maxWidth: 380, flex: 1, minWidth: 280, padding: 0, overflow: "hidden", borderRadius: 12 }]}>
-                              <View style={{ width: "100%", height: 160, backgroundColor: "#111", justifyContent: "center", alignItems: "center", position: "relative" }}>
-                                <Ionicons name="play-circle" size={52} color="#c62828" />
-                                {duration ? (
-                                  <View style={{ position: "absolute", bottom: 8, right: 8, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                    <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>{duration}</Text>
-                                  </View>
-                                ) : null}
-                              </View>
-                              <View style={{ padding: 14, gap: 8 }}>
-                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
-                                  {subject ? (
-                                    <View style={{ backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-                                      <Text style={{ fontSize: 10, color: "#c62828", fontWeight: "bold" }}>{subject}</Text>
-                                    </View>
-                                  ) : <View />}
-                                  {isAdmin && (
-                                    <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                                      <TouchableOpacity
-                                        onPress={() => {
-                                          setEditingRecordedClass(cls);
-                                          setRecordedClassForm({
-                                            title: cls.title || cls.name || "",
-                                            description: cls.description || "",
-                                            courseId: "",
-                                            subjectId: "",
-                                            topicId: cls.topicId || "",
-                                            uploadMode: "link",
-                                            youtubeUrl: cls.recordingUrl || cls.playbackUrl || cls.videoUrl || "",
-                                            file: null,
-                                            fileName: "",
-                                            accessLevel: cls.accessLevel || "premium"
-                                          });
-                                          setShowRecordedClassModal(true);
-                                          loadLmsLookups();
-                                        }}
+                           const renderClassCard = (cls: any) => {
+                             const title = cls.title || cls.name || cls.topicName || "Recorded Lecture";
+                             const subject = cls.subjectName || cls.subject || "";
+                             const duration = cls.duration ? `${Math.floor(cls.duration / 60)}h ${cls.duration % 60}m` : cls.durationText || "";
+                             const recordedAt = cls.recordedAt || cls.updatedAt
+                               ? new Date((cls.recordedAt || cls.updatedAt)?._seconds ? (cls.recordedAt || cls.updatedAt)._seconds * 1000 : (cls.recordedAt || cls.updatedAt)).toLocaleDateString("en-IN")
+                               : "";
+                             const hasVideo = !!cls.encryptedVideoId || !!cls.recordingUrl || !!cls.playbackUrl || !!cls.videoUrl;
+
+                             return (
+                               <View key={cls.id || cls._id} style={[styles.card, darkMode && styles.cardDark, { width: "100%", maxWidth: 380, flex: 1, minWidth: 280, padding: 0, overflow: "hidden", borderRadius: 12 }]}>
+                                 <View style={{ width: "100%", height: 160, backgroundColor: "#111", justifyContent: "center", alignItems: "center", position: "relative" }}>
+                                   <Ionicons name="play-circle" size={52} color="#c62828" />
+                                   {duration ? (
+                                     <View style={{ position: "absolute", bottom: 8, right: 8, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                       <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>{duration}</Text>
+                                     </View>
+                                   ) : null}
+                                 </View>
+                                 <View style={{ padding: 14, gap: 8 }}>
+                                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+                                     {subject ? (
+                                       <View style={{ backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                         <Text style={{ fontSize: 10, color: "#c62828", fontWeight: "bold" }}>{subject}</Text>
+                                       </View>
+                                     ) : <View />}
+                                     {isAdmin && (
+                                       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                                         <TouchableOpacity
+                                           onPress={() => {
+                                             setEditingRecordedClass(cls);
+                                             setRecordedClassForm({
+                                               title: cls.title || cls.name || "",
+                                               description: cls.description || "",
+                                               courseId: typeof cls.courseId === "object" ? (cls.courseId?.id || cls.courseId?._id || "") : (cls.courseId || ""),
+                                               subjectId: typeof cls.subjectId === "object" ? (cls.subjectId?.id || cls.subjectId?._id || "") : (cls.subjectId || ""),
+                                               topicId: typeof cls.topicId === "object" ? (cls.topicId?.id || cls.topicId?._id || "") : (cls.topicId || ""),
+                                               uploadMode: "link",
+                                               youtubeUrl: cls.recordingUrl || cls.playbackUrl || cls.videoUrl || "",
+                                               file: null,
+                                               fileName: "",
+                                               accessLevel: cls.accessLevel || "premium",
+                                               batchTargetType: cls.accessLevel === "batch" ? (cls.targetBatchIds?.includes("all") ? "all" : cls.targetBatchIds?.includes("all_paid") ? "all_paid" : cls.targetBatchIds?.includes("all_free") ? "all_free" : "select") : "all",
+                                               selectedBatchIds: Array.isArray(cls.targetBatchIds) ? cls.targetBatchIds.filter((id: string) => !["all", "all_paid", "all_free"].includes(id)) : []
+                                             });
+                                             setShowRecordedClassModal(true);
+                                             loadLmsLookups();
+                                           }}
+                                         >
+                                           <Ionicons name="create-outline" size={16} color={darkMode ? "#aaa" : "#757575"} />
+                                         </TouchableOpacity>
+                                         <TouchableOpacity onPress={() => handleDeleteClass(cls.id || cls._id, false)}>
+                                           <Ionicons name="trash-outline" size={16} color="#c62828" />
+                                         </TouchableOpacity>
+                                       </View>
+                                     )}
+                                   </View>
+                                   <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", lineHeight: 18 }}>{title}</Text>
+                                   {recordedAt ? <Text style={{ fontSize: 11, color: darkMode ? "#777" : "#9e9e9e" }}>Recorded {recordedAt}</Text> : null}
+
+
+                                   {hasVideo ? (
+                                     // Check SACS access decision (student-only field from /students/me/lms-classes)
+                                     // For admin/staff, cls.access is undefined so we always show Watch Recording
+                                     cls.access && !cls.access.allowed ? (
+                                       cls.access.pendingRequest ? (
+                                         // State: pending SACS request
+                                         <View style={{ marginTop: 6, paddingVertical: 10, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#fff3e0", alignItems: "center", borderWidth: 1, borderColor: "#ff9800" }}>
+                                           <Text style={{ fontSize: 12, color: "#ff9800", fontWeight: "700" }}>⏳ Request Pending</Text>
+                                           <Text style={{ fontSize: 10, color: darkMode ? "#aaa" : "#666", marginTop: 2 }}>Admin review in progress</Text>
+                                         </View>
+                                       ) : requestingAccessIds.has(cls.id || cls._id) ? (
+                                         <View style={[styles.primaryBtn, { marginTop: 6, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", backgroundColor: "#9e9e9e" }]}>
+                                           <ActivityIndicator size="small" color="#fff" />
+                                           <Text style={styles.primaryBtnTxt}>Request Processing...</Text>
+                                         </View>
+                                       ) : (() => {
+                                         const classId = cls.id || cls._id;
+                                         const isFormOpen = accessRequestFormId === classId;
+                                         const isSubmitting = requestingAccessIds.has(classId);
+
+                                         if (isSubmitting) {
+                                           return (
+                                             <View style={[styles.primaryBtn, { marginTop: 6, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", backgroundColor: "#9e9e9e" }]}>
+                                               <ActivityIndicator size="small" color="#fff" />
+                                               <Text style={styles.primaryBtnTxt}>Submitting...</Text>
+                                             </View>
+                                           );
+                                         }
+
+                                         if (!isFormOpen) {
+                                           return (
+                                             <TouchableOpacity
+                                               onPress={() => {
+                                                 setAccessRequestFormId(classId);
+                                                 setAccessRequestReason("");
+                                               }}
+                                               style={[styles.primaryBtn, { marginTop: 6, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center", backgroundColor: "#1565c0" }]}
+                                             >
+                                               <Ionicons name="lock-open-outline" size={16} color="#fff" />
+                                               <Text style={styles.primaryBtnTxt}>Request Access</Text>
+                                             </TouchableOpacity>
+                                           );
+                                         }
+
+                                         return (
+                                           <View style={{ marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: darkMode ? "#1e1e1e" : "#f0f4ff", borderWidth: 1, borderColor: "#1565c0" }}>
+                                             <Text style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#90caf9" : "#1565c0", marginBottom: 6 }}>Why do you need access?</Text>
+                                             <TextInput
+                                               value={accessRequestReason}
+                                               onChangeText={setAccessRequestReason}
+                                               placeholder="e.g. Missed the live session, need for revision..."
+                                               placeholderTextColor={darkMode ? "#666" : "#9e9e9e"}
+                                               multiline
+                                               numberOfLines={3}
+                                               style={{
+                                                 backgroundColor: darkMode ? "#121212" : "#fff",
+                                                 borderRadius: 8,
+                                                 borderWidth: 1,
+                                                 borderColor: darkMode ? "#333" : "#ddd",
+                                                 padding: 10,
+                                                 fontSize: 13,
+                                                 color: darkMode ? "#eee" : "#212121",
+                                                 minHeight: 70,
+                                                 textAlignVertical: "top",
+                                               }}
+                                             />
+                                             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                                               <TouchableOpacity
+                                                 onPress={() => { setAccessRequestFormId(null); setAccessRequestReason(""); }}
+                                                 style={{ flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: "#bbb", alignItems: "center" }}
+                                               >
+                                                 <Text style={{ fontSize: 12, color: darkMode ? "#aaa" : "#555", fontWeight: "600" }}>Cancel</Text>
+                                               </TouchableOpacity>
+                                               <TouchableOpacity
+                                                 disabled={accessRequestReason.trim().length < 5}
+                                                 onPress={async () => {
+                                                   if (accessRequestReason.trim().length < 5) return;
+                                                   setRequestingAccessIds(prev => { const s = new Set(prev); s.add(classId); return s; });
+                                                   setAccessRequestFormId(null);
+                                                   try {
+                                                     await api.post(`/access-rules/student/entity/${classId}/request`, {
+                                                       entityType: "class",
+                                                       entityName: cls.title || cls.name || "Recorded Class",
+                                                       reason: "other",
+                                                       customReason: accessRequestReason.trim(),
+                                                     });
+                                                     alert("Access request submitted! Admin will review shortly.");
+                                                     setAccessRequestReason("");
+                                                     loadRecordedClasses();
+                                                   } catch (err: any) {
+                                                     const msg = (err as any).response?.data?.message || (err as any).message;
+                                                     if (msg?.includes("already") || msg?.includes("pending")) {
+                                                       alert("You already have a pending request for this class.");
+                                                     } else {
+                                                       alert("Failed to request access: " + msg);
+                                                     }
+                                                     setRequestingAccessIds(prev => { const s = new Set(prev); s.delete(classId); return s; });
+                                                   }
+                                                 }}
+                                                 style={{ flex: 2, paddingVertical: 8, borderRadius: 8, backgroundColor: accessRequestReason.trim().length < 5 ? "#9e9e9e" : "#1565c0", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+                                               >
+                                                 <Ionicons name="send-outline" size={14} color="#fff" />
+                                                 <Text style={{ fontSize: 12, color: "#fff", fontWeight: "700" }}>Send Request</Text>
+                                               </TouchableOpacity>
+                                             </View>
+                                           </View>
+                                         );
+                                       })()
+                                     ) : (
+                                       // State: access granted (or admin/staff with no access field) — existing Watch Recording
+                                       <TouchableOpacity
+                                         onPress={async () => {
+                                           try {
+                                             const res = await api.get(`/classes/${cls.id || cls._id}/access`);
+                                             const playerToken = res.playerToken || res.data?.playerToken;
+                                             const denialReason = res.denialReason || res.data?.denialReason || "Access Denied";
+                                             
+                                             if (playerToken) {
+                                               setVideoPlayerModal({ visible: true, playerToken });
+                                             } else {
+                                               alert("Failed to get player token: " + denialReason);
+                                             }
+                                           } catch (err: any) {
+                                             alert("Error accessing recording: " + (err.response?.data?.message || err.message));
+                                           }
+                                         }}
+                                         style={[styles.primaryBtn, { marginTop: 6, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center" }]}
+                                       >
+                                         <Ionicons name="play-circle-outline" size={16} color="#fff" />
+                                         <Text style={styles.primaryBtnTxt}>Watch Recording</Text>
+                                       </TouchableOpacity>
+                                     )
+                                   ) : (
+                                     <View style={{ marginTop: 6, paddingVertical: 8, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", alignItems: "center" }}>
+                                       <Text style={{ fontSize: 12, color: darkMode ? "#666" : "#bdbdbd" }}>Recording not uploaded yet</Text>
+                                     </View>
+                                   )}
+                                 </View>
+                               </View>
+                             );
+                           };
+
+                           return (
+                             <View style={{ gap: 24 }}>
+                               {Array.from(coursesMap.values()).map(courseNode => {
+                                 const isCourseExpanded = expandedCourses[courseNode.id] !== false; // Default true
+                                 return (
+                                   <View key={courseNode.id} style={{ gap: 12 }}>
+                                      <TouchableOpacity 
+                                        onPress={() => setExpandedCourses(prev => ({ ...prev, [courseNode.id]: !isCourseExpanded }))}
+                                        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#1a1a1a" : "#eee", padding: 12, borderRadius: 8 }}
                                       >
-                                        <Ionicons name="create-outline" size={16} color={darkMode ? "#aaa" : "#757575"} />
+                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#333" }}>📚 {courseNode.title}</Text>
+                                        <Ionicons name={isCourseExpanded ? "chevron-up" : "chevron-down"} size={20} color={darkMode ? "#ccc" : "#666"} />
                                       </TouchableOpacity>
-                                      <TouchableOpacity onPress={() => handleDeleteClass(cls.id || cls._id, false)}>
-                                        <Ionicons name="trash-outline" size={16} color="#c62828" />
-                                      </TouchableOpacity>
-                                    </View>
-                                  )}
-                                </View>
-                                <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", lineHeight: 18 }}>{title}</Text>
-                                {recordedAt ? <Text style={{ fontSize: 11, color: darkMode ? "#777" : "#9e9e9e" }}>Recorded {recordedAt}</Text> : null}
 
+                                      {isCourseExpanded && (
+                                        <View style={{ paddingLeft: 16, gap: 16, borderLeftWidth: 2, borderLeftColor: darkMode ? "#333" : "#ddd", marginLeft: 8 }}>
+                                          {Array.from(courseNode.subjects.values()).map((subjectNode: any) => {
+                                            const isSubjectExpanded = expandedSubjects[subjectNode.id] !== false; // Default true
+                                            return (
+                                              <View key={subjectNode.id} style={{ gap: 12 }}>
+                                                <TouchableOpacity 
+                                                  onPress={() => setExpandedSubjects(prev => ({ ...prev, [subjectNode.id]: !isSubjectExpanded }))}
+                                                  style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#222" : "#f5f5f5", padding: 10, borderRadius: 8 }}
+                                                >
+                                                  <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#ddd" : "#444" }}>📘 {subjectNode.title}</Text>
+                                                  <Ionicons name={isSubjectExpanded ? "chevron-up" : "chevron-down"} size={18} color={darkMode ? "#ccc" : "#666"} />
+                                                </TouchableOpacity>
 
-                                {videoUrl ? (
-                                  <TouchableOpacity
-                                    onPress={() => {
-                                      if (typeof window !== "undefined") {
-                                        window.open(videoUrl, "_blank");
-                                      } else {
-                                        setSelectedRecordedClass(cls);
-                                      }
-                                    }}
-                                    style={[styles.primaryBtn, { marginTop: 6, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center" }]}
-                                  >
-                                    <Ionicons name="play-circle-outline" size={16} color="#fff" />
-                                    <Text style={styles.primaryBtnTxt}>Watch Recording</Text>
-                                  </TouchableOpacity>
-                                ) : (
-                                  <View style={{ marginTop: 6, paddingVertical: 8, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", alignItems: "center" }}>
-                                    <Text style={{ fontSize: 12, color: darkMode ? "#666" : "#bdbdbd" }}>Recording not uploaded yet</Text>
-                                  </View>
-                                )}
-                              </View>
-                            </View>
-                          );
-                        })}
+                                                {isSubjectExpanded && (
+                                                  <View style={{ paddingLeft: 16, paddingTop: 12 }}>
+                                                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
+                                                      {Array.from(subjectNode.topics.values()).flatMap((topicNode: any) => 
+                                                        topicNode.classes.map((cls: any) => renderClassCard({ ...cls, topicTitle: topicNode.title }))
+                                                      )}
+                                                    </View>
+                                                  </View>
+                                                )}
+                                              </View>
+                                            );
+                                          })}
+                                        </View>
+                                      )}
+                                   </View>
+                                 );
+                               })}
+
+                               {unassigned.length > 0 && (
+                                 <View style={{ gap: 12 }}>
+                                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: darkMode ? "#1a1a1a" : "#eee", padding: 12, borderRadius: 8 }}>
+                                     <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#333" }}>❓ Unassigned Classes</Text>
+                                   </View>
+                                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
+                                     {unassigned.map((cls: any) => renderClassCard(cls))}
+                                   </View>
+                                 </View>
+                               )}
+                             </View>
+                           );
+                        })()}
                       </View>
                     )}
                   </View>
@@ -24213,6 +24900,34 @@ PASTED QUESTION PAPER TEXT:
             onClose={() => setSelectedResourceId(null)}
           />
         </Suspense>
+      )}
+
+      {/* Video Player Modal */}
+      {videoPlayerModal.visible && (
+        <Modal visible={true} transparent animationType="fade">
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ width: "95%", height: "90%", backgroundColor: "#000", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: darkMode ? "#333" : "#555" }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, backgroundColor: darkMode ? "#222" : "#333" }}>
+                <Text style={{ color: "#fff", fontWeight: "bold" }}>Video Player</Text>
+                <TouchableOpacity onPress={() => setVideoPlayerModal({ visible: false, playerToken: "" })}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              {Platform.OS === "web" ? (
+                <iframe
+                  src={`${getBaseUrl().replace(/\/api\/v1\/?$/, "")}/player/${encodeURIComponent(videoPlayerModal.playerToken)}`}
+                  style={{ flex: 1, width: "100%", height: "100%", border: "none", backgroundColor: "black" }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" }}>
+                  <Text style={{ color: "#fff" }}>Video player is only supported on web right now.</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
       )}
     </SafeAreaView>
   );

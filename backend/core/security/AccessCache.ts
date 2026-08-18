@@ -21,7 +21,7 @@ export interface AccessContext {
 
   // Resolved visibility profiles this student can access
   // Allows quick allow/deny without re-evaluating rules per module
-  accessProfiles: ('public' | 'premium' | 'batch' | 'selected')[];
+  accessProfiles: ('public' | 'batch' | 'selected')[];
 
   studentName: string;
   studentEmail: string;
@@ -79,7 +79,6 @@ async function buildAccessContext(userId: string, tenantId: string): Promise<Acc
   // Derive resolved access profiles
   const accessProfiles: AccessContext['accessProfiles'] = ['public'];
   if (batchIds.length > 0) {
-    accessProfiles.push('premium');
     accessProfiles.push('batch');
   }
 

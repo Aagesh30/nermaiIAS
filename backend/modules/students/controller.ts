@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { StudentService } from './service';
 import * as Validators from './validator';
+import { getMyLmsClasses, getMyLmsResources } from './lms-service';
 
 const studentService = new StudentService();
 
@@ -245,5 +246,25 @@ export const updatePaymentAcknowledgementStatus = async (req: Request, res: Resp
     const { userId } = req.user!;
     const result = await studentService.updatePaymentAcknowledgementStatus(acknowledgementId, status, userId);
     res.status(200).json({ status: 'success', data: result });
+  } catch (error) { next(error); }
+};
+
+// ─── Student LMS Discovery Handlers ───────────────────────────────────────────
+// These handlers are called ONLY by the student-specific LMS routes.
+// They do not replace or modify any existing admin/teacher handlers.
+
+export const getMyLmsClassesHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, tenantId } = req.user!;
+    const data = await getMyLmsClasses(userId, tenantId);
+    res.status(200).json({ status: 'success', data });
+  } catch (error) { next(error); }
+};
+
+export const getMyLmsResourcesHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, tenantId } = req.user!;
+    const data = await getMyLmsResources(userId, tenantId);
+    res.status(200).json({ status: 'success', data });
   } catch (error) { next(error); }
 };
