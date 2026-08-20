@@ -77,7 +77,9 @@ export class StudentController {
                 totalDays,
                 courseDuration,
                 modeOfPayment,
-                transactionId
+                transactionId,
+                batches,
+                batchModes
             } = req.body;
 
             if (!loginUsername || !loginPassword) {
@@ -114,6 +116,14 @@ export class StudentController {
             const id = randomUUID();
             const passwordHash = await bcrypt.hash(loginPassword, 12);
 
+            const finalBatches = Array.isArray(batches) ? batches : (batch ? [batch] : []);
+            const finalBatchModes = (batchModes && typeof batchModes === "object") ? batchModes : {};
+            finalBatches.forEach((bName: string) => {
+                if (!finalBatchModes[bName]) {
+                    finalBatchModes[bName] = [type || "offline"];
+                }
+            });
+
             const payload: any = {
                 id,
                 tenantId,
@@ -140,10 +150,12 @@ export class StudentController {
                 city: city || "",
                 state: state || "",
                 pincode: pincode || "",
-                batch: batch || "",
+                batches: finalBatches,
+                batchModes: finalBatchModes,
+                batch: finalBatches[0] || "",
                 course: course || "",
                 academicYear: academicYear || "",
-                type: type || "offline",
+                type: (finalBatches[0] && finalBatchModes[finalBatches[0]] && finalBatchModes[finalBatches[0]][0]) || type || "offline",
                 totalFees: totalFees !== undefined ? Number(totalFees) : 0,
                 feesPaid: feesPaid !== undefined ? Number(feesPaid) : 0,
                 joiningDate: joiningDate || "",
@@ -444,7 +456,9 @@ export class StudentController {
                 isProfileSubmitted,
                 profileSubmitCount,
                 modeOfPayment,
-                transactionId
+                transactionId,
+                batches,
+                batchModes
             } = req.body;
 
             const docRef = db.collection(COLLECTION).doc(id);
@@ -500,7 +514,21 @@ export class StudentController {
             if (city !== undefined) updateData.city = city;
             if (state !== undefined) updateData.state = state;
             if (pincode !== undefined) updateData.pincode = pincode;
-            if (batch !== undefined) updateData.batch = batch;
+            if (batches !== undefined) {
+                updateData.batches = Array.isArray(batches) ? batches : [];
+                updateData.batch = updateData.batches[0] || "";
+            }
+            if (batchModes !== undefined) {
+                updateData.batchModes = (batchModes && typeof batchModes === "object") ? batchModes : {};
+                const firstBatch = updateData.batch || doc.data()?.batch;
+                if (firstBatch && updateData.batchModes[firstBatch]) {
+                    updateData.type = updateData.batchModes[firstBatch][0] || "offline";
+                }
+            }
+            if (batch !== undefined && batches === undefined) {
+                updateData.batch = batch;
+                updateData.batches = [batch].filter(Boolean);
+            }
             if (course !== undefined) updateData.course = course;
             if (academicYear !== undefined) updateData.academicYear = academicYear;
             if (status !== undefined) updateData.status = status;
@@ -515,7 +543,13 @@ export class StudentController {
             if (previousSchool !== undefined) updateData.previousSchool = previousSchool;
             if (previousClass !== undefined) updateData.previousClass = previousClass;
             if (previousMarks !== undefined) updateData.previousMarks = previousMarks;
-            if (type !== undefined) updateData.type = type;
+            if (type !== undefined && batchModes === undefined) {
+                updateData.type = type;
+                const activeBatch = updateData.batch || doc.data()?.batch;
+                if (activeBatch) {
+                    updateData[`batchModes.${activeBatch}`] = [type];
+                }
+            }
             if (totalFees !== undefined) updateData.totalFees = Number(totalFees);
             if (feesPaid !== undefined) updateData.feesPaid = Number(feesPaid);
 

@@ -32,6 +32,9 @@ const sacsService = new AccessRulesService();
 interface StudentContext {
   batchIds: string[];          // resolved UUID batch IDs
   studentType: string;         // 'offline' | 'online' | 'recorded' | ''
+  studentTypes: string[];      // all allowed modes
+  batchModes: Record<string, string[]>; // batch name -> modes
+  batchNameMap: Record<string, string>; // batch UUID -> batch name
   studentId: string | null;    // doc ID in 'students' collection
 }
 
@@ -46,46 +49,75 @@ interface StudentContext {
  * name ('43') while classes use UUID doc IDs ('2a237617-...') in targetBatchIds.
  */
 async function resolveStudentContext(userId: string): Promise<StudentContext> {
-  const result: StudentContext = { batchIds: [], studentType: '', studentId: null };
+  const result: StudentContext = {
+    batchIds: [],
+    studentType: '',
+    studentTypes: [],
+    batchModes: {},
+    batchNameMap: {},
+    studentId: null
+  };
 
-  // ── Path 1: NEW-NERMAI programMemberships ──────────────────────────────────
-  const profileDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(userId).get();
-  if (profileDoc.exists) {
-    const profile = profileDoc.data() as IStudentProfile;
-    (profile.programMemberships || []).forEach((m) => {
-      if (m.status === 'active' && m.batchId) {
-        result.batchIds.push(m.batchId);
+  // Resolve legacy users -> students path to get the rich student details
+  const userDoc = await db.collection('users').doc(userId).get();
+  let studentData: any = null;
+  if (userDoc.exists) {
+    const userData = userDoc.data();
+    if (userData?.studentId) {
+      result.studentId = userData.studentId;
+      const sDoc = await db.collection('students').doc(userData.studentId).get();
+      if (sDoc.exists) {
+        studentData = sDoc.data();
       }
-    });
+    }
   }
 
-  // ── Path 2: Legacy fallback via users → students → batches ─────────────────
-  if (result.batchIds.length === 0) {
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (userDoc.exists) {
-      const userData = userDoc.data();
-      if (userData?.studentId) {
-        result.studentId = userData.studentId;
-        const sDoc = await db.collection('students').doc(userData.studentId).get();
-        if (sDoc.exists) {
-          const sData = sDoc.data()!;
-          result.studentType = sData.type || 'offline'; // default to offline for legacy
+  if (studentData) {
+    result.studentType = studentData.type || 'offline';
+    result.batchModes = studentData.batchModes || {};
+    
+    // Resolve multiple batches
+    const studentBatches: string[] = studentData.batches || (studentData.batch ? [studentData.batch] : []);
+    for (const bName of studentBatches) {
+      if (bName) {
+        const batchSnap = await db.collection('batches')
+          .where('batchName', '==', String(bName))
+          .where('isDeleted', '==', false)
+          .limit(1)
+          .get();
 
-          // sData.batch is the legacy human-readable batch name (e.g. '43')
-          // We must resolve it to the UUID doc ID used in classes.targetBatchIds
-          if (sData.batch) {
-            const batchSnap = await db.collection('batches')
-              .where('batchName', '==', String(sData.batch))
-              .where('isDeleted', '==', false)
-              .limit(1)
-              .get();
-
-            if (!batchSnap.empty) {
-              result.batchIds.push(batchSnap.docs[0].id);
-            }
-          }
+        if (!batchSnap.empty) {
+          const bId = batchSnap.docs[0].id;
+          result.batchIds.push(bId);
+          result.batchNameMap[bId] = bName;
         }
       }
+    }
+
+    // Resolve all modes/types
+    let allTypes: string[] = [];
+    Object.values(result.batchModes).forEach((modes: any) => {
+      if (Array.isArray(modes)) {
+        allTypes.push(...modes);
+      }
+    });
+    if (studentData.type) allTypes.push(studentData.type);
+    result.studentTypes = Array.from(new Set(allTypes)).filter(Boolean);
+  }
+
+  // Fallback to profile path if no batches resolved
+  if (result.batchIds.length === 0) {
+    const profileDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(userId).get();
+    if (profileDoc.exists) {
+      const profile = profileDoc.data() as IStudentProfile;
+      (profile.programMemberships || []).forEach((m) => {
+        if (m.status === 'active' && m.batchId) {
+          result.batchIds.push(m.batchId);
+          result.batchNameMap[m.batchId] = m.batchId; // fallback to ID as name
+        }
+      });
+      result.studentType = profile.status === 'active' ? 'online' : 'offline';
+      result.studentTypes = [result.studentType];
     }
   }
 
@@ -184,7 +216,17 @@ export async function getMyLmsClasses(userId: string, tenantId: string): Promise
       
       let isAllowed = lockStatus.decision.allowed;
       // Replicate old NERMAI constraint: Offline students MUST request access for recorded classes
-      if (ctx.studentType === 'offline' && !lockStatus.decision.hasTemporaryGrant) {
+      // BUT for hybrid mode: if they are online/recorded in the matched batch, they should get immediate access!
+      const matchedBatchId = targetBatchIds.find(bId => ctx.batchIds.includes(bId));
+      const matchedBatchName = matchedBatchId ? ctx.batchNameMap[matchedBatchId] : null;
+      const modesForThisBatch = matchedBatchName ? (ctx.batchModes[matchedBatchName] || []) : [];
+      
+      const hasOnlineAccessForThisBatch = modesForThisBatch.includes('online') || modesForThisBatch.includes('recorded');
+      const isPurelyOfflineForThisBatch = modesForThisBatch.includes('offline') && !hasOnlineAccessForThisBatch;
+      
+      const isOfflineLegacy = ctx.studentType === 'offline' && ctx.studentTypes.length === 0;
+
+      if ((isPurelyOfflineForThisBatch || (isOfflineLegacy && !hasOnlineAccessForThisBatch)) && !lockStatus.decision.hasTemporaryGrant) {
         isAllowed = false;
       }
 

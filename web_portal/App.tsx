@@ -2111,7 +2111,7 @@ function MainApp() {
   const [submittingAdmission, setSubmittingAdmission] = useState(false);
   const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "", preferredMode: "" });
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", content: "", priority: "normal", targetDashboard: "all", targetBatch: "" });
-  const [newStudent, setNewStudent] = useState({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "" });
+  const [newStudent, setNewStudent] = useState({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [] as string[], batchModes: {} as Record<string, string[]> });
   const [editingStudent, setEditingStudent] = useState<any | null>(null);
   const [feeEditStudent, setFeeEditStudent] = useState<any | null>(null);
   const [feeEditModeOfPayment, setFeeEditModeOfPayment] = useState<string>("cash");
@@ -2297,6 +2297,7 @@ function MainApp() {
   const [password, setPassword] = useState("");
   const [studentOldPassword, setStudentOldPassword] = useState("");
   const [studentNewPassword, setStudentNewPassword] = useState("");
+  const [profileFormStep, setProfileFormStep] = useState(1);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [resultsSubjectFilter, setResultsSubjectFilter] = useState("");
   const [resultsTopicFilter, setResultsTopicFilter] = useState("");
@@ -2384,10 +2385,70 @@ function MainApp() {
   const [noticeTab, setNoticeTab] = useState<"notices" | "notifications">("notices");
   const [searchNoticeQuery, setSearchNoticeQuery] = useState("");
   const [searchNoticeDate, setSearchNoticeDate] = useState("");
+  const [noticeTick, setNoticeTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNoticeTick(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const calculateExpiry = (timerOption, customExpiresAt) => {
+    if (!timerOption || timerOption === "none") return null;
+    const now = new Date();
+    if (timerOption === "24h") {
+      return new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "3d") {
+      return new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "7d") {
+      return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "10d") {
+      return new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "15d") {
+      return new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "20d") {
+      return new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "30d") {
+      return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (timerOption === "custom" && customExpiresAt) {
+      const parsed = new Date(customExpiresAt.replace(" ", "T"));
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+    return null;
+  };
+
+  const formatCountdown = (expiresAtStr) => {
+    if (!expiresAtStr) return null;
+    const expiry = new Date(expiresAtStr).getTime();
+    const diff = expiry - Date.now();
+    if (diff <= 0) return "Expired";
+    
+    const seconds = Math.floor((diff / 1000) % 60);
+    const minutes = Math.floor((diff / (1000 * 60)) % 60);
+    const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    let parts = [];
+    if (days > 0) parts.push(days + "d");
+    if (hours > 0 || days > 0) parts.push(hours + "h");
+    if (minutes > 0 || hours > 0 || days > 0) parts.push(minutes + "m");
+    parts.push(seconds + "s");
+    
+    return parts.join(" ");
+  };
   const [pdfFilename, setPdfFilename] = useState("");
   const [akFilename, setAkFilename] = useState("");
   const [newNotification, setNewNotification] = useState({ title: "", message: "", targetGroup: "all", targetBatch: "" });
-  const [newNotice, setNewNotice] = useState({ title: "", content: "", priority: "normal", publishedAt: "", targetDashboard: "all", targetBatch: "" });
+  const [newNotice, setNewNotice] = useState({ title: "", content: "", priority: "normal", publishedAt: "", targetDashboard: "all", targetBatch: "", timerOption: "none", expiresAt: "" });
   const [showTargetDropdown, setShowTargetDropdown] = useState(false);
   const [showBatchDropdown, setShowBatchDropdown] = useState(false);
   const [selectedDirectoryStudent, setSelectedDirectoryStudent] = useState<any | null>(null);
@@ -2407,7 +2468,7 @@ function MainApp() {
     const end = new Date(start.getTime() + 60 * 60 * 1000);
     const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0") + "T" + String(start.getHours()).padStart(2, "0") + ":" + String(Math.floor(start.getMinutes() / 5) * 5).padStart(2, "0");
     const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
-    return { title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" };
+    return { title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online", allowOfflineDirectly: false };
   });
   const [pdfBase64, setPdfBase64] = useState("");
   const [akBase64, setAkBase64] = useState("");
@@ -2541,6 +2602,9 @@ function MainApp() {
     setTestSidebarCollapsed(true);
   };
   const [testSub, setTestSub] = useState(initialNav.testSubVal);
+  const [testFilterQuery, setTestFilterQuery] = useState("");
+  const [testFilterCategory, setTestFilterCategory] = useState("all");
+  const [testFilterStatus, setTestFilterStatus] = useState("all");
 
   // Sync navigation state to URL hash & localStorage on tab or sub-tab change
   useEffect(() => {
@@ -6014,6 +6078,7 @@ function MainApp() {
         targetAudience: newPdfTest.targetAudience || "all",
         targetBatch: newPdfTest.targetAudience === "batch" ? newPdfTest.targetBatch || "" : "",
         requireFeedback: newPdfTest.requireFeedback,
+        allowOfflineDirectly: !!newPdfTest.allowOfflineDirectly,
         testType: newPdfTest.testType || "mock",
         subject: newPdfTest.subject || "",
         topic: newPdfTest.topic || "",
@@ -6204,6 +6269,8 @@ function MainApp() {
       content: notice.content,
       priority: notice.priority || "normal",
       publishedAt: notice.publishedAt ? notice.publishedAt.split("T")[0] : new Date().toISOString().split("T")[0],
+      expiresAt: notice.expiresAt ? notice.expiresAt.replace("T", " ").substring(0, 16) : "",
+      timerOption: notice.timerOption || "none",
       // Preserve targeting so edits don't silently reset audience
       targetDashboard: notice.targetDashboard || "all",
       targetBatch: notice.targetBatch || ""
@@ -6219,6 +6286,14 @@ function MainApp() {
       Alert.alert("Validation Error", "Please select a target batch.");
       return;
     }
+    let expiresAt = null;
+    if (editingNotice.timerOption && editingNotice.timerOption !== "none") {
+      expiresAt = calculateExpiry(editingNotice.timerOption, editingNotice.expiresAt);
+      if (editingNotice.timerOption === "custom" && !expiresAt) {
+        Alert.alert("Validation Error", "Please enter a valid expiry date format (YYYY-MM-DD HH:MM).");
+        return;
+      }
+    }
     setIsPublishingNotice(true);
     try {
       await api.put(`/announcement/${editingNoticeId}`, {
@@ -6226,6 +6301,8 @@ function MainApp() {
         content: editingNotice.content,
         priority: editingNotice.priority,
         publishedAt: new Date(editingNotice.publishedAt).toISOString(),
+        expiresAt,
+        timerOption: editingNotice.timerOption || "none",
         targetDashboard: editingNotice.targetDashboard || "all",
         targetBatch: editingNotice.targetBatch || null,
         updatedBy: user?.name || "admin"
@@ -6285,31 +6362,41 @@ function MainApp() {
   };
 
   const createStudentRecord = async () => {
+    const roll = (newStudent.loginUsername || "").trim();
+    const phone = (newStudent.phone || "").trim();
+    const generatedPassword = roll + (phone.length >= 4 ? phone.slice(-4) : phone);
+    
+    const studentToSave = {
+      ...newStudent,
+      rollNumber: roll,
+      loginPassword: generatedPassword
+    };
+
+    const hasBatches = studentToSave.batches && studentToSave.batches.length > 0;
     if (
-      !newStudent.loginUsername ||
-      !newStudent.loginPassword ||
-      !newStudent.batch ||
-      !newStudent.type ||
-      !newStudent.totalFees ||
-      !newStudent.feesPaid ||
-      !newStudent.courseDuration ||
-      !newStudent.joiningDate ||
-      !newStudent.modeOfPayment
+      !studentToSave.loginUsername ||
+      !studentToSave.phone ||
+      !hasBatches ||
+      !studentToSave.totalFees ||
+      !studentToSave.feesPaid ||
+      !studentToSave.courseDuration ||
+      !studentToSave.joiningDate ||
+      !studentToSave.modeOfPayment
     ) {
-      Alert.alert("Error", "All fields are required");
+      Alert.alert("Error", "All fields are required (including Username/Roll Number and Phone Number for password generation)");
       return;
     }
-    const total = Number(newStudent.totalFees) || 0;
-    const paid = Number(newStudent.feesPaid) || 0;
+    const total = Number(studentToSave.totalFees) || 0;
+    const paid = Number(studentToSave.feesPaid) || 0;
     if (paid > total) {
       Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
     setIsSavingStudent(true);
     try {
-      await api.post("/erp/student", { ...newStudent, profileEditPermission: true, isProfileSubmitted: false, createdBy: user.name });
+      await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user.name });
       Alert.alert("Success", "Student created successfully.");
-      setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "" });
+      setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
       loadStudents();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save student profile.");
@@ -6504,31 +6591,54 @@ function MainApp() {
     setShowConfirmDocModal(true);
   };
 
+
+  const validatePage1 = () => {
+    if (!studentOldPassword || !studentNewPassword) {
+      Alert.alert("Validation Error", "Please fill in both old and new passwords.");
+      return false;
+    }
+    if (studentOldPassword === studentNewPassword) {
+      Alert.alert("Validation Error", "New password cannot be the same as old password.");
+      return false;
+    }
+    if (!profileForm.name || !profileForm.initial || !profileForm.dob || !profileForm.address ||
+        !profileForm.gender || !profileForm.community || !profileForm.studentOccupation ||
+        !profileForm.altPhone || !profileForm.email || !profileForm.qualification ||
+        !profileForm.college || !profileForm.referralSource ||
+        !(profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency)) {
+      setShowValidationErrors(true);
+      Alert.alert("Validation Error", "Please fill all required personal details marked with *.");
+      return false;
+    }
+    return true;
+  };
+
+  const validatePage2 = () => {
+    if (!profileForm.fatherName || !profileForm.occupation) {
+      setShowValidationErrors(true);
+      Alert.alert("Validation Error", "Please fill in Father's Name and Father's Occupation.");
+      return false;
+    }
+    return true;
+  };
+
   const submitProfileCompletion = async () => {
     const myStudent = getLoggedInStudent(user, students);
-    // Check if student has already submitted once (count >= 1) and no re-enable permission
     const rawCount = myStudent?.profileSubmitCount;
     const count = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
     if (count >= 1 && !myStudent?.profileEditPermission) {
       Alert.alert("Already Submitted", "Your profile has already been submitted. If you need to make changes, please contact the administrator.");
       return;
     }
-    if (!profileForm.name || !profileForm.initial || !profileForm.dob || !profileForm.address ||
-      !profileForm.gender || !profileForm.community || !profileForm.fatherName || !profileForm.occupation ||
-      !profileForm.studentOccupation || !profileForm.altPhone || !profileForm.email ||
-      !profileForm.qualification || !profileForm.college || !profileForm.referralSource ||
-      !(profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency) ||
-      !studentOldPassword || !studentNewPassword) {
-      setShowValidationErrors(true);
-      Alert.alert("Error", "All fields marked with * are required (including old/new passwords).");
+    if (!validatePage1() || !validatePage2()) return;
+    if (!profileForm.passportPhotoBase64) {
+      Alert.alert("Validation Error", "Please upload a passport size photo.");
       return;
     }
-    if (profileForm.photoIdBase64 && !profileForm.photoIdType) {
-      Alert.alert("Error", "Please select and confirm what document you uploaded for Photo ID.");
-      setShowDocModal(true);
+    if (!profileForm.photoIdBase64 || !profileForm.photoIdType || !profileForm.photoIdConfirmed) {
+      Alert.alert("Validation Error", "Please upload a valid Photo ID and confirm its category.");
       return;
     }
-    // Validation successful -> open custom review modal instead of native confirm
     setShowProfileReviewModal(true);
   };
 
@@ -6568,6 +6678,7 @@ function MainApp() {
       setIsSubmittingProfile(false);
       setShowProfileReviewModal(false);
       setProfileForm({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
+      setProfileFormStep(1);
       setStudentOldPassword("");
       setStudentNewPassword("");
       setShowValidationErrors(false);
@@ -6641,10 +6752,10 @@ function MainApp() {
 
   const updateStudentRecord = async () => {
     if (!editingStudent) return;
+    const hasBatches = editingStudent.batches && editingStudent.batches.length > 0;
     if (
       !editingStudent.loginUsername ||
-      !editingStudent.batch ||
-      !editingStudent.type ||
+      !hasBatches ||
       !editingStudent.totalFees ||
       !editingStudent.feesPaid ||
       !editingStudent.joiningDate
@@ -13391,7 +13502,16 @@ function MainApp() {
                     <View style={{ marginTop: 5 }}>
                       <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 10 }]}>Official Announcements & Notice Board</Text>
                       {(() => {
-                        const filtered = announcements.filter((n: any) => !((n.title || "").includes("Fee Payment Alert") || (n.content || "").toLowerCase().includes("pay your pending") || (n.content || "").toLowerCase().includes("pending tuition fee")));
+                        // Filter out expired announcements dynamically
+                        const filtered = announcements.filter((n: any) => {
+                          const isFeeAlert = (n.title || "").includes("Fee Payment Alert") || (n.content || "").toLowerCase().includes("pay your pending") || (n.content || "").toLowerCase().includes("pending tuition fee");
+                          if (isFeeAlert) return false;
+                          if (n.expiresAt) {
+                            const exp = new Date(n.expiresAt).getTime();
+                            if (!isNaN(exp) && exp < Date.now()) return false;
+                          }
+                          return true;
+                        });
                         if (filtered.length === 0) {
                           return (
                             <View style={[styles.card, darkMode && styles.cardDark, { padding: 15, alignItems: "center" }]}>
@@ -13400,7 +13520,9 @@ function MainApp() {
                             </View>
                           );
                         }
-                        return filtered.map((n: any) => (
+                        return filtered.map((n: any) => {
+                          const expiryText = n.expiresAt ? formatCountdown(n.expiresAt) : null;
+                          return (
                           <View
                             key={n.id}
                             style={[
@@ -13429,13 +13551,22 @@ function MainApp() {
                             </View>
                             <Text style={{ fontWeight: "bold", color: darkMode ? "#ffffff" : "#212121", fontSize: 14, marginBottom: 4 }}>{n.title}</Text>
                             <Text style={{ color: darkMode ? "#cccccc" : "#424242", fontSize: 13, lineHeight: 20 }}>{n.content}</Text>
-                            {n.targetBatch && (
-                              <View style={{ marginTop: 8, alignSelf: "flex-start", backgroundColor: n.priority === "high" ? "#ffebee" : "#e3f2fd", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
-                                <Text style={{ fontSize: 10, fontWeight: "bold", color: n.priority === "high" ? "#c62828" : "#1976d2" }}>Batch: {n.targetBatch}</Text>
-                              </View>
-                            )}
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                              {n.targetBatch && (
+                                <View style={{ alignSelf: "flex-start", backgroundColor: n.priority === "high" ? "#ffebee" : "#e3f2fd", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                  <Text style={{ fontSize: 10, fontWeight: "bold", color: n.priority === "high" ? "#c62828" : "#1976d2" }}>Batch: {n.targetBatch}</Text>
+                                </View>
+                              )}
+                              {expiryText && (
+                                <View style={{ alignSelf: "flex-start", backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 3 }}>
+                                  <Ionicons name="time-outline" size={10} color="#c62828" />
+                                  <Text style={{ fontSize: 10, fontWeight: "bold", color: "#c62828" }}>Expires in: {expiryText}</Text>
+                                </View>
+                              )}
+                            </View>
                           </View>
-                        ));
+                          );
+                        });
                       })()}
                     </View>
 
@@ -13833,34 +13964,91 @@ function MainApp() {
                 <ScrollView style={[styles.body, { paddingTop: (isMobile && testSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80 }}>
 
                   {testSub === "available" && (() => {
-                    // Live tests: started (startTime <= now) and not yet ended (endTime > now, or no endTime)
-                    // Use IST-aware parseTestTimeMs to correctly handle dates stored without timezone
                     const now = nowTick;
-                    const liveTests = tests.filter((t: any) => {
+                    
+                    // Filter tests based on search and category
+                    const filteredTests = tests.filter((t: any) => {
+                      const q = testFilterQuery.toLowerCase().trim();
+                      if (q && !t.title.toLowerCase().includes(q)) return false;
+                      
+                      const cat = testFilterCategory;
+                      if (cat !== "all" && (t.testType || "daily") !== cat) return false;
+                      
+                      return true;
+                    });
+
+                    const liveTests = filteredTests.filter((t: any) => {
                       const startMs = t.startTime ? parseTestTimeMs(t.startTime) : 0;
                       const endMs = t.endTime ? parseTestTimeMs(t.endTime) : Infinity;
                       if (startMs && now < startMs) return false; // not started yet
                       if (endMs !== Infinity && now > endMs) return false; // already ended
                       return true;
                     });
-                    const scheduledTests = tests.filter((t: any) => {
+                    const scheduledTests = filteredTests.filter((t: any) => {
                       const startMs = t.startTime ? parseTestTimeMs(t.startTime) : 0;
                       return startMs && now < startMs;
                     });
-                    // Past/expired tests for Study Mode (students only)
-                    const pastTests = !isAdmin ? tests.filter((t: any) => {
+                    const pastTests = !isAdmin ? filteredTests.filter((t: any) => {
                       const endMs = t.endTime ? parseTestTimeMs(t.endTime) : 0;
                       return endMs > 0 && now > endMs;
                     }) : [];
 
 
+                    const showLive = testFilterStatus === "all" || testFilterStatus === "live";
+                    const showScheduled = testFilterStatus === "all" || testFilterStatus === "scheduled";
+                    const showPast = testFilterStatus === "all" || testFilterStatus === "past";
+
                     return (
                       <View style={{ gap: 12 }}>
+                        {/* Search & Filter Options Bar */}
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 12, marginBottom: 5 }]}>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#fff" : "#2e7d32", marginBottom: 8 }}>🔍 Search & Filter Tests</Text>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                            <TextInput
+                              style={[styles.input, { flex: 2, minWidth: 150, marginBottom: 0 }]}
+                              placeholder="Search by test title..."
+                              placeholderTextColor="#999"
+                              value={testFilterQuery}
+                              onChangeText={setTestFilterQuery}
+                            />
+                            
+                            <select
+                              value={testFilterCategory}
+                              onChange={e => setTestFilterCategory(e.target.value)}
+                              style={{
+                                flex: 1, minWidth: 120, height: 38, borderRadius: 8, padding: 8,
+                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
+                                border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"), outline: "none", fontSize: 13
+                              }}
+                            >
+                              <option value="all">All Categories</option>
+                              <option value="daily">📅 Daily Tests</option>
+                              <option value="weekly">📆 Weekly Tests</option>
+                              <option value="mock">🏆 Mock Tests</option>
+                            </select>
+
+                            <select
+                              value={testFilterStatus}
+                              onChange={e => setTestFilterStatus(e.target.value)}
+                              style={{
+                                flex: 1, minWidth: 120, height: 38, borderRadius: 8, padding: 8,
+                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
+                                border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"), outline: "none", fontSize: 13
+                              }}
+                            >
+                              <option value="all">All Statuses</option>
+                              <option value="live">🟢 Live Tests</option>
+                              <option value="scheduled">⏰ Upcoming Tests</option>
+                              {!isAdmin && <option value="past">📚 Past / Study Mode</option>}
+                            </select>
+                          </View>
+                        </View>
+
                         {testsLoading || isInitialLoading ? (
                           <RNCardGridSkeleton count={4} darkMode={darkMode} />
                         ) : (
                           <>
-                            {liveTests.length === 0 && scheduledTests.length === 0 && (
+                            {(!showLive || liveTests.length === 0) && (!showScheduled || scheduledTests.length === 0) && (!showPast || pastTests.length === 0) && (
                               <View style={styles.emptyContainer}>
                                 <Ionicons name="document-text-outline" size={40} color="#757575" />
                                 <Text style={styles.emptyText}>No mock tests available right now.</Text>
@@ -13964,7 +14152,7 @@ function MainApp() {
                             )}
 
                             {/* LIVE TESTS */}
-                            {liveTests.length > 0 && (
+                            {showLive && liveTests.length > 0 && (
                               <>
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
                                   <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#2e7d32" }} />
@@ -13981,14 +14169,24 @@ function MainApp() {
                                     : null;
 
                                   const myStudent = getLoggedInStudent(user, students);
-                                  const isOfflineStudent = !isAdmin && (
-                                    (myStudent?.type || "").toLowerCase() === "offline" ||
-                                    (myStudent?.mode || "").toLowerCase() === "offline" ||
-                                    (myStudent?.admissionType || "").toLowerCase() === "offline" ||
-                                    myStudent?.isOffline === true
+                                  const targetBatchName = t.targetBatch;
+                                  const targetModes = targetBatchName && myStudent?.batchModes ? (myStudent.batchModes[targetBatchName] || []) : [];
+                                  
+                                  const isOfflineForThisTest = !isAdmin && (
+                                    targetModes.length > 0 
+                                      ? (targetModes.includes("offline") && !targetModes.includes("online") && !targetModes.includes("recorded"))
+                                      : (
+                                          (myStudent?.type || "").toLowerCase() === "offline" ||
+                                          (myStudent?.mode || "").toLowerCase() === "offline" ||
+                                          (myStudent?.admissionType || "").toLowerCase() === "offline" ||
+                                          myStudent?.isOffline === true
+                                        )
                                   );
+                                  
+                                  const bypassOfflineRequest = !!t.allowOfflineDirectly;
+                                  const requiresPermissionRequest = isOfflineForThisTest && !bypassOfflineRequest;
 
-                                  const req = isOfflineStudent
+                                  const req = requiresPermissionRequest
                                     ? offlineTestRequests.find((r: any) => r.testId === t.id && (r.studentId === myStudent?.id || r.rollNumber === myStudent?.rollNumber || r.username === user?.username))
                                     : null;
 
@@ -14040,7 +14238,7 @@ function MainApp() {
                                             <Ionicons name="trash-outline" size={20} color="#c62828" />
                                           </TouchableOpacity>
                                         </View>
-                                      ) : isOfflineStudent && statusInfo.status !== "completed" && req?.status !== "approved" ? (
+                                      ) : requiresPermissionRequest && statusInfo.status !== "completed" && req?.status !== "approved" ? (
                                         req?.status === "pending" ? (
                                           <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: "#fff3e0", borderWidth: 1, borderColor: "#ffe0b2", flexDirection: "row", alignItems: "center", gap: 8 }}>
                                             <ActivityIndicator size="small" color="#e65100" />
@@ -14097,7 +14295,7 @@ function MainApp() {
                             )}
 
                             {/* UPCOMING / SCHEDULED TESTS */}
-                            {scheduledTests.length > 0 && (
+                            {showScheduled && scheduledTests.length > 0 && (
                               <>
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 2 }}>
                                   <Ionicons name="time-outline" size={14} color="#f57c00" />
@@ -14813,6 +15011,33 @@ PASTED QUESTION PAPER TEXT:
                               </View>
                             )}
                           </View>
+
+                          {/* Offline Student Settings */}
+                          {newPdfTest.targetAudience === "batch" && (
+                            <View style={{ backgroundColor: darkMode ? "#1a2a2a" : "#e8f5e9", padding: 12, borderRadius: 10, marginBottom: 15, borderLeftWidth: 3, borderLeftColor: "#2e7d32", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                              <View style={{ flex: 1, marginRight: 10 }}>
+                                <Text style={{ fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32", fontSize: 11, marginBottom: 4 }}>OFFLINE STUDENT TEST ACCESS</Text>
+                                <Text style={{ fontSize: 10, color: darkMode ? "#bbb" : "#666" }}>Directly allow offline students in this batch to write the test without needing permission requests</Text>
+                              </View>
+                              <TouchableOpacity
+                                onPress={() => setNewPdfTest({ ...newPdfTest, allowOfflineDirectly: !newPdfTest.allowOfflineDirectly })}
+                                style={{
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 20,
+                                  backgroundColor: newPdfTest.allowOfflineDirectly ? "#2e7d32" : (darkMode ? "#333" : "#ddd"),
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 4
+                                }}
+                              >
+                                <Ionicons name={newPdfTest.allowOfflineDirectly ? "checkbox" : "square-outline"} size={14} color={newPdfTest.allowOfflineDirectly ? "#fff" : (darkMode ? "#9e9e9e" : "#555")} />
+                                <Text style={{ color: newPdfTest.allowOfflineDirectly ? "#fff" : (darkMode ? "#aaa" : "#555"), fontWeight: "bold", fontSize: 10 }}>
+                                  {newPdfTest.allowOfflineDirectly ? "Allowed" : "Restricted"}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
 
                           {/* Feedback Settings */}
                           <View style={{ backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5", padding: 12, borderRadius: 10, marginBottom: 15, borderLeftWidth: 3, borderLeftColor: "#e65100", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -15971,47 +16196,112 @@ PASTED QUESTION PAPER TEXT:
                                 <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={editingStudent.phone} onChangeText={p => setEditingStudent({ ...editingStudent, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
 
                                 {/* Batch & Course */}
-                                <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 10, fontSize: 13 }}>Batch & Course</Text>
-                                {batches.length === 0 ? (
-                                  <View style={{ backgroundColor: "#fff3e0", padding: 10, borderRadius: 8, marginBottom: 8 }}>
-                                    <Text style={{ color: "#e65100", fontSize: 12 }}> No batches found.</Text>
-                                  </View>
-                                ) : (
-                                  <>
-                                    <View style={{ backgroundColor: "#f9f9f9", borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0", marginBottom: 8, overflow: "hidden" }}>
-                                      <Text style={{ padding: 8, color: "#999", fontSize: 12, borderBottomWidth: 1, borderColor: "#e0e0e0" }}>Select Batch *</Text>
-                                      {batches.map(b => (
-                                        <TouchableOpacity
-                                          key={b.id}
-                                          onPress={() => setEditingStudent({ ...editingStudent, batch: b.batchName, course: b.course })}
-                                          style={{ flexDirection: "row", alignItems: "center", padding: 10, backgroundColor: editingStudent.batch === b.batchName ? "#e3f2fd" : "transparent", borderBottomWidth: 1, borderColor: "#f0f0f0" }}
-                                        >
-                                          <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: editingStudent.batch === b.batchName ? "#0288d1" : "#bbb", backgroundColor: editingStudent.batch === b.batchName ? "#0288d1" : "transparent", marginRight: 10 }} />
-                                          <Text style={{ color: "#212121", fontWeight: editingStudent.batch === b.batchName ? "bold" : "normal" }}>{b.batchName}</Text>
-                                          <Text style={{ color: "#757575", fontSize: 12, marginLeft: 8 }}>— {b.course}</Text>
-                                        </TouchableOpacity>
-                                      ))}
-                                    </View>
-                                    {editingStudent.course !== "" && editingStudent.course !== undefined && (
-                                      <View style={{ backgroundColor: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 8 }}>
-                                        <Text style={{ color: "#2e7d32", fontSize: 12 }}>Course auto-selected: <Text style={{ fontWeight: "bold" }}>{editingStudent.course}</Text></Text>
-                                      </View>
-                                    )}
-                                  </>
-                                )}
-                                {/* Enrollment Type */}
-                                <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Enrollment Type</Text>
-                                <View style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
-                                  {["offline", "online", "recorded"].map(t => (
-                                    <TouchableOpacity
-                                      key={t}
-                                      onPress={() => setEditingStudent({ ...editingStudent, type: t })}
-                                      style={{ flex: 1, padding: 10, borderRadius: 8, borderWidth: 2, borderColor: editingStudent.type === t ? "#0288d1" : "#e0e0e0", backgroundColor: editingStudent.type === t ? "#e3f2fd" : "#f9f9f9", alignItems: "center" }}
-                                    >
-                                      <Text style={{ color: editingStudent.type === t ? "#0288d1" : "#757575", fontWeight: editingStudent.type === t ? "bold" : "normal", textTransform: "capitalize" }}>{t === "offline" ? "Offline" : t === "online" ? "Online" : "Recorded"}</Text>
-                                    </TouchableOpacity>
-                                  ))}
-                                </View>
+                                <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 10, fontSize: 13 }}>Batches & Class Modes *</Text>
+                                                                 {batches.length === 0 ? (
+                                   <View style={{ backgroundColor: "#fff3e0", padding: 10, borderRadius: 8, marginBottom: 8 }}>
+                                     <Text style={{ color: "#e65100", fontSize: 12 }}> No batches found.</Text>
+                                   </View>
+                                 ) : (
+                                   <>
+                                     <View style={{ backgroundColor: "#f9f9f9", borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0", marginBottom: 8, overflow: "hidden" }}>
+                                       <Text style={{ padding: 8, color: "#999", fontSize: 12, borderBottomWidth: 1, borderColor: "#e0e0e0" }}>Select Batches & Class Modes *</Text>
+                                       {batches.map(b => {
+                                         const isSelected = (editingStudent.batches || []).includes(b.batchName);
+                                         const modes = (editingStudent.batchModes || {})[b.batchName] || [];
+                                         return (
+                                           <View key={b.id} style={{ borderBottomWidth: 1, borderColor: "#f0f0f0", padding: 10, backgroundColor: isSelected ? "#f0f8ff" : "transparent" }}>
+                                             <TouchableOpacity
+                                               onPress={() => {
+                                                 const isSel = (editingStudent.batches || []).includes(b.batchName);
+                                                 let updatedBatches = isSel 
+                                                   ? (editingStudent.batches || []).filter(name => name !== b.batchName)
+                                                   : [...(editingStudent.batches || []), b.batchName];
+                                                 
+                                                 let updatedModes = { ...(editingStudent.batchModes || {}) };
+                                                 if (isSel) {
+                                                   delete updatedModes[b.batchName];
+                                                 } else {
+                                                   updatedModes[b.batchName] = ["offline"]; // default mode
+                                                 }
+                                                 
+                                                 setEditingStudent({
+                                                   ...editingStudent,
+                                                   batches: updatedBatches,
+                                                   batchModes: updatedModes,
+                                                   batch: updatedBatches[0] || "",
+                                                   course: b.course
+                                                 });
+                                               }}
+                                               style={{ flexDirection: "row", alignItems: "center", marginBottom: isSelected ? 8 : 0 }}
+                                             >
+                                               <Ionicons 
+                                                 name={isSelected ? "checkbox" : "square-outline"} 
+                                                 size={20} 
+                                                 color={isSelected ? "#0288d1" : "#bbb"} 
+                                                 style={{ marginRight: 10 }} 
+                                               />
+                                               <View style={{ flex: 1 }}>
+                                                 <Text style={{ color: "#212121", fontWeight: isSelected ? "bold" : "normal" }}>{b.batchName}</Text>
+                                                 <Text style={{ color: "#757575", fontSize: 11 }}>Course: {b.course}</Text>
+                                               </View>
+                                             </TouchableOpacity>
+
+                                             {isSelected && (
+                                               <View style={{ flexDirection: "row", gap: 8, paddingLeft: 30 }}>
+                                                 {["online", "offline", "recorded"].map(mode => {
+                                                   const modeActive = modes.includes(mode);
+                                                   return (
+                                                     <TouchableOpacity
+                                                       key={mode}
+                                                       onPress={() => {
+                                                         const activeModes = (editingStudent.batchModes || {})[b.batchName] || [];
+                                                         const updated = activeModes.includes(mode)
+                                                           ? activeModes.filter(m => m !== mode)
+                                                           : [...activeModes, mode];
+                                                         
+                                                         setEditingStudent({
+                                                           ...editingStudent,
+                                                           batchModes: {
+                                                             ...(editingStudent.batchModes || {}),
+                                                             [b.batchName]: updated
+                                                           },
+                                                           type: updated[0] || editingStudent.type
+                                                         });
+                                                       }}
+                                                       style={{
+                                                         paddingHorizontal: 12,
+                                                         paddingVertical: 5,
+                                                         borderRadius: 15,
+                                                         borderWidth: 1.5,
+                                                         borderColor: modeActive ? "#0288d1" : "#d0d0d0",
+                                                         backgroundColor: modeActive ? "#e3f2fd" : "#ffffff",
+                                                         alignItems: "center"
+                                                       }}
+                                                     >
+                                                       <Text style={{
+                                                         fontSize: 10,
+                                                         fontWeight: "bold",
+                                                         color: modeActive ? "#0288d1" : "#757575",
+                                                         textTransform: "capitalize"
+                                                       }}>
+                                                         {mode}
+                                                       </Text>
+                                                     </TouchableOpacity>
+                                                   );
+                                                 })}
+                                               </View>
+                                             )}
+                                           </View>
+                                         );
+                                       })}
+                                     </View>
+                                     {editingStudent.course !== "" && editingStudent.course !== undefined && (
+                                       <View style={{ backgroundColor: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                                         <Text style={{ color: "#2e7d32", fontSize: 12 }}>Course auto-selected: <Text style={{ fontWeight: "bold" }}>{editingStudent.course}</Text></Text>
+                                       </View>
+                                     )}
+                                   </>
+                                 )}
 
                                 {/* Fee Details */}
                                 <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, fontSize: 13 }}>Fee & Attendance Details</Text>
@@ -16059,50 +16349,119 @@ PASTED QUESTION PAPER TEXT:
                                 {/* Account Credentials */}
                                 <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, fontSize: 13 }}>Login Credentials</Text>
                                 <TextInput style={styles.input} placeholder="Username / Roll Number *" placeholderTextColor="#999" value={newStudent.loginUsername} onChangeText={u => setNewStudent({ ...newStudent, loginUsername: u })} autoCapitalize="none" />
-                                <TextInput style={styles.input} placeholder="Password *" secureTextEntry placeholderTextColor="#999" value={newStudent.loginPassword} onChangeText={pw => setNewStudent({ ...newStudent, loginPassword: pw })} />
+                                <View style={[styles.input, { justifyContent: "center", backgroundColor: "#fafafa", borderColor: "#e0e0e0", minHeight: 40, marginBottom: 12 }]}>
+                                   <Text style={{ color: "#757575", fontSize: 13 }}>
+                                     🔑 Password: {newStudent.loginUsername && newStudent.phone ? (newStudent.loginUsername.trim() + newStudent.phone.trim().slice(-4)) : "(Generated from Username + Last 4 digits of Phone)"}
+                                   </Text>
+                                 </View>
 
-                                {/* Batch & Course */}
-                                <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, marginTop: 10, fontSize: 13 }}>Batch & Course</Text>
-                                {batches.length === 0 ? (
-                                  <View style={{ backgroundColor: "#fff3e0", padding: 10, borderRadius: 8, marginBottom: 8 }}>
-                                    <Text style={{ color: "#e65100", fontSize: 12 }}> No batches found. Please add batches in the Batches section first.</Text>
-                                  </View>
-                                ) : (
-                                  <>
-                                    <View style={{ backgroundColor: "#f9f9f9", borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0", marginBottom: 8, overflow: "hidden" }}>
-                                      <Text style={{ padding: 8, color: "#999", fontSize: 12, borderBottomWidth: 1, borderColor: "#e0e0e0" }}>Select Batch *</Text>
-                                      {batches.map(b => (
-                                        <TouchableOpacity
-                                          key={b.id}
-                                          onPress={() => setNewStudent({ ...newStudent, batch: b.batchName, course: b.course })}
-                                          style={{ flexDirection: "row", alignItems: "center", padding: 10, backgroundColor: newStudent.batch === b.batchName ? "#e3f2fd" : "transparent", borderBottomWidth: 1, borderColor: "#f0f0f0" }}
-                                        >
-                                          <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: newStudent.batch === b.batchName ? "#1976d2" : "#bbb", backgroundColor: newStudent.batch === b.batchName ? "#1976d2" : "transparent", marginRight: 10 }} />
-                                          <Text style={{ color: "#212121", fontWeight: newStudent.batch === b.batchName ? "bold" : "normal" }}>{b.batchName}</Text>
-                                          <Text style={{ color: "#757575", fontSize: 12, marginLeft: 8 }}>— {b.course}</Text>
-                                        </TouchableOpacity>
-                                      ))}
-                                    </View>
-                                    {newStudent.course !== "" && (
-                                      <View style={{ backgroundColor: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 8 }}>
-                                        <Text style={{ color: "#2e7d32", fontSize: 12 }}>Course auto-selected: <Text style={{ fontWeight: "bold" }}>{newStudent.course}</Text></Text>
-                                      </View>
-                                    )}
-                                  </>
-                                )}
-                                {/* Enrollment Type */}
-                                <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Enrollment Type</Text>
-                                <View style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
-                                  {["offline", "online", "recorded"].map(t => (
-                                    <TouchableOpacity
-                                      key={t}
-                                      onPress={() => setNewStudent({ ...newStudent, type: t })}
-                                      style={{ flex: 1, padding: 10, borderRadius: 8, borderWidth: 2, borderColor: newStudent.type === t ? "#c62828" : "#e0e0e0", backgroundColor: newStudent.type === t ? "#ffebee" : "#f9f9f9", alignItems: "center" }}
-                                    >
-                                      <Text style={{ color: newStudent.type === t ? "#c62828" : "#757575", fontWeight: newStudent.type === t ? "bold" : "normal", textTransform: "capitalize" }}>{t === "offline" ? "Offline" : t === "online" ? "Online" : "Recorded"}</Text>
-                                    </TouchableOpacity>
-                                  ))}
-                                </View>
+                                                                 {/* Batch & Course */}
+                                 <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, marginTop: 10, fontSize: 13 }}>Batches & Class Modes *</Text>
+                                 {batches.length === 0 ? (
+                                   <View style={{ backgroundColor: "#fff3e0", padding: 10, borderRadius: 8, marginBottom: 8 }}>
+                                     <Text style={{ color: "#e65100", fontSize: 12 }}> No batches found. Please add batches in the Batches section first.</Text>
+                                   </View>
+                                 ) : (
+                                   <>
+                                     <View style={{ backgroundColor: "#f9f9f9", borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0", marginBottom: 8, overflow: "hidden" }}>
+                                       <Text style={{ padding: 8, color: "#999", fontSize: 12, borderBottomWidth: 1, borderColor: "#e0e0e0" }}>Select Batches & Class Modes *</Text>
+                                       {batches.map(b => {
+                                         const isSelected = (newStudent.batches || []).includes(b.batchName);
+                                         const modes = (newStudent.batchModes || {})[b.batchName] || [];
+                                         return (
+                                           <View key={b.id} style={{ borderBottomWidth: 1, borderColor: "#f0f0f0", padding: 10, backgroundColor: isSelected ? "#f7faff" : "transparent" }}>
+                                             <TouchableOpacity
+                                               onPress={() => {
+                                                 const isSel = (newStudent.batches || []).includes(b.batchName);
+                                                 let updatedBatches = isSel 
+                                                   ? (newStudent.batches || []).filter(name => name !== b.batchName)
+                                                   : [...(newStudent.batches || []), b.batchName];
+                                                 
+                                                 let updatedModes = { ...(newStudent.batchModes || {}) };
+                                                 if (isSel) {
+                                                   delete updatedModes[b.batchName];
+                                                 } else {
+                                                   updatedModes[b.batchName] = ["offline"]; // default mode
+                                                 }
+                                                 
+                                                 setNewStudent({
+                                                   ...newStudent,
+                                                   batches: updatedBatches,
+                                                   batchModes: updatedModes,
+                                                   batch: updatedBatches[0] || "",
+                                                   course: b.course
+                                                 });
+                                               }}
+                                               style={{ flexDirection: "row", alignItems: "center", marginBottom: isSelected ? 8 : 0 }}
+                                             >
+                                               <Ionicons 
+                                                 name={isSelected ? "checkbox" : "square-outline"} 
+                                                 size={20} 
+                                                 color={isSelected ? "#c62828" : "#bbb"} 
+                                                 style={{ marginRight: 10 }} 
+                                               />
+                                               <View style={{ flex: 1 }}>
+                                                 <Text style={{ color: "#212121", fontWeight: isSelected ? "bold" : "normal" }}>{b.batchName}</Text>
+                                                 <Text style={{ color: "#757575", fontSize: 11 }}>Course: {b.course}</Text>
+                                               </View>
+                                             </TouchableOpacity>
+
+                                             {isSelected && (
+                                               <View style={{ flexDirection: "row", gap: 8, paddingLeft: 30 }}>
+                                                 {["online", "offline", "recorded"].map(mode => {
+                                                   const modeActive = modes.includes(mode);
+                                                   return (
+                                                     <TouchableOpacity
+                                                       key={mode}
+                                                       onPress={() => {
+                                                         const activeModes = (newStudent.batchModes || {})[b.batchName] || [];
+                                                         const updated = activeModes.includes(mode)
+                                                           ? activeModes.filter(m => m !== mode)
+                                                           : [...activeModes, mode];
+                                                         
+                                                         setNewStudent({
+                                                           ...newStudent,
+                                                           batchModes: {
+                                                             ...(newStudent.batchModes || {}),
+                                                             [b.batchName]: updated
+                                                           },
+                                                           type: updated[0] || newStudent.type
+                                                         });
+                                                       }}
+                                                       style={{
+                                                         paddingHorizontal: 12,
+                                                         paddingVertical: 5,
+                                                         borderRadius: 15,
+                                                         borderWidth: 1.5,
+                                                         borderColor: modeActive ? "#c62828" : "#d0d0d0",
+                                                         backgroundColor: modeActive ? "#ffebee" : "#ffffff",
+                                                         alignItems: "center"
+                                                       }}
+                                                     >
+                                                       <Text style={{
+                                                         fontSize: 10,
+                                                         fontWeight: "bold",
+                                                         color: modeActive ? "#c62828" : "#757575",
+                                                         textTransform: "capitalize"
+                                                       }}>
+                                                         {mode}
+                                                       </Text>
+                                                     </TouchableOpacity>
+                                                   );
+                                                 })}
+                                               </View>
+                                             )}
+                                           </View>
+                                         );
+                                       })}
+                                     </View>
+                                     {newStudent.course !== "" && (
+                                       <View style={{ backgroundColor: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                                         <Text style={{ color: "#2e7d32", fontSize: 12 }}>Course auto-selected: <Text style={{ fontWeight: "bold" }}>{newStudent.course}</Text></Text>
+                                       </View>
+                                     )}
+                                   </>
+                                 )}
 
                                 <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, fontSize: 13 }}>Fee Details</Text>
                                 <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
@@ -16567,7 +16926,18 @@ PASTED QUESTION PAPER TEXT:
                                           {/* Action Buttons */}
                                           <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
                                             <TouchableOpacity
-                                              onPress={() => { setSelectedDirectoryStudent(null); setEditingStudent(s); setShowStudentForm(true); }}
+                                              onPress={() => {
+                                                setSelectedDirectoryStudent(null);
+                                                const initialBatches = s.batches || (s.batch ? [s.batch] : []);
+                                                const initialBatchModes = s.batchModes || {};
+                                                initialBatches.forEach((b) => {
+                                                  if (!initialBatchModes[b]) {
+                                                    initialBatchModes[b] = [s.type || "offline"];
+                                                  }
+                                                });
+                                                setEditingStudent({ ...s, batches: initialBatches, batchModes: initialBatchModes });
+                                                setShowStudentForm(true);
+                                              }}
                                               style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
                                             >
                                               <Ionicons name="create-outline" size={14} color="#ffffff" />
@@ -16850,6 +17220,67 @@ PASTED QUESTION PAPER TEXT:
                             </View>
                           )}
 
+                          <Text style={styles.label}>Notice Expiry Timer:</Text>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 15, marginTop: 4 }}>
+                            {[
+                              { key: "none", label: "None" },
+                              { key: "24h", label: "24 Hours" },
+                              { key: "3d", label: "3 Days" },
+                              { key: "7d", label: "1 Week" },
+                              { key: "10d", label: "10 Days" },
+                              { key: "15d", label: "15 Days" },
+                              { key: "20d", label: "20 Days" },
+                              { key: "30d", label: "1 Month" },
+                              { key: "custom", label: "Custom Date" }
+                            ].map(opt => {
+                              const currentTimer = editingNoticeId ? (editingNotice.timerOption || "none") : (newNotice.timerOption || "none");
+                              const isSelected = currentTimer === opt.key;
+                              return (
+                                <TouchableOpacity
+                                  key={opt.key}
+                                  onPress={() => {
+                                    if (editingNoticeId) {
+                                      setEditingNotice({ ...editingNotice, timerOption: opt.key });
+                                    } else {
+                                      setNewNotice({ ...newNotice, timerOption: opt.key });
+                                    }
+                                  }}
+                                  style={{
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 20,
+                                    borderWidth: 2,
+                                    borderColor: isSelected ? "#c62828" : "#e0e0e0",
+                                    backgroundColor: isSelected ? "#ffebee" : "#ffffff"
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 11, fontWeight: "bold", color: isSelected ? "#c62828" : "#757575" }}>
+                                    {opt.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          {((editingNoticeId ? editingNotice.timerOption : newNotice.timerOption) === "custom") && (
+                            <View style={{ marginBottom: 12 }}>
+                              <Text style={styles.label}>Custom Expiry Date & Time (YYYY-MM-DD HH:MM):</Text>
+                              <TextInput
+                                style={styles.input}
+                                placeholder="e.g. 2026-08-25 14:30"
+                                placeholderTextColor="#999"
+                                value={editingNoticeId ? (editingNotice.expiresAt || "") : (newNotice.expiresAt || "")}
+                                onChangeText={val => {
+                                  if (editingNoticeId) {
+                                    setEditingNotice({ ...editingNotice, expiresAt: val });
+                                  } else {
+                                    setNewNotice({ ...newNotice, expiresAt: val });
+                                  }
+                                }}
+                              />
+                            </View>
+                          )}
+
                           <View style={{ flexDirection: "row", gap: 10 }}>
                             {editingNoticeId && (
                               <TouchableOpacity
@@ -16924,9 +17355,23 @@ PASTED QUESTION PAPER TEXT:
                                       </View>
                                     </View>
                                     <Text style={{ fontSize: 13, color: "#424242", marginTop: 4 }}>{notice.content}</Text>
-                                    <Text style={{ fontSize: 11, color: "#757575", marginTop: 6 }}>
-                                      Published: {formattedDate} | By: {notice.createdBy || "Admin"}
-                                    </Text>
+                                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6, alignItems: "center" }}>
+                                      <Text style={{ fontSize: 11, color: "#757575" }}>
+                                        Published: {formattedDate} | By: {notice.createdBy || "Admin"}
+                                      </Text>
+                                      {notice.expiresAt && (() => {
+                                        const expTime = new Date(notice.expiresAt).getTime();
+                                        const isExpired = !isNaN(expTime) && expTime < Date.now();
+                                        return (
+                                          <View style={{ backgroundColor: isExpired ? "#ffebee" : "#e3f2fd", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 3 }}>
+                                            <Ionicons name={isExpired ? "alert-circle" : "time-outline"} size={10} color={isExpired ? "#c62828" : "#1976d2"} />
+                                            <Text style={{ fontSize: 9, fontWeight: "bold", color: isExpired ? "#c62828" : "#1976d2" }}>
+                                              {isExpired ? "EXPIRED" : "EXPIRES IN: " + formatCountdown(notice.expiresAt)}
+                                            </Text>
+                                          </View>
+                                        );
+                                      })()}
+                                    </View>
                                   </View>
 
                                   <View style={{ flexDirection: "row", gap: 6 }}>
@@ -17789,6 +18234,51 @@ PASTED QUESTION PAPER TEXT:
                               <Text style={{ color: "#e53935", fontSize: 11, marginBottom: 12, fontWeight: "600" }}> Once submitted, details cannot be edited without administrator permission.</Text>
                               <Text style={{ color: "#757575", fontSize: 12, marginBottom: 12 }}>Fill all fields and upload documents. Admin will review and approve your profile.</Text>
 
+                              {/* Step Progress Indicator */}
+                              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20, backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", borderRadius: 10, padding: 8 }}>
+                                {[
+                                  { step: 1, label: "Personal" },
+                                  { step: 2, label: "Family" },
+                                  { step: 3, label: "Documents" }
+                                ].map((s, idx) => {
+                                  const isActive = profileFormStep === s.step;
+                                  const isCompleted = profileFormStep > s.step;
+                                  return (
+                                    <View key={s.step} style={{ flexDirection: "row", alignItems: "center", flex: idx < 2 ? 1 : 0 }}>
+                                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                        <View style={{
+                                          width: 20, height: 20, borderRadius: 10,
+                                          backgroundColor: isActive ? "#1976d2" : (isCompleted ? "#2e7d32" : "#bdbdbd"),
+                                          justifyContent: "center", alignItems: "center"
+                                        }}>
+                                          {isCompleted ? (
+                                            <Ionicons name="checkmark" size={12} color="#fff" />
+                                          ) : (
+                                            <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 10 }}>{s.step}</Text>
+                                          )}
+                                        </View>
+                                        <Text style={{
+                                          fontSize: 11, fontWeight: isActive ? "bold" : "500",
+                                          color: isActive ? "#1976d2" : (isCompleted ? "#2e7d32" : "#9e9e9e")
+                                        }}>
+                                          {s.label}
+                                        </Text>
+                                      </View>
+                                      {idx < 2 && (
+                                        <View style={{
+                                          flex: 1, height: 2, marginHorizontal: 8,
+                                          backgroundColor: isCompleted ? "#2e7d32" : "#e0e0e0"
+                                        }} />
+                                      )}
+                                    </View>
+                                  );
+                                })}
+                              </View>
+
+                              {/* Page 1: Personal Details */}
+                              {profileFormStep === 1 && (
+                                <View style={{ gap: 10 }}>
+
                               <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4, fontWeight: "bold" }}>🔑 Change Account Password *</Text>
                               <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentOldPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Old Password (created by admin) *" secureTextEntry placeholderTextColor="#999" value={studentOldPassword} onChangeText={setStudentOldPassword} />
                               <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentNewPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="New Password (modified by student) *" secureTextEntry placeholderTextColor="#999" value={studentNewPassword} onChangeText={setStudentNewPassword} />
@@ -17943,10 +18433,15 @@ PASTED QUESTION PAPER TEXT:
                                 <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.constituencyOthers && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Specify Constituency *" placeholderTextColor="#999" value={profileForm.constituencyOthers} onChangeText={v => setProfileForm({ ...profileForm, constituencyOthers: v })} />
                               )}
 
-                              {/* Father's Name & Occupation */}
-                              <TextInput style={styles.input} placeholder="Father's Name" placeholderTextColor="#999" value={profileForm.fatherName} onChangeText={v => setProfileForm({ ...profileForm, fatherName: v })} />
-                              <TextInput style={styles.input} placeholder="Father's Occupation" placeholderTextColor="#999" value={profileForm.occupation} onChangeText={v => setProfileForm({ ...profileForm, occupation: v })} />
-                              <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.studentOccupation && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Student's Occupation *" placeholderTextColor="#999" value={profileForm.studentOccupation} onChangeText={v => setProfileForm({ ...profileForm, studentOccupation: v })} />
+                                  <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.studentOccupation && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Student's Occupation *" placeholderTextColor="#999" value={profileForm.studentOccupation} onChangeText={v => setProfileForm({ ...profileForm, studentOccupation: v })} />
+                                </View>
+                              )}
+
+                              {/* Page 2: Family Details */}
+                              {profileFormStep === 2 && (
+                                <View style={{ gap: 10 }}>
+                                  <TextInput style={styles.input} placeholder="Father's Name *" placeholderTextColor="#999" value={profileForm.fatherName} onChangeText={v => setProfileForm({ ...profileForm, fatherName: v })} />
+                                  <TextInput style={styles.input} placeholder="Father's Occupation *" placeholderTextColor="#999" value={profileForm.occupation} onChangeText={v => setProfileForm({ ...profileForm, occupation: v })} />
 
                               {/* Contact */}
                               <TextInput style={styles.input} placeholder="Alternative Mobile Number" placeholderTextColor="#999" value={profileForm.altPhone} onChangeText={v => setProfileForm({ ...profileForm, altPhone: cleanPhone(v) })} maxLength={10} keyboardType="phone-pad" />
@@ -17966,8 +18461,14 @@ PASTED QUESTION PAPER TEXT:
                                 ))}
                               </View>
 
-                              {/* Passport Photo Upload */}
-                              <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, marginTop: 6, fontWeight: "bold" }}>Passport Size Photo *</Text>
+                                </View>
+                              )}
+
+                              {/* Page 3: Document Uploads */}
+                              {profileFormStep === 3 && (
+                                <View style={{ gap: 10 }}>
+                                  {/* Passport Photo Upload */}
+                                  <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, marginTop: 6, fontWeight: "bold" }}>Passport Size Photo *</Text>
                               {Platform.OS === 'web' ? (
                                 <View style={{ marginBottom: 10 }}>
                                   <input
@@ -18302,9 +18803,57 @@ PASTED QUESTION PAPER TEXT:
                                 </Modal>
                               )}
 
-                              <TouchableOpacity onPress={submitProfileCompletion} style={[styles.primaryBtn, { marginTop: 6 }]}>
-                                <Text style={styles.primaryBtnTxt}>Submit for Admin Approval</Text>
-                              </TouchableOpacity>
+                                </View>
+                              )}
+
+                              {/* Navigation Actions */}
+                              {profileFormStep === 1 && (
+                                <TouchableOpacity
+                                  onPress={() => { if (validatePage1()) setProfileFormStep(2); }}
+                                  style={[styles.primaryBtn, { marginTop: 15, flexDirection: "row", justifyContent: "center", gap: 6 }]}
+                                >
+                                  <Text style={styles.primaryBtnTxt}>Next: Family Details</Text>
+                                  <Ionicons name="arrow-forward-outline" size={16} color="#fff" />
+                                </TouchableOpacity>
+                              )}
+
+                              {profileFormStep === 2 && (
+                                <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
+                                  <TouchableOpacity
+                                    onPress={() => setProfileFormStep(1)}
+                                    style={[styles.outlineBtn, { flex: 1, justifyContent: "center", flexDirection: "row", gap: 6 }]}
+                                  >
+                                    <Ionicons name="arrow-back-outline" size={16} color="#1976d2" />
+                                    <Text style={styles.outlineBtnTxt}>Back</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => { if (validatePage2()) setProfileFormStep(3); }}
+                                    style={[styles.primaryBtn, { flex: 1.5, justifyContent: "center", flexDirection: "row", gap: 6 }]}
+                                  >
+                                    <Text style={styles.primaryBtnTxt}>Next: Documents</Text>
+                                    <Ionicons name="arrow-forward-outline" size={16} color="#fff" />
+                                  </TouchableOpacity>
+                                </View>
+                              )}
+
+                              {profileFormStep === 3 && (
+                                <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
+                                  <TouchableOpacity
+                                    onPress={() => setProfileFormStep(2)}
+                                    style={[styles.outlineBtn, { flex: 1, justifyContent: "center", flexDirection: "row", gap: 6 }]}
+                                  >
+                                    <Ionicons name="arrow-back-outline" size={16} color="#1976d2" />
+                                    <Text style={styles.outlineBtnTxt}>Back</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={submitProfileCompletion}
+                                    style={[styles.primaryBtn, { flex: 1.5, justifyContent: "center", flexDirection: "row", gap: 6, backgroundColor: "#2e7d32" }]}
+                                  >
+                                    <Text style={styles.primaryBtnTxt}>Submit Profile</Text>
+                                    <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
+                                  </TouchableOpacity>
+                                </View>
+                              )}
                             </View>
                           );
                         })()}

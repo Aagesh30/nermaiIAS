@@ -19,7 +19,7 @@ export class AnnouncementController {
      */
     static async create(req: Request, res: Response) {
         try {
-            const { title, content, priority, targetDashboard, targetBatch, publishedAt, createdBy } = req.body;
+            const { title, content, priority, targetDashboard, targetBatch, publishedAt, expiresAt, timerOption, createdBy } = req.body;
 
             if (!title || !title.trim()) {
                 return res.status(400).json({
@@ -54,6 +54,8 @@ export class AnnouncementController {
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 publishedAt: pubTimestamp,
+                expiresAt: expiresAt || null,
+                timerOption: timerOption || null,
                 createdBy: createdBy || "admin",
                 updatedBy: createdBy || "admin",
                 isDeleted: false,
@@ -112,6 +114,26 @@ export class AnnouncementController {
 
             // Filter out internal/developer notifications (e.g. approval requests)
             announcements = announcements.filter((ann: any) => ann.isNotification !== true);
+
+            // Filter out expired announcements for students/guests
+            const now = Date.now();
+            announcements = announcements.filter((ann: any) => {
+                if (ann.expiresAt) {
+                    const expiry = new Date(ann.expiresAt).getTime();
+                    if (!isNaN(expiry) && expiry < now) {
+                        if (role) {
+                            const userRole = String(role).toLowerCase();
+                            const adminRoles = ["super_admin", "admin", "staff", "editor", "contributor", "developer"];
+                            if (!adminRoles.includes(userRole)) {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
 
             // Filter announcements based on target user role and batch
             if (role) {
@@ -215,7 +237,7 @@ export class AnnouncementController {
     static async update(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { title, content, priority, targetDashboard, targetBatch, publishedAt, updatedBy } = req.body;
+            const { title, content, priority, targetDashboard, targetBatch, publishedAt, expiresAt, timerOption, updatedBy } = req.body;
 
             const docRef = db.collection(COLLECTION).doc(id);
             const doc = await docRef.get();
@@ -240,6 +262,8 @@ export class AnnouncementController {
             if (publishedAt !== undefined) {
                 updateData.publishedAt = publishedAt ? admin.firestore.Timestamp.fromDate(new Date(publishedAt)) : admin.firestore.FieldValue.serverTimestamp();
             }
+            if (expiresAt !== undefined) updateData.expiresAt = expiresAt;
+            if (timerOption !== undefined) updateData.timerOption = timerOption;
 
             await docRef.update(updateData);
 

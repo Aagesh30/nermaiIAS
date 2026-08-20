@@ -771,6 +771,7 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 targetAudience: targetAudience || "all",
                 targetBatch: targetBatch || "",
                 requireFeedback: !!requireFeedback,
+                allowOfflineDirectly: !!req.body.allowOfflineDirectly,
                 isDeleted: false,
                 deletedAt: null,
                 deletedBy: null
