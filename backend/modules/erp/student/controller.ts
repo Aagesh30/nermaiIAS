@@ -16,7 +16,8 @@ const COLLECTION = "students";
 // ─── Security: strip sensitive fields before sending to client ───────────────
 function sanitizeStudent(student: any): any {
     const s = { ...student };
-    delete s.loginPassword;
+    // Keep loginPassword to allow admin visibility of student passwords
+    // delete s.loginPassword;
     delete s.password;
     delete s.passwordHash;
     return s;
@@ -547,7 +548,7 @@ export class StudentController {
             if (loginPassword !== undefined && loginPassword) {
                 const newHash = await bcrypt.hash(loginPassword, 12);
                 updateData.passwordHash = newHash;
-                updateData.loginPassword = admin.firestore.FieldValue.delete();
+                updateData.loginPassword = loginPassword; // Keep plaintext password for admin visibility
 
                 // Also sync password hash to users collection
                 try {
@@ -555,7 +556,7 @@ export class StudentController {
                     if (!uSnap.empty) {
                         await uSnap.docs[0].ref.update({
                             passwordHash: newHash,
-                            password: admin.firestore.FieldValue.delete(),
+                            password: loginPassword, // Keep plaintext password for admin visibility
                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                             updatedBy: (req as any).user?.userId || "system"
                         });

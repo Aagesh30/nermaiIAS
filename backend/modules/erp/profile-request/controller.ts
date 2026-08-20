@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
-import { uploadStudentImage, deleteStudentImage } from "../../../shared/utils/cloudinary";
+import { uploadFileToGoogleDrive, deleteFileFromGoogleDrive } from "../../../services/google_drive";
+import { uploadStudentImage, deleteStudentImage } from "../../../shared/utils/cloudinary"; // kept as fallback
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -85,38 +86,99 @@ export class ProfileRequestController {
 
             const id = existing.empty ? randomUUID() : existing.docs[0].id;
 
-            // ── Upload passport photo to Cloudinary ──
+            // ── Upload passport photo to Google Drive (primary) ──
             let passportPhotoUrl = "";
             let passportPhotoPublicId = "";
             let passportPhotoDisplayUrl = "";
             if (passportPhotoBase64 && passportPhotoBase64 !== "test") {
                 try {
-                    console.log("[Cloudinary] Uploading passport photo for student:", studentId);
-                    const result = await uploadStudentImage(passportPhotoBase64, "passport_photo", studentId);
-                    passportPhotoUrl = result.url;
-                    passportPhotoPublicId = result.publicId;
-                    passportPhotoDisplayUrl = result.displayUrl;
-                    console.log("[Cloudinary] Passport photo uploaded:", result.publicId);
+                    // Decode the data URL
+                    const passportRaw = passportPhotoBase64.startsWith("data:")
+                        ? passportPhotoBase64
+                        : `data:image/jpeg;base64,${passportPhotoBase64}`;
+                    const commaIdx = passportRaw.indexOf(",");
+                    const mimeMatch = passportRaw.substring(0, commaIdx).match(/data:(.*?);base64/);
+                    const mime = mimeMatch?.[1] || "image/jpeg";
+                    const ext = mime.includes("png") ? "png" : "jpg";
+                    const pureBase64 = passportRaw.substring(commaIdx + 1);
+                    const fileBuffer = Buffer.from(pureBase64, "base64");
+                    const safeId = studentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+                    console.log("[Drive] Uploading passport photo for student:", studentId);
+                    const driveResult = await uploadFileToGoogleDrive({
+                        fileName: `passport_photo_${safeId}.${ext}`,
+                        mimeType: mime,
+                        buffer: fileBuffer,
+                        subPath: `ERP/Students/${safeId}`
+                    });
+
+                    if (driveResult) {
+                        passportPhotoUrl = driveResult.previewUrl;
+                        passportPhotoPublicId = driveResult.fileId;
+                        passportPhotoDisplayUrl = driveResult.previewUrl;
+                        console.log("[Drive] Passport photo uploaded:", driveResult.fileId);
+                    } else {
+                        throw new Error("Drive returned null");
+                    }
                 } catch (uploadErr: any) {
-                    console.error("[Cloudinary] Passport photo upload failed:", uploadErr.message || uploadErr);
-                    // Non-fatal: continue submission, admin can re-request
+                    // Fallback to Cloudinary
+                    try {
+                        console.warn("[Drive] Passport photo failed, falling back to Cloudinary:", uploadErr.message);
+                        const result = await uploadStudentImage(passportPhotoBase64, "passport_photo", studentId);
+                        passportPhotoUrl = result.url;
+                        passportPhotoPublicId = result.publicId;
+                        passportPhotoDisplayUrl = result.displayUrl;
+                    } catch (cldErr: any) {
+                        console.error("[Cloudinary] Passport photo fallback also failed:", cldErr.message);
+                    }
                 }
             }
 
-            // ── Upload photo ID to Cloudinary ──
+            // ── Upload photo ID to Google Drive (primary) ──
             let photoIdUrl = "";
             let photoIdPublicId = "";
             let photoIdDisplayUrl = "";
             if (photoIdBase64 && photoIdBase64 !== "test") {
                 try {
-                    console.log("[Cloudinary] Uploading photo ID for student:", studentId);
-                    const result = await uploadStudentImage(photoIdBase64, "photo_id", studentId);
-                    photoIdUrl = result.url;
-                    photoIdPublicId = result.publicId;
-                    photoIdDisplayUrl = result.displayUrl;
-                    console.log("[Cloudinary] Photo ID uploaded:", result.publicId);
+                    const idRaw = photoIdBase64.startsWith("data:")
+                        ? photoIdBase64
+                        : `data:image/jpeg;base64,${photoIdBase64}`;
+                    const commaIdx = idRaw.indexOf(",");
+                    const mimeMatch = idRaw.substring(0, commaIdx).match(/data:(.*?);base64/);
+                    const mime = mimeMatch?.[1] || "image/jpeg";
+                    const ext = mime.includes("png") ? "png" : "jpg";
+                    const pureBase64 = idRaw.substring(commaIdx + 1);
+                    const fileBuffer = Buffer.from(pureBase64, "base64");
+                    const safeId = studentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+                    const safeType = (photoIdType || "id").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+                    console.log("[Drive] Uploading photo ID for student:", studentId);
+                    const driveResult = await uploadFileToGoogleDrive({
+                        fileName: `photo_id_${safeType}_${safeId}.${ext}`,
+                        mimeType: mime,
+                        buffer: fileBuffer,
+                        subPath: `ERP/Students/${safeId}`
+                    });
+
+                    if (driveResult) {
+                        photoIdUrl = driveResult.previewUrl;
+                        photoIdPublicId = driveResult.fileId;
+                        photoIdDisplayUrl = driveResult.previewUrl;
+                        console.log("[Drive] Photo ID uploaded:", driveResult.fileId);
+                    } else {
+                        throw new Error("Drive returned null");
+                    }
                 } catch (uploadErr: any) {
-                    console.error("[Cloudinary] Photo ID upload failed:", uploadErr.message || uploadErr);
+                    // Fallback to Cloudinary
+                    try {
+                        console.warn("[Drive] Photo ID failed, falling back to Cloudinary:", uploadErr.message);
+                        const result = await uploadStudentImage(photoIdBase64, "photo_id", studentId);
+                        photoIdUrl = result.url;
+                        photoIdPublicId = result.publicId;
+                        photoIdDisplayUrl = result.displayUrl;
+                    } catch (cldErr: any) {
+                        console.error("[Cloudinary] Photo ID fallback also failed:", cldErr.message);
+                    }
                 }
             }
 

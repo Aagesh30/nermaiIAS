@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
+import axios from "axios";
+import { getDriveConfig as _getDriveConfig, saveDriveConfig as _saveDriveConfig } from "../../services/google_drive";
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -42,7 +44,8 @@ const KNOWN_COLLECTIONS = [
     "fee_reminders",
     "courses",
     "freebies",
-    "notifications"
+    "notifications",
+    "dailyContent"
 ];
 
 export class DeveloperController {
@@ -192,8 +195,8 @@ export class DeveloperController {
             const { name } = req.params;
             const { _id, ...data } = req.body;
 
-            // SECURITY: Reject plaintext password fields — use the auth service to set passwords.
-            if ('password' in data || 'loginPassword' in data) {
+            // SECURITY: Reject plaintext password fields — use the auth service to set passwords (except for students/staff).
+            if (name !== "students" && name !== "staff" && ('password' in data || 'loginPassword' in data)) {
                 return res.status(400).json({
                     success: false,
                     message: "Cannot write password fields via developer portal. Use the auth service or ERP to manage credentials."
@@ -244,8 +247,8 @@ export class DeveloperController {
             const { name, docId } = req.params;
             const { _id, ...data } = req.body;
 
-            // SECURITY: Reject plaintext password fields.
-            if ('password' in data || 'loginPassword' in data) {
+            // SECURITY: Reject plaintext password fields (except for students/staff).
+            if (name !== "students" && name !== "staff" && ('password' in data || 'loginPassword' in data)) {
                 return res.status(400).json({
                     success: false,
                     message: "Cannot update password fields via developer portal. Use the auth service or ERP to manage credentials."
@@ -397,16 +400,52 @@ export class DeveloperController {
     static async getRolePermissions(req: Request, res: Response) {
         const defaults: any = {
             super_admin: {
-                students: "CRUD", batches: "CRUD", announcements: "CRUD", fees: "CRUD", tests: "CRUD", quiz: "CRUD", "id-card": "CRUD"
+                student_management: "edit_direct",
+                staff_management: "edit_direct",
+                batch_management: "edit_direct",
+                fees_management: "edit_direct",
+                marks_management: "edit_direct",
+                test_creation: "edit_direct",
+                quiz_posting: "edit_direct",
+                id_card: "edit_direct",
+                hall_ticket: "edit_direct",
+                profile_requests: "edit_direct"
             },
             admin: {
-                students: "CRUD", batches: "CRUD", announcements: "CRUD", fees: "CRUD", tests: "CRUD", quiz: "CRUD", "id-card": "CRUD"
+                student_management: "edit_direct",
+                staff_management: "edit_direct",
+                batch_management: "edit_direct",
+                fees_management: "edit_direct",
+                marks_management: "edit_direct",
+                test_creation: "edit_direct",
+                quiz_posting: "edit_direct",
+                id_card: "edit_direct",
+                hall_ticket: "edit_direct",
+                profile_requests: "edit_direct"
             },
             editor: {
-                students: "CRU only", batches: "CRU only", announcements: "CRU only", fees: "CRU only", tests: "CRU only", quiz: "CRU only", "id-card": "CRU only"
+                student_management: "edit_on_approval",
+                staff_management: "edit_on_approval",
+                batch_management: "edit_on_approval",
+                fees_management: "edit_on_approval",
+                marks_management: "edit_on_approval",
+                test_creation: "edit_on_approval",
+                quiz_posting: "edit_on_approval",
+                id_card: "edit_on_approval",
+                hall_ticket: "edit_on_approval",
+                profile_requests: "edit_on_approval"
             },
             contributor: {
-                students: "CR only", batches: "CR only", announcements: "CR only", fees: "CR only", tests: "CR only", quiz: "CR only", "id-card": "CR only"
+                student_management: "view",
+                staff_management: "view",
+                batch_management: "view",
+                fees_management: "view",
+                marks_management: "view",
+                test_creation: "view",
+                quiz_posting: "view",
+                id_card: "view",
+                hall_ticket: "view",
+                profile_requests: "view"
             }
         };
 
@@ -487,6 +526,88 @@ export class DeveloperController {
             return res.status(200).json({
                 success: true,
                 data: {}
+            });
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // DRIVE CONFIG
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET DRIVE CONFIG
+     * GET /developer/drive-config
+     */
+    static async getDriveConfig(req: Request, res: Response) {
+        try {
+            const config = await _getDriveConfig();
+            return res.status(200).json({ success: true, data: config });
+        } catch (error: any) {
+            return res.status(500).json({ success: false, message: error.message || "Failed to get Drive config" });
+        }
+    }
+
+    /**
+     * SAVE DRIVE CONFIG
+     * PUT /developer/drive-config
+     * Body: { appsScriptUrl, rootFolderId, folderName }
+     */
+    static async saveDriveConfig(req: Request, res: Response) {
+        try {
+            const { appsScriptUrl, rootFolderId, folderName } = req.body;
+            const updated = await _saveDriveConfig({ appsScriptUrl, rootFolderId, folderName });
+            return res.status(200).json({ success: true, message: "Drive config saved", data: updated });
+        } catch (error: any) {
+            return res.status(500).json({ success: false, message: error.message || "Failed to save Drive config" });
+        }
+    }
+
+    /**
+     * TEST DRIVE CONNECTION
+     * POST /developer/drive-config/test
+     * Sends a test ping to the configured Apps Script Web App URL.
+     */
+    static async testDriveConnection(req: Request, res: Response) {
+        try {
+            const { appsScriptUrl, rootFolderId } = req.body;
+            const config = await _getDriveConfig();
+            const url = appsScriptUrl || config.appsScriptUrl;
+            const folderId = rootFolderId || config.rootFolderId;
+
+            if (!url) {
+                return res.status(400).json({ success: false, message: "Apps Script URL is not configured." });
+            }
+
+            const response = await axios.post(url, {
+                test: true,
+                rootFolderId: folderId
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 15000
+            });
+
+            const resData = response.data;
+            if (resData && (resData.status === 'success' || resData.success)) {
+                return res.status(200).json({
+                    success: true,
+                    message: `Connected successfully! Folder: "${resData.folderName || resData.message || folderId}"`
+                });
+            } else if (resData && resData.error && resData.error.includes("Missing required properties")) {
+                return res.status(200).json({
+                    success: true,
+                    message: `Connected successfully! (Apps Script reached successfully, but folder name display requires updating Code.gs script template)`
+                });
+            } else {
+                return res.status(200).json({
+                    success: false,
+                    message: `Connection failed: ${resData?.error || resData?.message || 'Unknown Apps Script error'}`
+                });
+            }
+        } catch (error: any) {
+            const status = error?.response?.status;
+            return res.status(200).json({
+                success: false,
+                message: `Connection failed: ${error.message || 'Unknown error'}${status ? ` (HTTP ${status})` : ''}`
             });
         }
     }

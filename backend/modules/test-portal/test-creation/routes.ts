@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { TestCreationController } from "./controller";
+import { TestCreationController, OfflineTestRequestController } from "./controller";
 import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
 
 const router = Router();
@@ -35,6 +35,27 @@ router.get("/", TestCreationController.getAll);
 router.get("/feedback", requireRole(adminRoles), TestCreationController.getFeedback);
 router.post("/feedback", TestCreationController.submitFeedback);
 
+// ─── Offline Student Test Permission Request Routes ───────────────────────────
+// Base: /api/test-portal/test-creation/permission-requests
+// Students POST to submit requests; Admins GET/PATCH/DELETE to manage them.
+
+/** Student submits a permission request */
+router.post("/permission-requests", OfflineTestRequestController.submitRequest);
+
+/** Fetch permission requests — admin gets all, student filters by their own studentId via ?studentId= */
+router.get("/permission-requests", OfflineTestRequestController.getAll);
+
+/** Admin clears ALL requests */
+router.delete("/permission-requests/clear-all", requireRole(adminRoles), OfflineTestRequestController.clearAll);
+
+/** Admin approves or rejects a request */
+router.patch("/permission-requests/:id", requireRole(adminRoles), OfflineTestRequestController.updateStatus);
+
+/** Admin deletes a specific request */
+router.delete("/permission-requests/:id", requireRole(adminRoles), OfflineTestRequestController.deleteRequest);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** GET SINGLE TEST — students and admins */
 router.get("/:id", TestCreationController.getOne);
 
@@ -60,4 +81,3 @@ router.patch("/:id/unpublish", requireRole(adminRoles), TestCreationController.u
 router.delete("/:id", requireRole(adminRoles), TestCreationController.delete);
 
 export default router;
-// Trigger build change 1

@@ -66,7 +66,8 @@ export class DailyContentController {
                 createdAt: now,
                 updatedAt: now,
                 createdBy: createdBy || "admin",
-                isDeleted: false
+                isDeleted: false,
+                status: req.body.status || "approved"
             };
 
             if (source === "url") {
@@ -95,7 +96,8 @@ export class DailyContentController {
                     const driveUpload = await uploadFileToGoogleDrive({
                         fileName: targetFileName,
                         mimeType: detectedMime,
-                        buffer: fileBuffer
+                        buffer: fileBuffer,
+                        subPath: "LMS/Daily Content"
                     });
 
                     if (driveUpload && driveUpload.previewUrl) {
@@ -213,7 +215,7 @@ export class DailyContentController {
             }
 
             const snapshot = await query.get();
-            let contentList = snapshot.docs.map(doc => {
+             let contentList = snapshot.docs.map(doc => {
                 const data = doc.data();
                 return {
                     id: doc.id,
@@ -228,9 +230,16 @@ export class DailyContentController {
                     targetBatch: data.targetBatch || null,
                     description: data.description || null,
                     createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    createdBy: data.createdBy
+                    createdBy: data.createdBy,
+                    status: data.status || "approved"
                 };
             });
+
+            // Filter out pending content unless includePending is true
+            const includePending = req.query.includePending === "true";
+            if (!includePending) {
+                contentList = contentList.filter(c => c.status !== "pending");
+            }
 
             // If batch/isPaid query params are supplied, filter accordingly
             if (batch || isPaid !== undefined) {

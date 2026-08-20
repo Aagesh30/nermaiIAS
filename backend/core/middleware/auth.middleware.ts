@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { auth } from '../../infrastructure/firebase';
+import { auth, db } from '../../infrastructure/firebase';
 import { AppError } from '../errors/AppError';
 import { logger } from '../logger';
 import jwt from 'jsonwebtoken';
@@ -101,11 +101,67 @@ export const requireRole = (allowedRoles: string[]) => {
     }
     
     // allow super_admin to access anything, or check if role is in allowed list
-    if (req.user.role === 'super_admin' || allowedRoles.includes(req.user.role)) {
+    if (req.user.role === 'super_admin' || req.user.role === 'developer' || allowedRoles.includes(req.user.role)) {
       return next();
     }
     
     return next(new AppError(`Forbidden: Requires one of roles [${allowedRoles.join(', ')}]`, 403));
+  };
+};
+
+export const requirePermission = (featureKey: string, action: 'C' | 'R' | 'U' | 'D') => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return next(new AppError('Forbidden: User not authenticated', 403));
+    }
+    
+    // super_admin and developer bypass all granular checks
+    if (req.user.role === 'super_admin' || req.user.role === 'developer') {
+      return next();
+    }
+
+    try {
+      const doc = await db.collection('role_permissions').doc(req.user.role).get();
+      if (!doc.exists) {
+        return next(new AppError(`Forbidden: Permissions not configured for role ${req.user.role}`, 403));
+      }
+
+      const data = doc.data() || {};
+      const perm = data[featureKey];
+
+      // Handle permission levels
+      if (!perm || perm === 'none') {
+        return next(new AppError(`Forbidden: You do not have access to this feature (${featureKey})`, 403));
+      }
+
+      if (action === 'R') {
+        // 'view', 'edit_on_approval', 'edit_direct', 'CRUD', 'CRU only', 'CR only' all allow Read
+        return next();
+      }
+
+      // Write Actions (C, U, D)
+      if (perm === 'edit_direct' || perm === 'CRUD') {
+        return next();
+      }
+
+      // For edit_on_approval, allow creation of draft documents (status: pending)
+      if (perm === 'edit_on_approval' && action === 'C' && req.body && req.body.status === 'pending') {
+        return next();
+      }
+
+      // Check legacy permission levels for compatibility
+      if (perm === 'CRU only') {
+        if (action === 'C' || action === 'U') return next();
+      } else if (perm === 'CR only') {
+        if (action === 'C') return next();
+      }
+
+      // Block direct writes for other permission levels (e.g., 'view', 'edit_on_approval')
+      return next(new AppError(`Forbidden: Direct edit permission denied for ${featureKey}. Access level: ${perm}`, 403));
+
+    } catch (err: any) {
+      return next(new AppError(`Internal Server Error: Permission check failed (${err.message})`, 500));
+    }
   };
 };
 

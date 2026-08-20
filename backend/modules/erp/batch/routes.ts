@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { BatchController } from "./controller";
-import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
+import { requireAuth, requireRole, requirePermission } from "../../../core/middleware/auth.middleware";
 
 const router = Router();
 
@@ -14,9 +14,9 @@ const adminRoles = ['super_admin', 'admin', 'staff'];
 router.use(requireAuth);
 router.use(requireRole(adminRoles));
 
-router.get("/", BatchController.getAll);
-router.post("/", BatchController.create);
-router.put("/:id", BatchController.update);
-router.delete("/:id", BatchController.delete);
+router.get("/", requirePermission("batch_management", "R"), BatchController.getAll);
+router.post("/", requirePermission("batch_management", "C"), BatchController.create);
+router.put("/:id", requirePermission("batch_management", "U"), BatchController.update);
+router.delete("/:id", requirePermission("batch_management", "D"), BatchController.delete);
 
 export default router;

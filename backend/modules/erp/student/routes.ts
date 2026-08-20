@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { StudentController } from "./controller";
-import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
+import { requireAuth, requireRole, requirePermission } from "../../../core/middleware/auth.middleware";
 
 const router = Router();
 
@@ -23,21 +23,21 @@ router.put("/profile/me", StudentController.updateMe);
 router.use(requireRole(adminRoles));
 
 // Get all students (with search, filter, pagination, sorting)
-router.get("/", StudentController.getAll);
+router.get("/", requirePermission("student_management", "R"), StudentController.getAll);
 
 // Get single student
-router.get("/:id", StudentController.getOne);
+router.get("/:id", requirePermission("student_management", "R"), StudentController.getOne);
 
 // Create student
-router.post("/", StudentController.create);
+router.post("/", requirePermission("student_management", "C"), StudentController.create);
 
 // Update student
-router.put("/:id", StudentController.update);
+router.put("/:id", requirePermission("student_management", "U"), StudentController.update);
 
 // Bulk update credentials for batch (super_admin only — highly privileged)
 router.post("/bulk/credentials", requireRole(['super_admin']), StudentController.bulkUpdateCredentials);
 
 // Soft delete student
-router.delete("/:id", StudentController.delete);
+router.delete("/:id", requirePermission("student_management", "D"), StudentController.delete);
 
 export default router;

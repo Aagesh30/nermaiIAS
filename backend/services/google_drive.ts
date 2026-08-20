@@ -1,10 +1,80 @@
 import { google } from 'googleapis';
 import { Readable } from 'stream';
 import axios from 'axios';
+import admin from 'firebase-admin';
 import { env } from '../config/env';
 import { logger } from '../core/logger';
 
 export const DEFAULT_ACADEMY_DRIVE_FOLDER_ID = '17PwvvyImIb2wwui8EXhhWlPZ4-gQNiJi';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Drive Config helpers — read/write from Firestore settings/drive_config
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface DriveConfig {
+  appsScriptUrl: string;
+  rootFolderId: string;
+  folderName: string;
+  updatedAt?: string;
+}
+
+let _cachedDriveConfig: DriveConfig | null = null;
+
+/**
+ * Reads the Drive config from Firestore settings/drive_config.
+ * Falls back to environment variables if Firestore is unavailable.
+ * Result is cached in-memory for 5 minutes.
+ */
+export async function getDriveConfig(): Promise<DriveConfig> {
+  if (_cachedDriveConfig) return _cachedDriveConfig;
+
+  const fallback: DriveConfig = {
+    appsScriptUrl: process.env.DRIVE_APPS_SCRIPT_URL || '',
+    rootFolderId: process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID || DEFAULT_ACADEMY_DRIVE_FOLDER_ID,
+    folderName: process.env.DRIVE_FOLDER_NAME || 'NERMAi IAS Academy'
+  };
+
+  try {
+    const db = admin.firestore();
+    const doc = await db.collection('settings').doc('drive_config').get();
+    if (doc.exists) {
+      const data = doc.data() as Partial<DriveConfig>;
+      _cachedDriveConfig = {
+        appsScriptUrl: data.appsScriptUrl || fallback.appsScriptUrl,
+        rootFolderId: data.rootFolderId || fallback.rootFolderId,
+        folderName: data.folderName || fallback.folderName,
+        updatedAt: data.updatedAt
+      };
+      // Expire cache after 5 minutes
+      setTimeout(() => { _cachedDriveConfig = null; }, 5 * 60 * 1000);
+      return _cachedDriveConfig;
+    }
+  } catch (err: any) {
+    logger.warn('getDriveConfig: Firestore read failed, using env fallback:', err?.message);
+  }
+
+  _cachedDriveConfig = fallback;
+  setTimeout(() => { _cachedDriveConfig = null; }, 5 * 60 * 1000);
+  return _cachedDriveConfig;
+}
+
+/**
+ * Saves the Drive config to Firestore and invalidates the in-memory cache.
+ */
+export async function saveDriveConfig(config: Partial<DriveConfig>): Promise<DriveConfig> {
+  const db = admin.firestore();
+  const current = await getDriveConfig();
+  const updated: DriveConfig = {
+    ...current,
+    ...config,
+    updatedAt: new Date().toISOString()
+  };
+  await db.collection('settings').doc('drive_config').set(updated, { merge: true });
+  _cachedDriveConfig = null; // Invalidate cache
+  return updated;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 export interface GoogleDriveUploadResult {
   fileId: string;
@@ -15,51 +85,70 @@ export interface GoogleDriveUploadResult {
 }
 
 /**
- * Uploads a file (PDF, Image, etc.) directly to the academy Google Drive folder.
+ * Uploads a file (PDF, Image, etc.) to Google Drive.
+ *
+ * Uses the Apps Script Web App if configured (supports sub-folder creation).
+ * Falls back to the service-account Drive API otherwise.
+ *
+ * @param options.subPath  Optional slash-separated folder path inside the root folder.
+ *                         e.g. "LMS/Daily Content" or "ERP/Students/STU001"
+ *                         The Apps Script will create these sub-folders automatically.
  */
 export async function uploadFileToGoogleDrive(options: {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
   folderId?: string;
+  subPath?: string;
 }): Promise<GoogleDriveUploadResult | null> {
   try {
-    // Check if Google Apps Script Web App bypass is configured for personal Google Drive accounts
-    const appsScriptUrl = process.env.DRIVE_APPS_SCRIPT_URL;
+    // ── Path 1: Google Apps Script Web App (preferred — no OAuth, supports sub-folders) ──
+    const driveConfig = await getDriveConfig();
+    const appsScriptUrl = driveConfig.appsScriptUrl || process.env.DRIVE_APPS_SCRIPT_URL;
+
     if (appsScriptUrl) {
-      console.log("Using Google Apps Script Web App bypass for Google Drive upload...");
-      const base64Data = options.buffer.toString("base64");
-      // NOTE: We intentionally do NOT send folderId here.
-      // The Apps Script "getFolderById" call fails when the folder is not owned by
-      // or shared with the script-deployer's Google account. Sending no folderId
-      // makes the script save the file to the root of My Drive, which always works.
-      
-      const response = await axios.post(appsScriptUrl, {
+      console.log(`[Drive] Uploading via Apps Script: ${options.fileName} → ${options.subPath || '(root)'}`);
+      const base64Data = options.buffer.toString('base64');
+
+      const payload: any = {
         fileName: options.fileName,
         mimeType: options.mimeType,
-        base64: base64Data
-        // folderId intentionally omitted — saves to root My Drive
-      }, {
-        headers: { "Content-Type": "application/json" }
+        base64: base64Data,
+        rootFolderId: options.folderId || driveConfig.rootFolderId || DEFAULT_ACADEMY_DRIVE_FOLDER_ID
+      };
+
+      // If a subPath is provided (e.g. "LMS/Daily Content"), pass it to Apps Script
+      if (options.subPath) {
+        payload.subPath = options.subPath.trim().replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
+      }
+
+      const response = await axios.post(appsScriptUrl, payload, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 60000
       });
-      
-      if (response.data && response.data.success) {
-        console.log(`✅ Google Drive Upload SUCCESS via Apps Script: ${response.data.previewUrl}`);
+
+      const resData = response.data;
+
+      if (resData && (resData.success || resData.status === 'success') && resData.fileId) {
+        const fileId = resData.fileId;
+        console.log(`✅ [Drive] Apps Script upload SUCCESS: ${options.fileName} → fileId=${fileId}`);
         return {
-          fileId: response.data.fileId,
-          name: response.data.name,
-          previewUrl: response.data.previewUrl,
-          webViewLink: response.data.webViewLink
+          fileId,
+          name: resData.name || options.fileName,
+          previewUrl: resData.previewUrl || `https://drive.google.com/file/d/${fileId}/preview`,
+          webViewLink: resData.webViewLink || `https://drive.google.com/file/d/${fileId}/view`
         };
       } else {
-        console.error("❌ Google Apps Script upload failed:", response.data?.error || response.data);
-        return null;
+        console.error('❌ [Drive] Apps Script upload failed:', resData?.error || resData);
+        // Fall through to service-account path
       }
     }
+
+    // ── Path 2: Service account Drive API (fallback, no sub-folder support) ──
     const clientEmail = env.DRIVE_CLIENT_EMAIL || env.FIREBASE_CLIENT_EMAIL;
     const rawKey = env.DRIVE_PRIVATE_KEY || env.FIREBASE_PRIVATE_KEY;
     if (!clientEmail || !rawKey) {
-      logger.warn('Google Drive Upload: Drive service account credentials not found in env.');
+      logger.warn('[Drive] Service account credentials not found in env.');
       return null;
     }
 
@@ -74,7 +163,8 @@ export async function uploadFileToGoogleDrive(options: {
     });
 
     const drive = google.drive({ version: 'v3', auth });
-    const targetFolderId = options.folderId || process.env.DRIVE_FOLDER_ID || DEFAULT_ACADEMY_DRIVE_FOLDER_ID;
+    const driveConfig2 = await getDriveConfig();
+    const targetFolderId = options.folderId || driveConfig2.rootFolderId || DEFAULT_ACADEMY_DRIVE_FOLDER_ID;
 
     const stream = new Readable();
     stream.push(options.buffer);
@@ -99,7 +189,7 @@ export async function uploadFileToGoogleDrive(options: {
 
     const fileId = res.data.id;
     if (!fileId) {
-      console.error('Google Drive Upload: No file ID returned');
+      console.error('[Drive] No file ID returned from Drive API');
       return null;
     }
 
@@ -107,18 +197,15 @@ export async function uploadFileToGoogleDrive(options: {
     try {
       await drive.permissions.create({
         fileId,
-        requestBody: {
-          role: 'reader',
-          type: 'anyone'
-        },
+        requestBody: { role: 'reader', type: 'anyone' },
         supportsAllDrives: true
       });
     } catch (permErr: any) {
-      console.warn('Google Drive Upload: Could not set public permission:', permErr?.message);
+      console.warn('[Drive] Could not set public permission:', permErr?.message);
     }
 
     const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-    console.log(`✅ Google Drive Upload SUCCESS: File "${options.fileName}" uploaded -> ${previewUrl}`);
+    console.log(`✅ [Drive] Service account upload SUCCESS: "${options.fileName}" → ${previewUrl}`);
 
     return {
       fileId,
@@ -128,9 +215,9 @@ export async function uploadFileToGoogleDrive(options: {
       webContentLink: res.data.webContentLink || undefined
     };
   } catch (error: any) {
-    console.error('❌ Google Drive Upload Error:', error?.message || error);
+    console.error('❌ [Drive] Upload Error:', error?.message || error);
     if (error?.response?.data) {
-      console.error('❌ Google Drive API Error Details:', JSON.stringify(error.response.data));
+      console.error('❌ [Drive] API Error Details:', JSON.stringify(error.response.data));
     }
     return null;
   }
@@ -142,25 +229,27 @@ export async function uploadFileToGoogleDrive(options: {
  */
 export async function deleteFileFromGoogleDrive(fileId: string): Promise<boolean> {
   try {
-    const appsScriptUrl = process.env.DRIVE_APPS_SCRIPT_URL;
+    const driveConfig = await getDriveConfig();
+    const appsScriptUrl = driveConfig.appsScriptUrl || process.env.DRIVE_APPS_SCRIPT_URL;
     if (!appsScriptUrl || !fileId) return false;
 
     const response = await axios.post(appsScriptUrl, {
-      action: "delete",
+      action: 'delete',
       fileId
     }, {
-      headers: { "Content-Type": "application/json" }
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000
     });
 
-    if (response.data && response.data.success) {
-      console.log(`✅ Google Drive file deleted: ${fileId}`);
+    if (response.data && (response.data.success || response.data.status === 'success')) {
+      console.log(`✅ [Drive] File deleted: ${fileId}`);
       return true;
     } else {
-      console.warn(`⚠️ Google Drive delete failed for ${fileId}:`, response.data?.error);
+      console.warn(`⚠️ [Drive] Delete failed for ${fileId}:`, response.data?.error);
       return false;
     }
   } catch (error: any) {
-    console.warn(`⚠️ Google Drive delete error for ${fileId}:`, error?.message);
+    console.warn(`⚠️ [Drive] Delete error for ${fileId}:`, error?.message);
     return false;
   }
 }

@@ -5,6 +5,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Groq } from "groq-sdk";
 import * as fs from "fs";
 import * as path from "path";
+import { uploadFileToGoogleDrive } from "../../../services/google_drive";
 
 const db = admin.firestore();
 const COLLECTION = "tests";
@@ -689,6 +690,55 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
             const id = randomUUID();
             const now = admin.firestore.FieldValue.serverTimestamp();
 
+            // ── Upload question paper & answer key files to Google Drive ──
+            // This avoids storing large base64 blobs in Firestore.
+            let questionPaperDriveUrl: string | null = null;
+            let answerKeyDriveUrl: string | null = null;
+
+            if (questionPaperBase64) {
+              try {
+                const qpBuffer = Buffer.from(
+                  questionPaperBase64.startsWith("data:") ? questionPaperBase64.split(",")[1] : questionPaperBase64,
+                  "base64"
+                );
+                const qpFilename = `${(title || "Test").replace(/[^a-zA-Z0-9]/g, "_")}_QuestionPaper.pdf`;
+                const driveResult = await uploadFileToGoogleDrive({
+                  fileName: qpFilename,
+                  mimeType: "application/pdf",
+                  buffer: qpBuffer,
+                  subPath: "Test Portal/Question Papers"
+                });
+                if (driveResult?.previewUrl) {
+                  questionPaperDriveUrl = driveResult.previewUrl;
+                  console.log(`[Drive] Question paper uploaded: ${driveResult.previewUrl}`);
+                }
+              } catch (driveErr: any) {
+                console.warn("[Drive] Question paper upload failed, storing base64 as fallback:", driveErr?.message);
+              }
+            }
+
+            if (answerKeyBase64) {
+              try {
+                const akBuffer = Buffer.from(
+                  answerKeyBase64.startsWith("data:") ? answerKeyBase64.split(",")[1] : answerKeyBase64,
+                  "base64"
+                );
+                const akFilename = `${(title || "Test").replace(/[^a-zA-Z0-9]/g, "_")}_AnswerKey.pdf`;
+                const driveResult = await uploadFileToGoogleDrive({
+                  fileName: akFilename,
+                  mimeType: "application/pdf",
+                  buffer: akBuffer,
+                  subPath: "Test Portal/Answer Keys"
+                });
+                if (driveResult?.previewUrl) {
+                  answerKeyDriveUrl = driveResult.previewUrl;
+                  console.log(`[Drive] Answer key uploaded: ${driveResult.previewUrl}`);
+                }
+              } catch (driveErr: any) {
+                console.warn("[Drive] Answer key upload failed, storing base64 as fallback:", driveErr?.message);
+              }
+            }
+
             const payload = {
                 id,
                 title,
@@ -704,8 +754,12 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 passingMarks: passingMarks || 0,
                 startTime: startTime || null,
                 endTime: endTime || null,
-                questionPaperBase64: questionPaperBase64 || null,
-                answerKeyBase64: answerKeyBase64 || null,
+                // Store Drive URL if upload succeeded; fallback to base64 for legacy compatibility
+                questionPaperBase64: questionPaperDriveUrl || (questionPaperBase64 ? "[uploaded]" : null),
+                questionPaperUrl: questionPaperDriveUrl || null,
+                answerKeyBase64: answerKeyDriveUrl || (answerKeyBase64 ? "[uploaded]" : null),
+                answerKeyUrl: answerKeyDriveUrl || null,
+                hasQuestionPaper: !!(questionPaperBase64),
                 hasAnswerKey: !!(answerKeyBase64),
                 status: (published !== false) ? "published" : "draft",
                 published: published !== undefined ? !!published : true,
@@ -1301,4 +1355,136 @@ function parseQuestionsFromText(text: string, answerMap: Record<number, string> 
     }
 
     return Array.from(questionMap.values()).sort((a, b) => a.questionNo - b.questionNo);
+}
+
+// ─── Offline Student Test Permission Requests ────────────────────────────────
+// Students (offline mode) cannot directly write to Firestore from the client.
+// These backend routes use the admin SDK so both students and admins share data.
+
+const OFFLINE_REQUESTS_COLLECTION = "offlineTestPermissionRequests";
+
+export class OfflineTestRequestController {
+    /**
+     * POST /api/test-portal/permission-requests
+     * Student submits a permission request to attend a live test.
+     */
+    static async submitRequest(req: Request, res: Response) {
+        try {
+            const { id, testId, testTitle, studentId, studentName, rollNumber, batch, username, requestedAt } = req.body;
+            if (!testId || !studentId) {
+                return res.status(400).json({ success: false, message: "testId and studentId are required" });
+            }
+            const reqId = id || `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            const payload = {
+                id: reqId,
+                testId,
+                testTitle: testTitle || "",
+                studentId,
+                studentName: studentName || "",
+                rollNumber: rollNumber || "",
+                batch: batch || "",
+                username: username || "",
+                status: "pending",
+                requestedAt: requestedAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            await db.collection(OFFLINE_REQUESTS_COLLECTION).doc(reqId).set(payload, { merge: true });
+            return res.status(200).json({ success: true, data: payload });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] submit error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * GET /api/test-portal/permission-requests
+     * - Admin (no query param): returns all requests.
+     * - Student (?studentId=xxx or ?username=yyy): returns only that student's own requests.
+     */
+    static async getAll(req: Request, res: Response) {
+        try {
+            const { studentId, username } = req.query;
+            let snapshot: any;
+            if (studentId && typeof studentId === "string") {
+                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("studentId", "==", studentId)
+                    .get();
+            } else if (username && typeof username === "string") {
+                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("username", "==", username)
+                    .get();
+            } else {
+                // Admin: fetch all
+                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .get();
+            }
+            const requests = snapshot.docs.map((doc: any) => doc.data());
+            
+            // Sort in-memory desc by requestedAt to avoid requiring a composite index in Firestore
+            requests.sort((a: any, b: any) => {
+                const timeA = new Date(a.requestedAt || 0).getTime();
+                const timeB = new Date(b.requestedAt || 0).getTime();
+                return timeB - timeA;
+            });
+
+            return res.status(200).json({ success: true, data: requests });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] getAll error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * PATCH /api/test-portal/permission-requests/:id
+     * Admin approves or rejects a request.
+     */
+    static async updateStatus(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const { status } = req.body;
+            if (!["approved", "rejected", "pending"].includes(status)) {
+                return res.status(400).json({ success: false, message: "Invalid status. Use: approved, rejected, pending" });
+            }
+            await db.collection(OFFLINE_REQUESTS_COLLECTION).doc(id).update({
+                status,
+                updatedAt: new Date().toISOString()
+            });
+            return res.status(200).json({ success: true, message: `Request ${status}` });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] updateStatus error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * DELETE /api/test-portal/permission-requests/:id
+     * Admin deletes a specific request.
+     */
+    static async deleteRequest(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            await db.collection(OFFLINE_REQUESTS_COLLECTION).doc(id).delete();
+            return res.status(200).json({ success: true, message: "Request deleted" });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] delete error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * DELETE /api/test-portal/permission-requests
+     * Admin clears ALL requests.
+     */
+    static async clearAll(req: Request, res: Response) {
+        try {
+            const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION).get();
+            const batch = db.batch();
+            snapshot.docs.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+            return res.status(200).json({ success: true, message: "All requests cleared" });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] clearAll error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
 }

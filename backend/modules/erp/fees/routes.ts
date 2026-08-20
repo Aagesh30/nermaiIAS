@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { FeesController } from "./controller";
-import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
+import { requireAuth, requireRole, requirePermission } from "../../../core/middleware/auth.middleware";
 
 const router = Router();
 
@@ -17,15 +17,15 @@ router.use(requireAuth);
 router.use(requireRole(adminRoles));
 
 // Fee Structure Routes
-router.post("/structure", FeesController.createStructure);
-router.get("/structures", FeesController.getStructures);
+router.post("/structure", requirePermission("fees_management", "C"), FeesController.createStructure);
+router.get("/structures", requirePermission("fees_management", "R"), FeesController.getStructures);
 
 // Fee Assignment Routes
-router.post("/assign", FeesController.assignToStudent);
-router.get("/student/:studentId", FeesController.getStudentFees);
+router.post("/assign", requirePermission("fees_management", "C"), FeesController.assignToStudent);
+router.get("/student/:studentId", requirePermission("fees_management", "R"), FeesController.getStudentFees);
 
 // Payment Routes
-router.post("/payment", FeesController.recordPayment);
-router.get("/payments", FeesController.getAllPayments);
+router.post("/payment", requirePermission("fees_management", "C"), FeesController.recordPayment);
+router.get("/payments", requirePermission("fees_management", "R"), FeesController.getAllPayments);
 
 export default router;

@@ -353,6 +353,10 @@ export const loginStudent = async (req: Request, res: Response, next: NextFuncti
         return res.status(401).json({ status: 'error', message: 'User account has been deleted' });
       }
 
+      if (studentData.status === "pending") {
+        return res.status(401).json({ status: 'error', message: 'Your account is pending registration approval by the administrator.' });
+      }
+
       // Support both bcrypt hashed and legacy plaintext passwords
       let passwordMatch = false;
       if (studentData.passwordHash) {

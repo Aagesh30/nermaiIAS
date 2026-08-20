@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { StaffController } from "./controller";
-import { requireAuth, requireRole } from "../../../core/middleware/auth.middleware";
+import { requireAuth, requireRole, requirePermission } from "../../../core/middleware/auth.middleware";
 
 const router = Router();
 
@@ -35,9 +35,9 @@ router.get("/:id", requireSelfStaffOrAdmin, StaffController.getOne);
 // All other endpoints require full admin roles
 router.use(requireRole(adminRoles));
 
-router.get("/", StaffController.getAll);
-router.post("/", StaffController.create);
-router.put("/:id", StaffController.update);
-router.delete("/:id", StaffController.delete);
+router.get("/", requirePermission("staff_management", "R"), StaffController.getAll);
+router.post("/", requirePermission("staff_management", "C"), StaffController.create);
+router.put("/:id", requirePermission("staff_management", "U"), StaffController.update);
+router.delete("/:id", requirePermission("staff_management", "D"), StaffController.delete);
 
 export default router;

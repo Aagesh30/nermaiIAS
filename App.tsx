@@ -16,7 +16,6 @@ import {
   NativeModules
 } from "react-native";
 import Constants from "expo-constants";
-import * as ScreenCapture from "expo-screen-capture";
 
 // Custom Alert wrapper — routes to in-app modal on Web, native RNAlert on mobile
 const Alert = {
@@ -38,7 +37,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
 // Configure your Host IP address for local network connections
-const DEFAULT_HOST_IP = "192.168.0.240";
+const DEFAULT_HOST_IP = "192.168.0.120";
 // Timeout in ms for all API calls — 20s gives plenty of room on mobile Wi-Fi / LAN
 const API_TIMEOUT_MS = 20000;
 
@@ -245,134 +244,13 @@ function DateTimePickerSelect({
   );
 }
 
-let globalShowAlert: (title: string, message?: string, buttons?: any[]) => void = () => {};
+let globalShowAlert: (title: string, message?: string, buttons?: any[]) => void = () => { };
 if (typeof window !== "undefined") {
-  (window as any).globalShowAlert = () => {};
+  (window as any).globalShowAlert = () => { };
 } else if (typeof global !== "undefined") {
-  (global as any).globalShowAlert = () => {};
+  (global as any).globalShowAlert = () => { };
 }
 
-// Web screenshot protection helpers
-let rootContextMenuListener: any = null;
-let rootKeydownListener: any = null;
-let rootBlurListener: any = null;
-let rootFocusListener: any = null;
-let rootStyleElement: any = null;
-
-const enableRootWebScreenshotProtection = () => {
-  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
-
-  if (!rootStyleElement) {
-    rootStyleElement = document.createElement("style");
-    rootStyleElement.id = "root-screenshot-protection-styles";
-    rootStyleElement.innerHTML = `
-      @media print {
-        body {
-          display: none !important;
-        }
-      }
-      body {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-      }
-      img {
-        -webkit-user-drag: none !important;
-        -khtml-user-drag: none !important;
-        -moz-user-drag: none !important;
-        -o-user-drag: none !important;
-        user-drag: none !important;
-        pointer-events: none !important;
-      }
-    `;
-    document.head.appendChild(rootStyleElement);
-  }
-
-  if (!rootContextMenuListener) {
-    rootContextMenuListener = (e: MouseEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("contextmenu", rootContextMenuListener);
-  }
-
-  if (!rootKeydownListener) {
-    rootKeydownListener = (e: KeyboardEvent) => {
-      if (e.key === "PrintScreen") {
-        e.preventDefault();
-        try {
-          navigator.clipboard.writeText("");
-        } catch (_) {}
-        alert("Screenshots are disabled on this platform.");
-      }
-      if (
-        (e.ctrlKey && e.key === "p") ||
-        (e.ctrlKey && e.key === "s") ||
-        (e.ctrlKey && e.shiftKey && e.key === "I") ||
-        (e.ctrlKey && e.shiftKey && e.key === "i") ||
-        e.key === "F12" ||
-        (e.ctrlKey && e.key === "u") ||
-        (e.ctrlKey && e.shiftKey && e.key === "C") ||
-        (e.ctrlKey && e.shiftKey && e.key === "c")
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("keydown", rootKeydownListener, true);
-  }
-
-  if (!rootBlurListener) {
-    rootBlurListener = () => {
-      const rootDiv = document.getElementById("root") || document.body;
-      if (rootDiv) {
-        rootDiv.style.filter = "blur(15px)";
-        rootDiv.style.transition = "filter 0.2s ease";
-      }
-    };
-    window.addEventListener("blur", rootBlurListener);
-  }
-
-  if (!rootFocusListener) {
-    rootFocusListener = () => {
-      const rootDiv = document.getElementById("root") || document.body;
-      if (rootDiv) {
-        rootDiv.style.filter = "none";
-      }
-    };
-    window.addEventListener("focus", rootFocusListener);
-  }
-};
-
-const disableRootWebScreenshotProtection = () => {
-  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
-
-  if (rootStyleElement) {
-    rootStyleElement.remove();
-    rootStyleElement = null;
-  }
-  if (rootContextMenuListener) {
-    window.removeEventListener("contextmenu", rootContextMenuListener);
-    rootContextMenuListener = null;
-  }
-  if (rootKeydownListener) {
-    window.removeEventListener("keydown", rootKeydownListener, true);
-    rootKeydownListener = null;
-  }
-  if (rootBlurListener) {
-    window.removeEventListener("blur", rootBlurListener);
-    rootBlurListener = null;
-  }
-  if (rootFocusListener) {
-    window.removeEventListener("focus", rootFocusListener);
-    rootFocusListener = null;
-  }
-
-  const rootDiv = document.getElementById("root") || document.body;
-  if (rootDiv) {
-    rootDiv.style.filter = "none";
-  }
-};
 
 export default function App() {
   const { width: screenWidth } = useWindowDimensions();
@@ -407,34 +285,6 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    const shouldBlock = user && user.role !== "guest";
-    if (shouldBlock) {
-      if (Platform.OS !== "web") {
-        ScreenCapture.preventScreenCaptureAsync().catch(err => {
-          console.warn("Failed to prevent screen capture:", err);
-        });
-      } else {
-        enableRootWebScreenshotProtection();
-      }
-    } else {
-      if (Platform.OS !== "web") {
-        ScreenCapture.allowScreenCaptureAsync().catch(err => {
-          console.warn("Failed to allow screen capture:", err);
-        });
-      } else {
-        disableRootWebScreenshotProtection();
-      }
-    }
-
-    return () => {
-      if (Platform.OS !== "web") {
-        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
-      } else {
-        disableRootWebScreenshotProtection();
-      }
-    };
-  }, [user]);
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
@@ -671,10 +521,28 @@ export default function App() {
       if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.") || hostname.startsWith("10.") || hostname.startsWith("172.")) {
         return `http://${hostname}:5000/api`;
       }
+      return `https://${hostname}/api`;
     }
+    // On native mobile (Android / iOS):
+    // 1. Always use hostIp if it's set (including DEFAULT_HOST_IP)
+    if (hostIp && hostIp.trim()) {
+      const trimmedIp = hostIp.trim();
+      if (trimmedIp.startsWith("http://") || trimmedIp.startsWith("https://")) {
+        return trimmedIp.endsWith("/api") ? trimmedIp : `${trimmedIp}/api`;
+      }
+      // If it's a domain name (e.g., contains a dot but isn't a plain IPv4 address)
+      if (trimmedIp.includes(".") && !/^\d+\.\d+\.\d+\.\d+$/.test(trimmedIp)) {
+        return `https://${trimmedIp}/api`;
+      }
+      return `http://${trimmedIp}:5000/api`;
+    }
+    // 2. If running inside local Expo Go development (where autoIp is detected), use local server
     const autoIp = getAutoDetectedHostIp();
-    const targetIp = hostIpRef.current || autoIp || DEFAULT_HOST_IP;
-    return `http://${targetIp}:5000/api`;
+    if (autoIp) {
+      return `http://${autoIp}:5000/api`;
+    }
+    // 3. Last resort: use DEFAULT_HOST_IP directly
+    return `http://${DEFAULT_HOST_IP}:5000/api`;
   };
   const extractionAbortRef = useRef<AbortController | null>(null);
 
@@ -1238,7 +1106,7 @@ export default function App() {
         // If auto-login is enabled (user didn't explicitly log out), log in automatically
         if (persisted.autoLogin) {
           try {
-            const baseUrl = `http://${hostIpRef.current || DEFAULT_HOST_IP}:5000/api`;
+            const baseUrl = getBaseUrl();
             const res = await fetch(`${baseUrl}/crm/leads/guest-login`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1315,21 +1183,28 @@ export default function App() {
       loadNotifications();
       loadStudents();
       loadBatches();
-      loadProfileRequests();
-      loadStaff();
-      loadFees();
-      loadTests();
-      loadQuestions();
-      loadAdmissions();
-      loadLeads();
-      loadCampaigns();
-      loadFeedback();
       loadTodayQuiz();
       loadAllQuizzes();
-      loadRolePermissions();
-      api.get("/developer/page-locks").then((res: any) => setDevPageLocks(res?.data || res || {})).catch(() => {});
-      if (user.role && ["developer", "super_admin", "admin"].includes(user.role)) {
-        loadPendingApprovals();
+      loadCampaigns();
+
+      // Only load administrative datasets for admin/staff/developer roles
+      if (user.role && ["developer", "super_admin", "admin", "staff", "editor", "contributor"].includes(user.role)) {
+        loadProfileRequests();
+        loadStaff();
+        loadFees();
+        loadTests();
+        loadQuestions();
+        loadAdmissions();
+        loadLeads();
+        loadFeedback();
+        loadRolePermissions();
+        api.get("/developer/page-locks").then((res: any) => setDevPageLocks(res?.data || res || {})).catch(() => { });
+        if (user.role && ["developer", "super_admin", "admin"].includes(user.role)) {
+          loadPendingApprovals();
+        }
+      } else {
+        // Students still need to load tests to take them
+        loadTests();
       }
     } else {
       loadAnnouncements();
@@ -1503,8 +1378,10 @@ export default function App() {
 
   const loadStudents = async () => {
     try {
-      const res = await api.get("/erp/student");
-      setStudents(res?.data || res || []);
+      const endpoint = user?.role === "student" ? "/erp/student/profile/me" : "/erp/student";
+      const res = await api.get(endpoint);
+      const data = res?.data || res;
+      setStudents(Array.isArray(data) ? data : [data]);
     } catch (e) {
       console.log("Failed loading students:", e);
       setStudents([]);
@@ -2156,6 +2033,59 @@ export default function App() {
 
 
 
+  const renderServerSettingsModal = () => {
+    return (
+      <Modal
+        visible={showIpConfig}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowIpConfig(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={{ width: "100%", maxWidth: 320, backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, padding: 20, borderWidth: 1, borderColor: darkMode ? "#333" : "#eee" }}>
+            <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", marginBottom: 12 }}>Server Settings</Text>
+            
+            <Text style={{ fontSize: 12, color: darkMode ? "#aaa" : "#666", marginBottom: 6 }}>Host Server IP or Domain:</Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 12, color: darkMode ? "#fff" : "#212121", borderColor: darkMode ? "#444" : "#ccc" }]}
+              value={hostIp}
+              onChangeText={setHostIp}
+              placeholder="192.168.x.x or domain"
+              placeholderTextColor="#999"
+              autoCapitalize="none"
+            />
+            
+            <View style={{ flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+              <TouchableOpacity 
+                onPress={() => setShowIpConfig(false)} 
+                style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5" }}
+              >
+                <Text style={{ color: darkMode ? "#ccc" : "#333", fontSize: 12, fontWeight: "bold" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => setShowIpConfig(false)} 
+                style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, backgroundColor: "#c62828" }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity 
+              onPress={() => {
+                setHostIp("nermaiiasacademy-519c8.web.app");
+                setShowIpConfig(false);
+                Alert.alert("Server Configured", "Connected to the Live Production Server!");
+              }} 
+              style={{ marginTop: 15, paddingVertical: 8, backgroundColor: "#c6282815", borderRadius: 6, alignItems: "center" }}
+            >
+              <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>⚡ CONNECT TO PRODUCTION SERVER</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   // Auth Submit
   const handleAuth = async (overrideUser?: string, overridePass?: string, forceLogin?: boolean) => {
     const u = overrideUser !== undefined ? overrideUser : username;
@@ -2434,7 +2364,7 @@ export default function App() {
       return;
     }
 
-    const detailsText = 
+    const detailsText =
       `Name: ${profileForm.name}\n` +
       `DOB: ${profileForm.dob}\n` +
       `Blood Group: ${profileForm.bloodGroup || "—"}\n` +
@@ -3626,6 +3556,15 @@ export default function App() {
     return (
       <SafeAreaView style={styles.authContainer}>
         <StatusBar style="dark" />
+        {renderServerSettingsModal()}
+
+        {/* Settings gear to configure Server Connection on login screen */}
+        <View style={{ position: "absolute", top: Platform.OS === "ios" ? 50 : 20, right: 20, zIndex: 10 }}>
+          <TouchableOpacity onPress={() => setShowIpConfig(true)} style={{ padding: 10 }}>
+            <Ionicons name="settings-outline" size={24} color="#757575" />
+          </TouchableOpacity>
+        </View>
+
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, width: "100%" }}>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20 }}>
             <View style={styles.authCard}>
@@ -3635,23 +3574,7 @@ export default function App() {
                   <Text style={styles.authTitle}>NERMAI IAS ACADEMY</Text>
                 </View>
                 <Text style={styles.authSubtitle}>Integrated Learning Platform</Text>
-              </View>{showIpConfig && (
-                <View style={styles.ipConfigBox}>
-                  <Text style={styles.ipConfigLabel}>Host Server IP Address:</Text>
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TextInput
-                      style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                      value={hostIp}
-                      onChangeText={setHostIp}
-                      placeholder="192.168.x.x"
-                      placeholderTextColor="#999"
-                    />
-                    <TouchableOpacity onPress={() => setShowIpConfig(false)} style={styles.ipSaveBtn}>
-                      <Text style={{ color: "#ffffff", fontWeight: "bold" }}>Save</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
+              </View>
 
               {/* Sign In Tab */}
               <View style={styles.authTabs}>
@@ -3746,6 +3669,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
+        {renderServerSettingsModal()}
 
         {/* Hamburger Drawer Overlay */}
         {showHamburger && (
@@ -4279,9 +4203,9 @@ export default function App() {
                     <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
                       <Text style={styles.outlineBtnTxt}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       disabled={submittingAdmission}
-                      onPress={handleGuestAdmission} 
+                      onPress={handleGuestAdmission}
                       style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
                     >
                       {submittingAdmission ? (
@@ -4507,9 +4431,9 @@ export default function App() {
                     <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
                       <Text style={styles.outlineBtnTxt}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       disabled={submittingAdmission}
-                      onPress={handleGuestAdmission} 
+                      onPress={handleGuestAdmission}
                       style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
                     >
                       {submittingAdmission ? (
@@ -4620,12 +4544,12 @@ export default function App() {
               <View style={{ gap: 10 }}>
                 {(() => {
                   const q = attemptQuestions[currentQIdx];
-                  const rawOpts = Array.isArray(q.options) 
-                    ? q.options 
+                  const rawOpts = Array.isArray(q.options)
+                    ? q.options
                     : (q.options && typeof q.options === "object"
                       ? [q.options.A?.en || q.options.A || "", q.options.B?.en || q.options.B || "", q.options.C?.en || q.options.C || "", q.options.D?.en || q.options.D || ""]
                       : []);
-                  
+
                   const opts = rawOpts.map((o: any, idx: number) => {
                     let val = String(o || "").trim();
                     const rawTa = Array.isArray(q.optionsTa) ? q.optionsTa[idx] : (q.options && typeof q.options === "object" ? (q.options[["A", "B", "C", "D"][idx]]?.ta || "") : "");
@@ -4901,6 +4825,7 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.container, darkMode && { backgroundColor: "#121212" }]}>
       <StatusBar style={darkMode ? "light" : "dark"} />
+      {renderServerSettingsModal()}
 
       {/* Hamburger Drawer Overlay */}
       {showHamburger && (
@@ -5197,18 +5122,18 @@ export default function App() {
                     const myStudent = getLoggedInStudent(user, students);
                     const studentId = myStudent?.id || user?.studentId || user?.userId || "";
                     const myName = myStudent ? getStudentName(myStudent) : "";
-                    
+
                     if (notif.targetStudentId) {
                       return notif.targetStudentId === studentId;
                     }
-                    
+
                     // Fallback name check for individual notifications
                     const isIndividual = notif.title?.includes("Fee Payment Alert - ") || notif.message?.includes("Dear ");
                     if (isIndividual) {
                       if (!myName) return false;
                       return notif.title?.includes(myName) || notif.message?.includes(myName);
                     }
-                    
+
                     return true;
                   });
 
@@ -6531,8 +6456,8 @@ export default function App() {
                             <Text style={{ fontWeight: "bold", color: "#757575", marginBottom: 6, fontSize: 13 }}>📞 Contact Details</Text>
                             <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor="#999" value={newStudent.phone} onChangeText={p => setNewStudent({ ...newStudent, phone: cleanPhone(p) })} maxLength={10} keyboardType="phone-pad" />
 
-                            <TouchableOpacity 
-                              onPress={createStudentRecord} 
+                            <TouchableOpacity
+                              onPress={createStudentRecord}
                               style={[styles.primaryBtn, { marginTop: 10 }]}
                               disabled={isSavingStudent}
                             >
@@ -7231,8 +7156,8 @@ export default function App() {
                       <TextInput style={styles.input} placeholder="Batch Name (e.g. Batch 43)" placeholderTextColor="#999" value={newBatch.batchName} onChangeText={v => setNewBatch({ ...newBatch, batchName: v })} />
                       <TextInput style={styles.input} placeholder="Course (e.g. LDC / UPSC GS / TNPSC)" placeholderTextColor="#999" value={newBatch.course} onChangeText={v => setNewBatch({ ...newBatch, course: v })} />
                       <TextInput style={styles.input} placeholder="Description (optional)" placeholderTextColor="#999" value={newBatch.description} onChangeText={v => setNewBatch({ ...newBatch, description: v })} />
-                      <TouchableOpacity 
-                        onPress={createBatch} 
+                      <TouchableOpacity
+                        onPress={createBatch}
                         style={styles.primaryBtn}
                         disabled={isSavingBatch}
                       >
@@ -7305,8 +7230,8 @@ export default function App() {
                               </View>
                             ) : null}
                             <View style={{ flexDirection: "row", gap: 10, marginTop: 6 }}>
-                              <TouchableOpacity 
-                                onPress={() => approveProfileRequest(r.id)} 
+                              <TouchableOpacity
+                                onPress={() => approveProfileRequest(r.id)}
                                 style={{ flex: 1, backgroundColor: "#4caf50", borderRadius: 8, padding: 10, alignItems: "center" }}
                                 disabled={isProcessingProfile === r.id}
                               >
@@ -7316,8 +7241,8 @@ export default function App() {
                                   <Text style={{ color: "#fff", fontWeight: "bold" }}>✅ Approve</Text>
                                 )}
                               </TouchableOpacity>
-                              <TouchableOpacity 
-                                onPress={() => rejectProfileRequest(r.id, "Please resubmit with correct documents.")} 
+                              <TouchableOpacity
+                                onPress={() => rejectProfileRequest(r.id, "Please resubmit with correct documents.")}
                                 style={{ flex: 1, backgroundColor: "#c62828", borderRadius: 8, padding: 10, alignItems: "center" }}
                                 disabled={isProcessingProfile === r.id}
                               >
@@ -7655,17 +7580,17 @@ export default function App() {
                             <TextInput style={styles.input} placeholder="Login Username *" placeholderTextColor="#999" value={newStaff.loginUsername} onChangeText={u => setNewStaff({ ...newStaff, loginUsername: u })} />
                             <TextInput style={styles.input} placeholder="Login Password *" secureTextEntry placeholderTextColor="#999" value={newStaff.loginPassword} onChangeText={pw => setNewStaff({ ...newStaff, loginPassword: pw })} />
 
-                            <TouchableOpacity 
-                               onPress={createStaffRecord} 
-                               style={styles.primaryBtn}
-                               disabled={isSavingAdmin}
-                             >
-                               {isSavingAdmin ? (
-                                 <ActivityIndicator color="#ffffff" size="small" />
-                               ) : (
-                                 <Text style={styles.primaryBtnTxt}>Add Admin Record</Text>
-                               )}
-                             </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={createStaffRecord}
+                              style={styles.primaryBtn}
+                              disabled={isSavingAdmin}
+                            >
+                              {isSavingAdmin ? (
+                                <ActivityIndicator color="#ffffff" size="small" />
+                              ) : (
+                                <Text style={styles.primaryBtnTxt}>Add Admin Record</Text>
+                              )}
+                            </TouchableOpacity>
                           </>
                         )}
                       </View>

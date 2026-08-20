@@ -21,6 +21,15 @@ router.get("/page-locks", DeveloperController.getPageLocks);
 // Protect ALL other developer routes: must be authenticated
 router.use(requireAuth);
 
+// Role permissions reading is allowed for all admin/staff roles so their frontend can configure views
+router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff']), DeveloperController.getRolePermissions);
+
+// Allow admin/staff roles to submit approval request notifications
+router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff']), (req, res, next) => {
+  req.params.name = "notifications";
+  next();
+}, DeveloperController.createDocument);
+
 // All other developer routes require super_admin role
 router.use(requireRole(['super_admin']));
 
@@ -38,11 +47,16 @@ router.delete("/collection/:name/:docId", DeveloperController.deleteDocument);
 // Raw Firestore query
 router.post("/query/:name", DeveloperController.rawQuery);
 
-// Custom Role Permissions Management
-router.get("/role-permissions", DeveloperController.getRolePermissions);
+// Custom Role Permissions Management (Writes)
 router.put("/role-permissions/:role", DeveloperController.updateRolePermissions);
 
 // Global Page Lock Management
 router.put("/page-locks", DeveloperController.updatePageLocks);
+
+// ── Google Drive Config (Super Admin only) ────────────────────────────────────
+// NOTE: test route must come before :name wildcard routes, so it's registered here explicitly
+router.get("/drive-config", DeveloperController.getDriveConfig);
+router.put("/drive-config", DeveloperController.saveDriveConfig);
+router.post("/drive-config/test", DeveloperController.testDriveConnection);
 
 export default router;

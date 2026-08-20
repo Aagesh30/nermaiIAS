@@ -12,6 +12,7 @@ import { logResourceOpen } from './analytics';
 import { FirebaseStorageProvider } from './providers/FirebaseStorageProvider';
 import { GoogleDriveProvider } from './providers/GoogleDriveProvider';
 import { IResourceProvider } from './providers/IResourceProvider';
+import { uploadFileToGoogleDrive } from '../../services/google_drive';
 
 export class ResourceService {
   private repo = new ResourceRepository();
@@ -25,23 +26,45 @@ export class ResourceService {
     let finalStoragePath = '';
     let checksum = '';
     let fileSize = data.fileSize ? parseInt(data.fileSize) : 0;
+    let resolvedProvider = 'firebase_storage';
     
     // 1. Direct Local File Upload (Multipart)
     if (file) {
       fileSize = file.size;
       checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
-      
-      const bucket = this.getBucket();
-      const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
-      const bucketFile = bucket.file(destPath);
-      
-      await bucketFile.save(file.buffer, {
-        metadata: { contentType: data.mimeType || file.mimetype }
-      });
-      
-      finalStoragePath = destPath;
+
+      // Try Google Drive first
+      let driveSuccess = false;
+      try {
+        const driveResult = await uploadFileToGoogleDrive({
+          fileName: `${Date.now()}_${file.originalname}`,
+          mimeType: data.mimeType || file.mimetype,
+          buffer: file.buffer,
+          subPath: 'LMS/Resources'
+        });
+        if (driveResult && driveResult.previewUrl) {
+          finalStoragePath = driveResult.previewUrl;
+          resolvedProvider = 'google_drive';
+          driveSuccess = true;
+          console.log(`[Drive] Resource uploaded: ${driveResult.previewUrl}`);
+        }
+      } catch (driveErr: any) {
+        console.warn('[Drive] Resource upload failed, falling back to Firebase Storage:', driveErr?.message);
+      }
+
+      // Fallback: Firebase Storage
+      if (!driveSuccess) {
+        const bucket = this.getBucket();
+        const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
+        const bucketFile = bucket.file(destPath);
+        await bucketFile.save(file.buffer, {
+          metadata: { contentType: data.mimeType || file.mimetype }
+        });
+        finalStoragePath = destPath;
+        resolvedProvider = 'firebase_storage';
+      }
     } 
-    // 2. Google Drive Import
+    // 2. Google Drive Import (admin pastes a Drive link)
     else if (data.googleDriveUrl) {
       const gDriveMatch = data.googleDriveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if (gDriveMatch && gDriveMatch[1]) {
@@ -61,7 +84,7 @@ export class ResourceService {
       throw new AppError('Must provide a file, googleDriveUrl, or externalUrl', 400);
     }
 
-    const provider = data.provider || (data.googleDriveUrl ? 'google_drive' : 'firebase_storage');
+      const provider = resolvedProvider || data.provider || (data.googleDriveUrl ? 'google_drive' : 'firebase_storage');
 
     const resourceData: IResource = {
       tenantId,
@@ -582,17 +605,44 @@ YES
 
     const fileSize = file.size;
     const checksum = crypto.createHash('sha256').update(file.buffer).digest('hex');
-    
-    const bucket = this.getBucket();
-    const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
-    const bucketFile = bucket.file(destPath);
-    
-    await bucketFile.save(file.buffer, {
-      metadata: { contentType: file.mimetype }
-    });
+
+    let newStoragePath = '';
+    let newProvider = existing.provider;
+
+    // Try Google Drive first
+    let driveSuccess = false;
+    try {
+      const driveResult = await uploadFileToGoogleDrive({
+        fileName: `${Date.now()}_${file.originalname}`,
+        mimeType: file.mimetype,
+        buffer: file.buffer,
+        subPath: 'LMS/Resources'
+      });
+      if (driveResult && driveResult.previewUrl) {
+        newStoragePath = driveResult.previewUrl;
+        newProvider = 'google_drive';
+        driveSuccess = true;
+        console.log(`[Drive] Resource version uploaded: ${driveResult.previewUrl}`);
+      }
+    } catch (driveErr: any) {
+      console.warn('[Drive] Version upload failed, falling back to Firebase Storage:', driveErr?.message);
+    }
+
+    // Fallback: Firebase Storage
+    if (!driveSuccess) {
+      const bucket = this.getBucket();
+      const destPath = `resources/${tenantId}/${Date.now()}_${file.originalname}`;
+      const bucketFile = bucket.file(destPath);
+      await bucketFile.save(file.buffer, {
+        metadata: { contentType: file.mimetype }
+      });
+      newStoragePath = destPath;
+      newProvider = 'firebase_storage';
+    }
 
     const updateData: Partial<IResource> = {
-      storagePath: encrypt(destPath),
+      storagePath: encrypt(newStoragePath),
+      provider: newProvider as any,
       checksum,
       fileSize,
       mimeType: file.mimetype,
@@ -604,11 +654,13 @@ YES
 
     await this.repo.update(resourceId, updateData, userId);
     
-    // Attempt to delete old file
-    try {
-      const oldPath = decrypt(existing.storagePath);
-      await this.getBucket().file(oldPath).delete();
-    } catch(e) {}
+    // Attempt to delete old file only if it was in Firebase Storage
+    if (existing.provider === 'firebase_storage') {
+      try {
+        const oldPath = decrypt(existing.storagePath);
+        await this.getBucket().file(oldPath).delete();
+      } catch(e) {}
+    }
 
     return { ...existing, ...updateData };
   }

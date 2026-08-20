@@ -13,10 +13,11 @@ import {
   Image,
   ActivityIndicator,
   useWindowDimensions,
-  Linking
+  Linking,
+  Animated,
+  Easing
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import * as ScreenCapture from "expo-screen-capture";
 
 // Dynamically load HashRouter only on Web to prevent React Native mobile app crashes on startup
 let HashRouter: any = React.Fragment;
@@ -93,7 +94,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import { handleFirebaseGoogleSignIn } from "./firebaseConfig";
+import { handleFirebaseGoogleSignIn, db } from "./firebaseConfig";
+import { doc, setDoc, onSnapshot, collection, deleteDoc } from "firebase/firestore";
 
 // Inject Vector Icon FontFace styles dynamically for production Web builds
 if (Platform.OS === "web" && typeof document !== "undefined") {
@@ -140,9 +142,9 @@ if (Platform.OS === "web" && typeof document !== "undefined") {
 }
 
 // Configure your Host IP address for local network connections
-const DEFAULT_HOST_IP = "10.42.115.38";
-// Timeout in ms for all API calls — 12s gives plenty of room on LAN
-const API_TIMEOUT_MS = 12000;
+const DEFAULT_HOST_IP = "192.168.0.120";
+// Timeout in ms for all API calls — 30s to handle Firebase Cloud Function cold starts
+const API_TIMEOUT_MS = 30000;
 
 // Native & Web Universal PDF Export Helper
 const downloadPdfDocument = async (html: string, fileName: string) => {
@@ -593,127 +595,770 @@ const getSavedNav = () => {
   return { activeTabVal, erpSubVal, lmsSubVal, crmSubVal, testSubVal, guestTabVal, hasExplicitSub };
 };
 
-// Web screenshot protection helpers
-let webContextMenuListener: any = null;
-let webKeydownListener: any = null;
-let webBlurListener: any = null;
-let webFocusListener: any = null;
-let webStyleElement: any = null;
 
-const enableWebScreenshotProtection = () => {
-  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+// ─── SPLASH SCREEN ────────────────────────────────────────────────────────────
+function SplashScreen({ onDone }: { onDone: () => void }) {
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.55)).current;
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const taglineOpacity = useRef(new Animated.Value(0)).current;
+  const starScale = useRef(new Animated.Value(0)).current;
 
-  if (!webStyleElement) {
-    webStyleElement = document.createElement("style");
-    webStyleElement.id = "screenshot-protection-styles";
-    webStyleElement.innerHTML = `
-      @media print {
-        body {
-          display: none !important;
+  useEffect(() => {
+    // Inject CSS for gradient background
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      const style = document.createElement("style");
+      style.innerHTML = `
+        .splash-bg {
+          background: radial-gradient(ellipse at 30% 20%, #b71c1c 0%, #7b0000 50%, #4a0000 100%) !important;
         }
-      }
-      body {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-      }
-      img {
-        -webkit-user-drag: none !important;
-        -khtml-user-drag: none !important;
-        -moz-user-drag: none !important;
-        -o-user-drag: none !important;
-        user-drag: none !important;
-        pointer-events: none !important;
-      }
-    `;
-    document.head.appendChild(webStyleElement);
-  }
+        .flip-card-inner { transition: transform 0.65s cubic-bezier(0.4,0,0.2,1); transform-style: preserve-3d; }
+        .flip-card-inner.flipped { transform: rotateY(180deg); }
+        .flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .flip-face-back { transform: rotateY(180deg); }
+        @keyframes float-up-down { 0%,100%{transform:translateY(0px)} 50%{transform:translateY(-10px)} }
+        @keyframes orbit { from{transform:rotate(0deg) translateX(72px) rotate(0deg)} to{transform:rotate(360deg) translateX(72px) rotate(-360deg)} }
+        @keyframes pulse-ring { 0%{transform:scale(0.95);opacity:0.7} 70%{transform:scale(1.08);opacity:0.4} 100%{transform:scale(0.95);opacity:0.7} }
+        @keyframes graph-grow { from{transform:scaleX(0)} to{transform:scaleX(1)} }
+        @keyframes slide-in-up { from{transform:translateY(30px);opacity:0} to{transform:translateY(0);opacity:1} }
+        .float-icon { animation: float-up-down 2.4s ease-in-out infinite; }
+        .float-icon-2 { animation: float-up-down 2.8s ease-in-out infinite 0.4s; }
+        .float-icon-3 { animation: float-up-down 3.2s ease-in-out infinite 0.8s; }
+        .orbit-icon { position:absolute; animation: orbit linear infinite; transform-origin: center center; }
+        .pulse-ring { animation: pulse-ring 2s ease-in-out infinite; }
+        .graph-bar { animation: graph-grow 1.2s ease-out forwards; transform-origin: left; }
+        .slide-in { animation: slide-in-up 0.6s ease-out forwards; }
+      `;
+      document.head.appendChild(style);
+    }
 
-  if (!webContextMenuListener) {
-    webContextMenuListener = (e: MouseEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("contextmenu", webContextMenuListener);
-  }
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(logoOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.spring(logoScale, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
+      ]),
+      Animated.timing(textOpacity, { toValue: 1, duration: 600, delay: 100, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
+      Animated.timing(taglineOpacity, { toValue: 1, duration: 500, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
+      Animated.spring(starScale, { toValue: 1, tension: 80, friction: 6, useNativeDriver: true }),
+    ]).start();
 
-  if (!webKeydownListener) {
-    webKeydownListener = (e: KeyboardEvent) => {
-      if (e.key === "PrintScreen") {
-        e.preventDefault();
-        try {
-          navigator.clipboard.writeText("");
-        } catch (_) {}
-        alert("Screenshots are disabled on this platform.");
-      }
-      if (
-        (e.ctrlKey && e.key === "p") ||
-        (e.ctrlKey && e.key === "s") ||
-        (e.ctrlKey && e.shiftKey && e.key === "I") ||
-        (e.ctrlKey && e.shiftKey && e.key === "i") ||
-        e.key === "F12" ||
-        (e.ctrlKey && e.key === "u") ||
-        (e.ctrlKey && e.shiftKey && e.key === "C") ||
-        (e.ctrlKey && e.shiftKey && e.key === "c")
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("keydown", webKeydownListener, true);
-  }
+    const timer = setTimeout(() => onDone(), 2800);
+    return () => clearTimeout(timer);
+  }, []);
 
-  if (!webBlurListener) {
-    webBlurListener = () => {
-      const rootDiv = document.getElementById("root") || document.body;
-      if (rootDiv) {
-        rootDiv.style.filter = "blur(15px)";
-        rootDiv.style.transition = "filter 0.2s ease";
-      }
-    };
-    window.addEventListener("blur", webBlurListener);
-  }
+  return (
+    <View style={{ flex: 1, backgroundColor: "#7b0000", alignItems: "center", justifyContent: "center" }}>
+      {Platform.OS === "web" && (
+        <style>{`
+          .splash-root { background: radial-gradient(ellipse at 30% 20%, #b71c1c 0%, #7b0000 55%, #3e0000 100%); }
+        `}</style>
+      )}
+      {/* Decorative circles */}
+      <View style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: 110, backgroundColor: "rgba(255,255,255,0.04)" }} />
+      <View style={{ position: "absolute", bottom: -80, left: -60, width: 280, height: 280, borderRadius: 140, backgroundColor: "rgba(255,255,255,0.03)" }} />
+      <View style={{ position: "absolute", top: 80, left: 30, width: 80, height: 80, borderRadius: 40, backgroundColor: "rgba(255,255,255,0.04)" }} />
 
-  if (!webFocusListener) {
-    webFocusListener = () => {
-      const rootDiv = document.getElementById("root") || document.body;
-      if (rootDiv) {
-        rootDiv.style.filter = "none";
-      }
-    };
-    window.addEventListener("focus", webFocusListener);
-  }
-};
+      <Animated.View style={{ opacity: logoOpacity, transform: [{ scale: logoScale }], alignItems: "center", marginBottom: 32 }}>
+        {/* Logo ring */}
+        <View style={{
+          width: 120, height: 120, borderRadius: 60,
+          backgroundColor: "rgba(255,255,255,0.12)",
+          alignItems: "center", justifyContent: "center",
+          borderWidth: 2, borderColor: "rgba(255,255,255,0.25)",
+          shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 16, elevation: 10
+        }}>
+          <Image
+            source={require("./assets/logo.png")}
+            style={{ width: 90, height: 90, borderRadius: 45 }}
+            resizeMode="cover"
+          />
+        </View>
+      </Animated.View>
 
-const disableWebScreenshotProtection = () => {
-  if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return;
+      <Animated.View style={{ opacity: textOpacity, alignItems: "center" }}>
+        {/* Gold divider line */}
+        <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 8 }}>
+          <View style={{ height: 1.5, width: 40, backgroundColor: "#FFD700" }} />
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#FFD700" }} />
+          <View style={{ height: 1.5, width: 40, backgroundColor: "#FFD700" }} />
+        </View>
+        <Text style={{ fontSize: 28, fontWeight: "900", color: "#FFFFFF", letterSpacing: 2, textAlign: "center" }}>NERMAI</Text>
+        <Text style={{ fontSize: 18, fontWeight: "700", color: "#FFCDD2", letterSpacing: 4, textAlign: "center", marginTop: 2 }}>IAS ACADEMY</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 }}>
+          <View style={{ height: 1, width: 50, backgroundColor: "rgba(255,215,0,0.5)" }} />
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#FFD700" }} />
+          <View style={{ height: 1, width: 50, backgroundColor: "rgba(255,215,0,0.5)" }} />
+        </View>
+      </Animated.View>
 
-  if (webStyleElement) {
-    webStyleElement.remove();
-    webStyleElement = null;
-  }
-  if (webContextMenuListener) {
-    window.removeEventListener("contextmenu", webContextMenuListener);
-    webContextMenuListener = null;
-  }
-  if (webKeydownListener) {
-    window.removeEventListener("keydown", webKeydownListener, true);
-    webKeydownListener = null;
-  }
-  if (webBlurListener) {
-    window.removeEventListener("blur", webBlurListener);
-    webBlurListener = null;
-  }
-  if (webFocusListener) {
-    window.removeEventListener("focus", webFocusListener);
-    webFocusListener = null;
-  }
+      <Animated.View style={{ opacity: taglineOpacity, alignItems: "center", marginTop: 28, paddingHorizontal: 40 }}>
+        <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", textAlign: "center", lineHeight: 22, fontStyle: "italic" }}>
+          Your Journey Towards{"\n"}Competitive Excellence
+        </Text>
+      </Animated.View>
 
-  const rootDiv = document.getElementById("root") || document.body;
-  if (rootDiv) {
-    rootDiv.style.filter = "none";
-  }
-};
+      {/* Loading dots */}
+      <Animated.View style={{ opacity: taglineOpacity, flexDirection: "row", gap: 8, marginTop: 48 }}>
+        {[0, 1, 2].map(i => (
+          <View key={i} style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i === 1 ? "#FFD700" : "rgba(255,255,255,0.4)" }} />
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── ONBOARDING SCREENS ──────────────────────────────────────────────────────
+const ONBOARDING_KEY = "nermai_onboarding_done";
+
+function OnboardingScreens({ onDone }: { onDone: () => void }) {
+  const [slide, setSlide] = useState(0);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const contentAnim = useRef(new Animated.Value(0)).current;
+  const orbitAnim = useRef(new Animated.Value(0)).current;
+  const barAnim = useRef(new Animated.Value(0)).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  const cardsAnim = useRef([
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0)
+  ]).current;
+  const bentoAnim = useRef([
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0)
+  ]).current;
+
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isLargeScreen = windowWidth > 768;
+  const orbitRadius = isLargeScreen ? 120 : 98;
+  const centralCircleSize = isLargeScreen ? 104 : 86;
+  const badgeSize = isLargeScreen ? 50 : 42;
+
+  useEffect(() => {
+    contentAnim.setValue(0);
+    Animated.timing(contentAnim, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.back(1.0)) }).start();
+
+    if (slide === 0) {
+      cardsAnim.forEach(anim => anim.setValue(0));
+      const animations = cardsAnim.map(anim =>
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+          easing: Easing.out(Easing.back(0.8))
+        })
+      );
+      Animated.stagger(80, animations).start();
+    }
+
+    Animated.loop(
+      Animated.timing(orbitAnim, { toValue: 1, duration: 10000, useNativeDriver: true, easing: Easing.linear })
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, { toValue: 1, duration: 1800, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 1800, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      ])
+    ).start();
+
+    if (slide === 2) {
+      bentoAnim.forEach(anim => anim.setValue(0));
+      const animations = bentoAnim.map(anim =>
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+          easing: Easing.out(Easing.ease)
+        })
+      );
+      Animated.stagger(100, animations).start();
+
+      barAnim.setValue(0);
+      Animated.timing(barAnim, { toValue: 1, duration: 1500, delay: 300, useNativeDriver: false, easing: Easing.out(Easing.ease) }).start();
+    }
+  }, [slide]);
+
+  const goNext = () => {
+    if (slide < 2) { setSlide(slide + 1); }
+    else { markDone(); }
+  };
+
+  const markDone = () => {
+    try { if (Platform.OS === "web") localStorage.setItem(ONBOARDING_KEY, "true"); } catch (e) { }
+    onDone();
+  };
+
+  const slides = [
+    {
+      bg: ["#c62828", "#7b0000"],
+      title: "WELCOME TO",
+      subtitle: "NERMAI IAS ACADEMY",
+      desc: "Prepare for UPSC, TNPSC, Puducherry Government Exams, UDC, LDC, VAO, Banking, SSC and other competitive examinations — all from one learning platform.",
+      icons: [
+        { icon: "school-outline", label: "Govt Exams", dx: -90, dy: -40, color: "#c62828" },
+        { icon: "trophy-outline", label: "Excellence", dx: 90, dy: -40, color: "#ffa726" },
+        { icon: "book-outline", label: "Study", dx: -80, dy: 50, color: "#29b6f6" },
+        { icon: "star-outline", label: "Success", dx: 80, dy: 50, color: "#66bb6a" },
+      ]
+    },
+    {
+      bg: ["#1565c0", "#0d3b7a"],
+      title: "LEARN WITHOUT LIMITS",
+      subtitle: "",
+      desc: "Access live classes, study materials, handouts, assignments and recorded lectures to continue your preparation anytime, anywhere.",
+      icons: [
+        { icon: "videocam", label: "Live Classes", angle: 0, color: "#ef5350" },
+        { icon: "document-text", label: "Handouts", angle: 60, color: "#ffa726" },
+        { icon: "create", label: "Assignments", angle: 120, color: "#66bb6a" },
+        { icon: "play-circle", label: "Video Library", angle: 180, color: "#ab47bc" },
+        { icon: "book", label: "Study Materials", angle: 240, color: "#29b6f6" },
+        { icon: "headset", label: "Recorded", angle: 300, color: "#26a69a" },
+      ],
+      benefits: [
+        { icon: "school-outline", title: "ANYTIME LEARNING", sub: "Learn at your convenience" },
+        { icon: "phone-portrait-outline", title: "ANYWHERE ACCESS", sub: "On your phone, anytime, anywhere" },
+        { icon: "people-outline", title: "EXPERT GUIDANCE", sub: "Learn from experienced faculty & mentors" },
+      ]
+    },
+    {
+      bg: ["#f9a825", "#e65100"],
+      title: "COURSES OFFERED",
+      subtitle: "Prepare for Excellence",
+      desc: "Comprehensive coaching programs tailored to help you crack civil services and key government examinations."
+    }
+  ];
+
+  const s = slides[slide];
+  const isGold = slide === 2;
+  const isBlue = slide === 1;
+  const isRed = slide === 0;
+
+  const textCol = isGold ? "#3e1e00" : "#ffffff";
+  const titleCol = isGold ? "#c62828" : "#ffffff";
+  const subTextCol = isGold ? "rgba(62,30,0,0.82)" : "rgba(255,255,255,0.85)";
+  const accentCol = isGold ? "#c62828" : "#FFD700";
+  const headerLogoTextCol = isGold ? "#c62828" : "#ffffff";
+
+  const floatY = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -10] });
+  const orbitDeg = orbitAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  const scaleFactor = isLargeScreen ? 1.0 : 0.82;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: s.bg[1] }}>
+      {Platform.OS === "web" && (
+        <style>{`
+          .ob-bg { background: radial-gradient(ellipse at 30% 20%, ${s.bg[0]} 0%, ${s.bg[1]} 100%) !important; }
+          @keyframes rotateOrbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+          @keyframes counterRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(-360deg); }
+          }
+          .orbit-ring-animated {
+            animation: rotateOrbit 30s linear infinite !important;
+          }
+          .orbit-badge-animated {
+            animation: counterRotate 30s linear infinite !important;
+          }
+        `}</style>
+      )}
+
+      {/* Background gradient */}
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: s.bg[1] }}>
+        <View style={Platform.OS === "web" ? { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: `radial-gradient(ellipse at 30% 20%, ${s.bg[0]} 0%, ${s.bg[1]} 100%)` } as any : { position: "absolute", top: 0, left: 0, right: 0, height: "100%", backgroundColor: s.bg[0] }} />
+      </View>
+
+      {/* Decorative background shapes */}
+      <View style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: isGold ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)" }} />
+      <View style={{ position: "absolute", bottom: -60, left: -60, width: 200, height: 200, borderRadius: 100, backgroundColor: isGold ? "rgba(0,0,0,0.015)" : "rgba(255,255,255,0.02)" }} />
+
+      <Animated.View style={{ flex: 1, opacity: contentAnim, transform: [{ translateY: contentAnim.interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }] }}>
+
+        {/* Header */}
+        <View style={{ paddingTop: 48, paddingHorizontal: 24, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Image source={require("./assets/logo.png")} style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: isGold ? "rgba(198,40,40,0.3)" : "rgba(255,255,255,0.4)" }} />
+            <View>
+              <Text style={{ fontSize: 13, fontWeight: "900", color: headerLogoTextCol, letterSpacing: 0.8 }}>NERMAI</Text>
+              <Text style={{ fontSize: 9, fontWeight: "700", color: isGold ? "rgba(198,40,40,0.75)" : "rgba(255,255,255,0.75)", letterSpacing: 1.2 }}>IAS ACADEMY</Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            {[0, 1, 2].map(i => (
+              <View key={i} style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: i === slide ? accentCol : (isGold ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)") }} />
+            ))}
+          </View>
+        </View>
+
+        {/* Text Section */}
+        <View style={{ paddingHorizontal: 24, marginTop: 24, alignItems: "center" }}>
+          {slide === 0 ? (
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ fontSize: 22, fontWeight: "900", color: "#ffffff", textAlign: "center", letterSpacing: 0.5 }}>
+                WELCOME TO
+              </Text>
+              <Text style={{ fontSize: 26, fontWeight: "900", color: "#FFD700", textAlign: "center", marginTop: 2, letterSpacing: 0.5 }}>
+                NERMAI
+              </Text>
+              <Text style={{ fontSize: 22, fontWeight: "900", color: "#ffffff", textAlign: "center", marginTop: 2, letterSpacing: 0.5 }}>
+                IAS ACADEMY
+              </Text>
+              {/* Star separator */}
+              <View style={{ marginVertical: 6 }}>
+                <Ionicons name="star" size={12} color="#FFD700" />
+              </View>
+              {/* Tagline */}
+              <Text style={{ fontSize: 12.5, fontWeight: "800", color: "#ffffff", textAlign: "center" }}>
+                Your Journey Towards Competitive Excellence
+              </Text>
+            </View>
+          ) : (
+            <View style={{ alignItems: "center" }}>
+              <Text style={{ fontSize: 24, fontWeight: "900", color: titleCol, textAlign: "center", letterSpacing: 0.5, lineHeight: 30 }}>
+                {s.title}
+              </Text>
+              {s.subtitle ? (
+                <Text style={{ fontSize: 18, fontWeight: "900", color: accentCol, textAlign: "center", marginTop: 2 }}>
+                  {s.subtitle}
+                </Text>
+              ) : null}
+            </View>
+          )}
+          <Text style={{ fontSize: 12, color: subTextCol, textAlign: "center", marginTop: 8, lineHeight: 18, paddingHorizontal: 12 }}>
+            {s.desc}
+          </Text>
+        </View>
+
+        {/* Illustration Section */}
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 }}>
+
+          {slide === 0 && (
+            // Slide 1 Layout (Red Theme 2-column grid of 8 content cards)
+            <View style={{ width: "100%", maxWidth: 440, paddingHorizontal: 16 }}>
+              {(() => {
+                const isSmallHeight = windowHeight < 700;
+                const gridGap = isSmallHeight ? 8 : 12;
+                const circW = isSmallHeight ? 30 : 38;
+                const iconSz = isSmallHeight ? 16 : 20;
+                const cardH = isSmallHeight ? 50 : 62;
+                
+                return (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: gridGap }}>
+                    {[
+                      { icon: "heart-outline", label: "Non Profit\nInitiative", color: "#ef5350" },
+                      { icon: "book-outline", label: "Comprehensive\nsyllabus", color: "#29b6f6" },
+                      { icon: "create-outline", label: "Regular Test\nPractice", color: "#ffca28" },
+                      { icon: "people-outline", label: "Personal Guidance\nCounseling", color: "#ab47bc" },
+                      { icon: "laptop-outline", label: "Offline &\nOnline Classes", color: "#26a69a" },
+                      { icon: "desktop-outline", label: "Digitally\nInteractive Class", color: "#ffa726" },
+                      { icon: "trophy-outline", label: "Result Driven\nLearning", color: "#66bb6a" },
+                      { icon: "play-circle-outline", label: "Video\nLibrary", color: "#ec407a" }
+                    ].map((item, idx) => {
+                      const translateX = cardsAnim[idx].interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [idx % 2 === 0 ? -120 : 120, 0]
+                      });
+                      const opacity = cardsAnim[idx].interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 1]
+                      });
+
+                      return (
+                        <Animated.View
+                          key={idx}
+                          style={{
+                            width: "48%",
+                            height: cardH,
+                            backgroundColor: "rgba(255, 255, 255, 0.08)",
+                            borderRadius: 12,
+                            paddingLeft: isSmallHeight ? 6 : 8,
+                            paddingRight: isSmallHeight ? 4 : 8,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: isSmallHeight ? 6 : 10,
+                            borderWidth: 1,
+                            borderColor: "rgba(255, 255, 255, 0.12)",
+                            opacity,
+                            transform: [{ translateX }]
+                          }}
+                        >
+                          {/* Circle Badge with Icon */}
+                          <View style={{
+                            width: circW,
+                            height: circW,
+                            borderRadius: circW / 2,
+                            backgroundColor: "#ffffff",
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}>
+                            <Ionicons name={item.icon as any} size={iconSz} color={item.color} />
+                          </View>
+                          
+                          {/* Text Description */}
+                          <Text style={{
+                            fontSize: isSmallHeight ? 8.5 : 10.5,
+                            fontWeight: "800",
+                            color: "#ffffff",
+                            flex: 1,
+                            lineHeight: isSmallHeight ? 10 : 13
+                          }} numberOfLines={2}>
+                            {item.label}
+                          </Text>
+                        </Animated.View>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+            </View>
+          )}
+
+          {slide === 1 && (
+            // Slide 2 Layout (Blue Theme Orbit Ring)
+            <View style={{ width: orbitRadius * 2 + badgeSize + 20, height: orbitRadius * 2 + badgeSize + 20, alignItems: "center", justifyContent: "center" }}>
+              {/* Central Laptop Device */}
+              <View style={{
+                width: centralCircleSize,
+                height: centralCircleSize,
+                borderRadius: centralCircleSize / 2,
+                backgroundColor: "#ffffff",
+                borderWidth: 1.5,
+                borderColor: "#FFD700",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 2,
+                shadowColor: "#000",
+                shadowOpacity: 0.15,
+                shadowRadius: 5,
+                elevation: 4
+              }}>
+                <Ionicons name="laptop-outline" size={isLargeScreen ? 36 : 28} color="#1565c0" />
+              </View>
+
+              {/* Orbiting Ring Wrapper */}
+              <Animated.View
+                {...{ className: Platform.OS === "web" ? "orbit-ring-animated" : undefined } as any}
+                style={[
+                  {
+                    position: "absolute",
+                    width: orbitRadius * 2,
+                    height: orbitRadius * 2,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  },
+                  Platform.OS !== "web" && { transform: [{ rotate: orbitDeg }] }
+                ]}
+              >
+                {/* Dashed Border Ring */}
+                <View style={{
+                  position: "absolute",
+                  width: orbitRadius * 2,
+                  height: orbitRadius * 2,
+                  borderRadius: orbitRadius,
+                  borderWidth: 1.5,
+                  borderColor: "rgba(255,255,255,0.2)",
+                  borderStyle: "dashed",
+                }} />
+
+                {/* Orbiting Icons */}
+                {(s as any).icons?.map((ic: any, idx: number) => {
+                  const angle = (ic.angle * Math.PI) / 180;
+                  const r = orbitRadius;
+                  const tx = Math.cos(angle) * r;
+                  const ty = Math.sin(angle) * r;
+                  return (
+                    <Animated.View
+                      key={idx}
+                      {...{ className: Platform.OS === "web" ? "orbit-badge-animated" : undefined } as any}
+                      style={[
+                        {
+                          position: "absolute",
+                          left: orbitRadius + tx - (badgeSize + 4) / 2,
+                          top: orbitRadius + ty - (badgeSize + 4) / 2,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: badgeSize + 4,
+                          height: badgeSize + 4 + 18,
+                        },
+                        Platform.OS !== "web" && {
+                          transform: [{ rotate: orbitAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "-360deg"] }) }]
+                        }
+                      ]}
+                    >
+                      <View style={{
+                        width: badgeSize + 4,
+                        height: badgeSize + 4,
+                        borderRadius: (badgeSize + 4) / 2,
+                        backgroundColor: "#ffffff",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.4)",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        shadowColor: "#000",
+                        shadowOpacity: 0.1,
+                        shadowRadius: 3,
+                        elevation: 2
+                      }}>
+                        <Ionicons name={ic.icon as any} size={isLargeScreen ? 24 : 20} color={ic.color} />
+                      </View>
+                      <Text style={{
+                        fontSize: isLargeScreen ? 8.5 : 7.5,
+                        color: "#ffffff",
+                        marginTop: 4,
+                        fontWeight: "900",
+                        letterSpacing: 0.3,
+                        width: 90,
+                        textAlign: "center"
+                      }} numberOfLines={1}>
+                        {ic.label.toUpperCase()}
+                      </Text>
+                    </Animated.View>
+                  );
+                })}
+              </Animated.View>
+            </View>
+          )}
+
+          {slide === 2 && (
+            // Slide 3 Layout (Yellow Theme Bento Grid)
+            <View style={{ width: "100%", maxWidth: 540, alignSelf: "center", paddingHorizontal: 16 }}>
+              {(() => {
+                const isSmallHeight = windowHeight < 700;
+                const isTallScreen = windowHeight > 800;
+                const rowH = isSmallHeight ? 76 : (isTallScreen ? 134 : 114);
+                const gapVal = isSmallHeight ? 8 : (isTallScreen ? 14 : 10);
+                const cardRadius = 12;
+                
+                // Icon circle container size
+                const circW = isSmallHeight ? 38 : (isTallScreen ? 54 : 48);
+                const iconSz = isSmallHeight ? 20 : (isTallScreen ? 28 : 24);
+
+                const bentoCardStyle = (widthPercent: any) => ({
+                  width: widthPercent,
+                  height: rowH,
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  borderRadius: cardRadius,
+                  padding: isSmallHeight ? 8 : 12,
+                  flexDirection: "row" as const,
+                  alignItems: "center" as const,
+                  gap: isSmallHeight ? 8 : 12,
+                  borderWidth: 1,
+                  borderColor: "rgba(255, 255, 255, 0.12)"
+                });
+
+                const verticalBentoCardStyle = (widthPercent: any) => ({
+                  width: widthPercent,
+                  height: rowH,
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  borderRadius: cardRadius,
+                  padding: isSmallHeight ? 6 : 10,
+                  flexDirection: "column" as const,
+                  alignItems: "center" as const,
+                  justifyContent: "center" as const,
+                  borderWidth: 1,
+                  borderColor: "rgba(255, 255, 255, 0.12)"
+                });
+
+                const makeIconCircle = (bg: string, name: string, color: string) => (
+                  <View style={{
+                    width: circW,
+                    height: circW,
+                    borderRadius: circW / 2,
+                    backgroundColor: bg,
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}>
+                    <Ionicons name={name as any} size={iconSz} color={color} />
+                  </View>
+                );
+
+                return (
+                  <View style={{ flexDirection: "column", gap: gapVal, width: "100%" }}>
+                    
+                    {/* Row 1: UPSC (Wide) & TNPSC (Small) */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", width: "100%" }}>
+                      {/* UPSC */}
+                      <Animated.View style={[
+                        bentoCardStyle("62%"),
+                        {
+                          opacity: bentoAnim[0],
+                          transform: [{ translateY: bentoAnim[0].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#fff8e1", "ribbon-outline", "#ff8f00")}
+                        <View style={{ flex: 1, justifyContent: "center" }}>
+                          <Text style={{ fontSize: isSmallHeight ? 10 : (isTallScreen ? 14 : 12), fontWeight: "900", color: "#ffffff", lineHeight: isSmallHeight ? 12 : 16 }} numberOfLines={2}>
+                            UPSC CIVIL SERVICE{"\n"}( IAS / IPS )
+                          </Text>
+                          <View style={{ backgroundColor: "rgba(0, 0, 0, 0.22)", borderRadius: 4, paddingVertical: 2, paddingHorizontal: 7, alignSelf: "flex-start", marginTop: isSmallHeight ? 4 : 6 }}>
+                            <Text style={{ fontSize: isSmallHeight ? 7.5 : 8.5, color: "#ffffff", fontWeight: "800" }}>View Details</Text>
+                          </View>
+                        </View>
+                      </Animated.View>
+
+                      {/* TNPSC */}
+                      <Animated.View style={[
+                        verticalBentoCardStyle("35%"),
+                        {
+                          opacity: bentoAnim[1],
+                          transform: [{ translateY: bentoAnim[1].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#e3f2fd", "train-outline", "#1565c0")}
+                        <Text style={{ fontSize: isSmallHeight ? 9 : (isTallScreen ? 12 : 10.5), fontWeight: "900", color: "#ffffff", textAlign: "center", marginTop: isSmallHeight ? 6 : 10, lineHeight: isSmallHeight ? 11 : 14 }} numberOfLines={2}>
+                          TNPSC /{"\n"}RAILWAYS
+                        </Text>
+                      </Animated.View>
+                    </View>
+
+                    {/* Row 2: UDC/LDC/VAO (Small) & BANKING (Wide) */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", width: "100%" }}>
+                      {/* UDC/LDC/VAO */}
+                      <Animated.View style={[
+                        verticalBentoCardStyle("35%"),
+                        {
+                          opacity: bentoAnim[2],
+                          transform: [{ translateY: bentoAnim[2].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#e8f5e9", "document-text-outline", "#2e7d32")}
+                        <Text style={{ fontSize: isSmallHeight ? 9 : (isTallScreen ? 12 : 10.5), fontWeight: "900", color: "#ffffff", textAlign: "center", marginTop: isSmallHeight ? 6 : 10, lineHeight: isSmallHeight ? 11 : 14 }} numberOfLines={2}>
+                          UDC / LDC{"\n"}/ VAO
+                        </Text>
+                      </Animated.View>
+
+                      {/* BANKING */}
+                      <Animated.View style={[
+                        bentoCardStyle("62%"),
+                        {
+                          opacity: bentoAnim[3],
+                          transform: [{ translateY: bentoAnim[3].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#f3e5f5", "cash-outline", "#6a1b9a")}
+                        <View style={{ flex: 1, justifyContent: "center" }}>
+                          <Text style={{ fontSize: isSmallHeight ? 10.5 : (isTallScreen ? 14 : 12.5), fontWeight: "900", color: "#ffffff", lineHeight: isSmallHeight ? 13 : 16 }} numberOfLines={1}>
+                            BANKING EXAMS
+                          </Text>
+                          <View style={{ backgroundColor: "rgba(0, 0, 0, 0.22)", borderRadius: 4, paddingVertical: 2, paddingHorizontal: 7, alignSelf: "flex-start", marginTop: isSmallHeight ? 4 : 6 }}>
+                            <Text style={{ fontSize: isSmallHeight ? 7.5 : 8.5, color: "#ffffff", fontWeight: "800" }}>View Details</Text>
+                          </View>
+                        </View>
+                      </Animated.View>
+                    </View>
+
+                    {/* Row 3: PUDUCHERRY EXAM (Medium) & SSC/PC/DT/SI (Medium) */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", width: "100%" }}>
+                      {/* Puducherry Exam */}
+                      <Animated.View style={[
+                        bentoCardStyle("48%"),
+                        {
+                          opacity: bentoAnim[4],
+                          transform: [{ translateY: bentoAnim[4].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#e0f7fa", "flag-outline", "#00838f")}
+                        <Text style={{ fontSize: isSmallHeight ? 9.5 : (isTallScreen ? 12.5 : 11), fontWeight: "900", color: "#ffffff", flex: 1, lineHeight: isSmallHeight ? 11 : 14 }} numberOfLines={2}>
+                          PUDUCHERRY{"\n"}GOVT EXAMS
+                        </Text>
+                      </Animated.View>
+
+                      {/* SSC/PC/DT/SI */}
+                      <Animated.View style={[
+                        bentoCardStyle("48%"),
+                        {
+                          opacity: bentoAnim[5],
+                          transform: [{ translateY: bentoAnim[5].interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }]
+                        }
+                      ]}>
+                        {makeIconCircle("#ffebee", "shield-checkmark-outline", "#c62828")}
+                        <Text style={{ fontSize: isSmallHeight ? 9.5 : (isTallScreen ? 12.5 : 11), fontWeight: "900", color: "#ffffff", flex: 1, lineHeight: isSmallHeight ? 11 : 14 }} numberOfLines={2}>
+                          SSC / PC / SI{"\n"}RECRUITMENT
+                        </Text>
+                      </Animated.View>
+                    </View>
+
+                  </View>
+                );
+              })()}
+            </View>
+          )}
+        </View>
+
+        {/* Benefits strip */}
+        {s.benefits && (
+          <View style={{
+            flexDirection: "row",
+            backgroundColor: isGold ? "#ffffff" : "rgba(0,0,0,0.22)",
+            marginHorizontal: 20,
+            borderRadius: 14,
+            borderWidth: isGold ? 0 : 1,
+            borderColor: "rgba(255,255,255,0.06)",
+            padding: 14,
+            gap: 8,
+            marginBottom: 12,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: isGold ? 0.08 : 0.1,
+            shadowRadius: 4,
+            elevation: isGold ? 3 : 0
+          }}>
+            {s.benefits.map((b: any, i: number) => (
+              <View key={i} style={{ flex: 1, alignItems: "center", gap: 4 }}>
+                <Ionicons name={b.icon as any} size={18} color={isGold ? "#c62828" : "#FFD700"} />
+                <Text style={{ fontSize: 10, fontWeight: "900", color: isGold ? "#c62828" : "#ffffff", textAlign: "center", marginTop: 2 }}>{b.title}</Text>
+                <Text style={{ fontSize: 8.5, color: isGold ? "#3e1e00" : "rgba(255,255,255,0.65)", textAlign: "center", lineHeight: 11 }}>{b.sub}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Navigation bar */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 24, paddingBottom: Platform.OS === "ios" ? 40 : 28, paddingTop: 10 }}>
+          <TouchableOpacity onPress={slide === 0 ? markDone : () => setSlide(slide - 1)} style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+            <Text style={{ color: isGold ? "rgba(0,0,0,0.5)" : "rgba(255,255,255,0.7)", fontWeight: "700", fontSize: 13, letterSpacing: 0.5 }}>
+              {slide === 0 ? "SKIP" : "← BACK"}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Dots Indicator */}
+          <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+            {[0, 1, 2].map(i => (
+              <View key={i} style={{
+                width: i === slide ? 18 : 6,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: i === slide ? accentCol : (isGold ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.3)")
+              }} />
+            ))}
+          </View>
+
+          <TouchableOpacity onPress={goNext} style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+            <Text style={{ color: accentCol, fontWeight: "900", fontSize: 13, letterSpacing: 0.5 }}>
+              {slide === 2 ? "START →" : "NEXT →"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+
+
+
 
 function MainApp() {
   const initialNavRef = useRef(getSavedNav());
@@ -754,34 +1399,7 @@ function MainApp() {
     }
   }, []);
 
-  useEffect(() => {
-    const shouldBlock = user && user.role !== "guest";
-    if (shouldBlock) {
-      if (Platform.OS !== "web") {
-        ScreenCapture.preventScreenCaptureAsync().catch(err => {
-          console.warn("Failed to prevent screen capture:", err);
-        });
-      } else {
-        enableWebScreenshotProtection();
-      }
-    } else {
-      if (Platform.OS !== "web") {
-        ScreenCapture.allowScreenCaptureAsync().catch(err => {
-          console.warn("Failed to allow screen capture:", err);
-        });
-      } else {
-        disableWebScreenshotProtection();
-      }
-    }
 
-    return () => {
-      if (Platform.OS !== "web") {
-        ScreenCapture.allowScreenCaptureAsync().catch(() => {});
-      } else {
-        disableWebScreenshotProtection();
-      }
-    };
-  }, [user]);
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
@@ -1159,6 +1777,310 @@ function MainApp() {
     return `${baseDomain}${cleanPath}`;
   };
 
+  const WebDailyImageZoomView = ({ imgSrc, alt, driveId, darkMode }: { imgSrc: string; alt: string; driveId: string | null; darkMode: boolean }) => {
+    const [scale, setScale] = useState(1);
+    const [translateX, setTranslateX] = useState(0);
+    const [translateY, setTranslateY] = useState(0);
+
+    const isDragging = useRef(false);
+    const startX = useRef(0);
+    const startY = useRef(0);
+    const initialTranslateX = useRef(0);
+    const initialTranslateY = useRef(0);
+    
+    const initialPinchDist = useRef(0);
+    const initialScale = useRef(1);
+    const lastTapTime = useRef(0);
+
+    const resetZoom = () => {
+      setScale(1);
+      setTranslateX(0);
+      setTranslateY(0);
+    };
+
+    // Handle Touch Gestures
+    const handleTouchStart = (e: React.TouchEvent) => {
+      if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        initialPinchDist.current = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        initialScale.current = scale;
+      } else if (e.touches.length === 1) {
+        const now = Date.now();
+        if (now - lastTapTime.current < 300) {
+          if (scale > 1) {
+            resetZoom();
+          } else {
+            setScale(2.5);
+          }
+          lastTapTime.current = 0;
+          return;
+        }
+        lastTapTime.current = now;
+
+        isDragging.current = true;
+        startX.current = e.touches[0].clientX;
+        startY.current = e.touches[0].clientY;
+        initialTranslateX.current = translateX;
+        initialTranslateY.current = translateY;
+      }
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+      if (e.touches.length === 2 && initialPinchDist.current > 0) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const currentDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const factor = currentDist / initialPinchDist.current;
+        const newScale = Math.min(Math.max(initialScale.current * factor, 1), 4);
+        setScale(newScale);
+        if (newScale === 1) {
+          setTranslateX(0);
+          setTranslateY(0);
+        }
+      } else if (e.touches.length === 1 && isDragging.current && scale > 1) {
+        const deltaX = e.touches[0].clientX - startX.current;
+        const deltaY = e.touches[0].clientY - startY.current;
+        setTranslateX(initialTranslateX.current + deltaX);
+        setTranslateY(initialTranslateY.current + deltaY);
+      }
+    };
+
+    const handleTouchEnd = (e: React.TouchEvent) => {
+      if (e.touches.length < 2) {
+        initialPinchDist.current = 0;
+      }
+      if (e.touches.length === 0) {
+        isDragging.current = false;
+      }
+    };
+
+    // Handle Mouse Gestures (Desktop)
+    const handleMouseDown = (e: React.MouseEvent) => {
+      if (scale <= 1) return;
+      isDragging.current = true;
+      startX.current = e.clientX;
+      startY.current = e.clientY;
+      initialTranslateX.current = translateX;
+      initialTranslateY.current = translateY;
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+      if (!isDragging.current || scale <= 1) return;
+      const deltaX = e.clientX - startX.current;
+      const deltaY = e.clientY - startY.current;
+      setTranslateX(initialTranslateX.current + deltaX);
+      setTranslateY(initialTranslateY.current + deltaY);
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+    };
+
+    const handleWheel = (e: React.WheelEvent) => {
+      const zoomDelta = e.deltaY < 0 ? 0.25 : -0.25;
+      const newScale = Math.min(Math.max(scale + zoomDelta, 1), 4);
+      setScale(newScale);
+      if (newScale === 1) {
+        setTranslateX(0);
+        setTranslateY(0);
+      }
+    };
+
+    return (
+      <View style={{ flex: 1, width: "100%", height: "100%", position: "relative", overflow: "hidden" }}>
+        <div
+          onContextMenu={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onWheel={handleWheel}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            overflow: "hidden",
+            position: "relative",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
+            touchAction: "none",
+            cursor: scale > 1 ? "grab" : "default"
+          }}
+        >
+          <img
+            src={imgSrc}
+            alt={alt}
+            onContextMenu={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+              borderRadius: 8,
+              transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
+              transition: isDragging.current ? "none" : "transform 0.1s ease-out",
+              pointerEvents: "none",
+              userSelect: "none",
+              WebkitUserSelect: "none"
+            }}
+            onError={(e) => {
+              if (driveId && e.currentTarget.src !== `https://drive.google.com/uc?export=view&id=${driveId}`) {
+                e.currentTarget.src = `https://drive.google.com/uc?export=view&id=${driveId}`;
+              }
+            }}
+          />
+        </div>
+
+        {/* Floating reset button when zoomed in */}
+        {scale > 1 && (
+          <TouchableOpacity
+            onPress={resetZoom}
+            style={{
+              position: "absolute",
+              bottom: 16,
+              alignSelf: "center",
+              backgroundColor: "#c62828",
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 20,
+              elevation: 5,
+              zIndex: 100
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+              Reset Zoom ({Math.round(scale * 100)}%)
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
+  const NativeDailyImageZoomView = ({ imgSrc, darkMode }: { imgSrc: string; darkMode: boolean }) => {
+    const { WebView } = require("react-native-webview");
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: ${darkMode ? '#111' : '#f5f5f5'}; display: flex; justify-content: center; align-items: center; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+        #container { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; touch-action: none; }
+        #img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; transform-origin: center center; transition: transform 0.05s ease-out; pointer-events: none; }
+        #resetBtn { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: #c62828; color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 13px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 100; }
+      </style>
+      </head>
+      <body>
+      <div id="container">
+        <img id="img" src="${imgSrc}" oncontextmenu="return false;" ondragstart="return false;" />
+        <button id="resetBtn" onclick="resetZoom()">Reset Zoom</button>
+      </div>
+      <script>
+        var img = document.getElementById('img');
+        var resetBtn = document.getElementById('resetBtn');
+        var container = document.getElementById('container');
+        
+        var scale = 1;
+        var translateX = 0;
+        var translateY = 0;
+        
+        var isDragging = false;
+        var startX = 0, startY = 0;
+        var initialTx = 0, initialTy = 0;
+        var initialPinchDist = 0, initialScale = 1;
+        var lastTapTime = 0;
+
+        function updateTransform() {
+          img.style.transform = 'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + scale + ')';
+          if (scale > 1) {
+            resetBtn.style.display = 'block';
+            resetBtn.innerText = 'Reset Zoom (' + Math.round(scale * 100) + '%)';
+          } else {
+            resetBtn.style.display = 'none';
+          }
+        }
+
+        function resetZoom() {
+          scale = 1; translateX = 0; translateY = 0;
+          updateTransform();
+        }
+
+        container.addEventListener('touchstart', function(e) {
+          if (e.touches.length === 2) {
+            var t1 = e.touches[0], t2 = e.touches[1];
+            initialPinchDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+            initialScale = scale;
+          } else if (e.touches.length === 1) {
+            var now = Date.now();
+            if (now - lastTapTime < 300) {
+              if (scale > 1) { resetZoom(); } else { scale = 2.5; updateTransform(); }
+              lastTapTime = 0;
+              return;
+            }
+            lastTapTime = now;
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            initialTx = translateX;
+            initialTy = translateY;
+          }
+        }, { passive: false });
+
+        container.addEventListener('touchmove', function(e) {
+          if (e.touches.length === 2 && initialPinchDist > 0) {
+            e.preventDefault();
+            var t1 = e.touches[0], t2 = e.touches[1];
+            var dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+            var factor = dist / initialPinchDist;
+            scale = Math.min(Math.max(initialScale * factor, 1), 4.5);
+            if (scale === 1) { translateX = 0; translateY = 0; }
+            updateTransform();
+          } else if (e.touches.length === 1 && isDragging && scale > 1) {
+            e.preventDefault();
+            var dx = e.touches[0].clientX - startX;
+            var dy = e.touches[0].clientY - startY;
+            translateX = initialTx + dx;
+            translateY = initialTy + dy;
+            updateTransform();
+          }
+        }, { passive: false });
+
+        container.addEventListener('touchend', function(e) {
+          if (e.touches.length < 2) initialPinchDist = 0;
+          if (e.touches.length === 0) isDragging = false;
+        });
+      </script>
+      </body>
+      </html>
+    `;
+
+    return (
+      <View style={{ flex: 1, width: "100%", height: "100%" }}>
+        <WebView
+          originWhitelist={["*"]}
+          source={{ html: htmlContent }}
+          style={{ flex: 1, width: "100%", backgroundColor: darkMode ? "#111" : "#f5f5f5" }}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          scrollEnabled={false}
+          bounces={false}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
+    );
+  };
+
   const getLoggedInStudent = (userObj: any, studentList: any[]) => {
     if (!userObj) return null;
     if (studentList && studentList.length > 0) {
@@ -1180,7 +2102,11 @@ function MainApp() {
   const [guestPhone, setGuestPhone] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [showAdmissionForm, setShowAdmissionForm] = useState(false);
+  const [showInquiryForm, setShowInquiryForm] = useState(false);
   const [contactQrPlatform, setContactQrPlatform] = useState<"android" | "ios">("android");
+  const [campaignQueue, setCampaignQueue] = useState<any[]>([]);
+  const [activeCampaignBanner, setActiveCampaignBanner] = useState<any | null>(null);
+  const hasShownCampaignsRef = useRef(false);
   const [admissionSubmitted, setAdmissionSubmitted] = useState(false);
   const [submittingAdmission, setSubmittingAdmission] = useState(false);
   const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "", preferredMode: "" });
@@ -1386,6 +2312,11 @@ function MainApp() {
   const [showPdfTopicDropdown, setShowPdfTopicDropdown] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState("");
   const [guestPhoneInput, setGuestPhoneInput] = useState("");
+  const [guestContentTab, setGuestContentTab] = useState<"resources" | "tests">("resources");
+  const [showNoticesPanel, setShowNoticesPanel] = useState(false);
+  const [showContactPanel, setShowContactPanel] = useState(false);
+  const [contactFormType, setContactFormType] = useState<"admission" | "inquiry" | null>(null);
+  const [showAuthFlip, setShowAuthFlip] = useState(false);
 
   const handleGoogleAuthSignIn = async () => {
     if (!guestNameInput.trim()) {
@@ -1465,6 +2396,7 @@ function MainApp() {
   const [searchDirQuery, setSearchDirQuery] = useState("");
   const [filterDirBatch, setFilterDirBatch] = useState("all");
   const [filterDirType, setFilterDirType] = useState("all");
+  const [filterDirStatus, setFilterDirStatus] = useState<"all" | "active" | "pending">("all");
   const [newBatch, setNewBatch] = useState({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [] as string[] });
   const [batchTab, setBatchTab] = useState<"general" | "special">("general");
   const [editingBatch, setEditingBatch] = useState<any>(null);
@@ -1782,6 +2714,79 @@ function MainApp() {
   const [offlineAttendanceMarks, setOfflineAttendanceMarks] = useState<Record<string, "present" | "absent" | null>>({});
   const [offlineAttendanceSaving, setOfflineAttendanceSaving] = useState<Record<string, boolean>>({});
 
+  // Offline Student Test Permission Requests State
+  const [offlineTestRequests, setOfflineTestRequests] = useState<any[]>(() => {
+    try {
+      const saved = typeof localStorage !== "undefined" ? localStorage.getItem("nermai_offline_test_requests") : null;
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Poll student's own permission request status from backend every 10s
+  // (only for offline students — admins load via loadOfflineTestRequests)
+  useEffect(() => {
+    if (!user || isAdmin) return;
+    const studentId = user?.userId || user?.username;
+    const username = user?.username || "";
+    if (!studentId && !username) return;
+
+    const pollMyRequests = async () => {
+      try {
+        // Build query params — pass both studentId and username for maximum match
+        const params = new URLSearchParams();
+        if (studentId) params.set("studentId", studentId);
+        else if (username) params.set("username", username);
+        const res = await api.get(`/test-portal/test-creation/permission-requests?${params.toString()}`);
+        const data = Array.isArray(res) ? res : (res?.data || []);
+        
+        // Synchronize state and localStorage with server data
+        setOfflineTestRequests(data);
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem("nermai_offline_test_requests", JSON.stringify(data));
+          }
+        } catch (storageErr) {}
+      } catch (e) {
+        // silently ignore network errors
+      }
+    };
+
+    pollMyRequests();
+    const interval = setInterval(pollMyRequests, 10000);
+    return () => clearInterval(interval);
+  }, [user, isAdmin]);
+
+
+
+  // Load offline test permission requests from backend
+  const loadOfflineTestRequests = async () => {
+    try {
+      const res = await api.get("/test-portal/test-creation/permission-requests");
+      const data = res?.data || res || [];
+      if (Array.isArray(data)) {
+        setOfflineTestRequests(data);
+      }
+    } catch (e) {
+      // silently ignore
+    }
+  };
+
+  // Admin: auto-poll every 10s so new student requests appear without manual refresh
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadOfflineTestRequests();
+    const interval = setInterval(loadOfflineTestRequests, 10000);
+    return () => clearInterval(interval);
+  }, [isAdmin]);
+
+  const saveOfflineTestRequests = async (newList: any[]) => {
+    setOfflineTestRequests(newList);
+  };
+
+
+
   // Page Lock state — developer can lock any page with a custom maintenance message
   const [lockedPages, setLockedPages] = useState<Record<string, { locked: boolean; message: string }>>(() => {
     try {
@@ -1796,8 +2801,11 @@ function MainApp() {
     try {
       const res = await api.get("/developer/page-locks");
       if (res && typeof res === "object") {
-        setLockedPages(res);
-        try { localStorage.setItem("nermai_locked_pages", JSON.stringify(res)); } catch { }
+        setLockedPages(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(res)) return prev;
+          try { localStorage.setItem("nermai_locked_pages", JSON.stringify(res)); } catch { }
+          return res;
+        });
       }
     } catch (e) { }
   };
@@ -1812,6 +2820,7 @@ function MainApp() {
 
   useEffect(() => {
     loadPageLocks();
+    loadDriveConfig();
     const interval = setInterval(loadPageLocks, 8000);
     return () => clearInterval(interval);
   }, []);
@@ -1827,6 +2836,76 @@ function MainApp() {
       setLockedPageInfoModal({ visible: true, tabKey, message: lockedPages[tabKey].message || "This page is currently under maintenance. Please check back later." });
     } else {
       action();
+    }
+  };
+
+  // Google Drive configuration state
+  const [driveRootFolderId, setDriveRootFolderId] = useState("");
+  const [driveAppsScriptUrl, setDriveAppsScriptUrl] = useState("");
+  const [driveIsTesting, setDriveIsTesting] = useState(false);
+  const [driveTestResult, setDriveTestResult] = useState<any>(null);
+  const [driveSaveResult, setDriveSaveResult] = useState<any>(null);
+  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(false);
+
+  const loadDriveConfig = async () => {
+    try {
+      const res = await api.get("/developer/drive-config");
+      // Backend returns { success: true, data: { appsScriptUrl, rootFolderId } }
+      // The api wrapper returns the raw JSON, so config is under res.data
+      const config = res?.data ?? res;
+      if (config && (config.rootFolderId !== undefined || config.appsScriptUrl !== undefined)) {
+        setDriveRootFolderId(config.rootFolderId || "");
+        setDriveAppsScriptUrl(config.appsScriptUrl || "");
+      }
+    } catch (err: any) {
+      // Quietly ignore permissions errors for non-admin/student sessions
+    }
+  };
+
+  const handleSaveDriveConfig = async () => {
+    setDriveSaveResult(null);
+    try {
+      await api.put("/developer/drive-config", {
+        rootFolderId: driveRootFolderId.trim(),
+        appsScriptUrl: driveAppsScriptUrl.trim()
+      });
+      setDriveSaveResult({ status: "success", message: "Configuration saved successfully!" });
+      setTimeout(() => setDriveSaveResult(null), 4000);
+    } catch (err: any) {
+      setDriveSaveResult({ status: "error", message: err.message || "Failed to save drive configuration." });
+    }
+  };
+
+  const handleTestDriveConnection = async () => {
+    if (!driveAppsScriptUrl.trim()) {
+      setDriveTestResult({ status: "error", error: "Please provide a Google Apps Script Web App URL first." });
+      return;
+    }
+    setDriveIsTesting(true);
+    setDriveTestResult(null);
+    try {
+      const res = await api.post("/developer/drive-config/test", {
+        rootFolderId: driveRootFolderId.trim(),
+        appsScriptUrl: driveAppsScriptUrl.trim()
+      });
+      if (res && res.success) {
+        setDriveTestResult({
+          status: "success",
+          message: res.message || "Connected successfully!"
+        });
+      } else {
+        setDriveTestResult({
+          status: "error",
+          error: res?.message || res?.error || "Unknown Apps Script failure. Ensure Executed As Me and Anyone has access."
+        });
+      }
+    } catch (err: any) {
+      setDriveTestResult({
+        status: "error",
+        error: err.message || "Network request failed. Make sure your server is online."
+      });
+    } finally {
+      setDriveIsTesting(false);
     }
   };
 
@@ -2816,23 +3895,28 @@ function MainApp() {
       loadAnnouncements();
       loadNotifications();
       loadBatches();
-      loadTests();
-      loadQuestions();
-      loadCampaigns();
-      loadFeedback();
-      loadTestFeedbacks();
       loadTodayQuiz();
       loadAllQuizzes();
-
-      // Only load administrative datasets for admin/staff roles
+      loadCampaigns();
+      
+      // Load student data (which handles student vs admin URL internally)
       loadStudents();
-      if (user.role && ["super_admin", "admin", "staff"].includes(user.role)) {
+
+      // Only load administrative datasets for admin/staff/developer roles
+      if (user.role && ["super_admin", "admin", "staff", "editor", "contributor", "developer"].includes(user.role)) {
         loadProfileRequests();
         loadStaff();
         loadFees();
         loadAdmissions();
         loadEnquiries();
         loadLeads();
+        loadTests();
+        loadQuestions();
+        loadFeedback();
+        loadTestFeedbacks();
+      } else {
+        // Students still need to load available mock tests
+        loadTests();
       }
 
       // Only load role permissions for super_admin role
@@ -3055,6 +4139,7 @@ function MainApp() {
 
   // Anti-malpractice: block screenshots, clipboard, context menu during active exam
   useEffect(() => {
+    return; // Disabled for development
     if (!activeAttempt || Platform.OS !== "web") return;
 
     // Block keyboard shortcuts used for screenshot/copy/inspect
@@ -3264,11 +4349,12 @@ function MainApp() {
       let studentList = students;
       if (role === "student" && (!studentList || studentList.length === 0)) {
         try {
-          const res = await api.get("/erp/student");
-          studentList = res?.data || res || [];
+          const res = await api.get("/erp/student/profile/me");
+          const meData = res?.data || res || {};
+          studentList = [meData];
           setStudents(studentList);
         } catch (e) {
-          console.log("Failed loading students in loadNotifications:", e);
+          console.log("Failed loading student profile in loadNotifications:", e);
         }
       }
       const myStudent = getLoggedInStudent(user, studentList);
@@ -3574,13 +4660,41 @@ function MainApp() {
       }
       const res = await api.get(endpoint);
       const rawRes = res?.data || res || [];
-      setCampaigns(rawRes.filter((c: any) => {
+      const filtered = rawRes.filter((c: any) => {
         const title = (c?.title || "").toLowerCase();
         return !title.includes("state level test") && !title.includes("free entry");
-      }));
+      });
+      setCampaigns(filtered);
+
+      // Now set the popup advertisement queue
+      if (!hasShownCampaignsRef.current) {
+        const activeCamps = filtered
+          .filter((c: any) => c.showInDashboard)
+          .sort((a: any, b: any) => {
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            if (dateB !== dateA) return dateB - dateA;
+            return String(b.id || "").localeCompare(String(a.id || ""));
+          });
+        if (activeCamps.length > 0) {
+          hasShownCampaignsRef.current = true;
+          setCampaignQueue(activeCamps);
+          setActiveCampaignBanner(activeCamps[0]);
+        }
+      }
     } catch (e) {
       console.log("Failed loading campaigns:", e);
       setCampaigns([]);
+    }
+  };
+
+  const handleCloseCampaignBanner = () => {
+    const nextQueue = campaignQueue.slice(1);
+    setCampaignQueue(nextQueue);
+    if (nextQueue.length > 0) {
+      setActiveCampaignBanner(nextQueue[0]);
+    } else {
+      setActiveCampaignBanner(null);
     }
   };
 
@@ -7362,87 +8476,92 @@ function MainApp() {
                   <Text style={[styles.label, darkMode && styles.labelDark]}>Test Category:</Text>
                   <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
                     {[{ label: "📅 Daily Test", value: "daily" }, { label: "📆 Weekly Test", value: "weekly" }, { label: "🏆 Mock Test", value: "mock" }].map(cat => (
-                      <TouchableOpacity key={cat.value} onPress={() => setNewTest({ ...newTest, testType: cat.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
-                        <Text style={{ fontSize: 11, fontWeight: "bold", color: (newTest.testType || "mock") === cat.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{cat.label}</Text>
+                      <TouchableOpacity key={cat.value} onPress={() => setNewTest({ ...newTest, testType: cat.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newTest.testType || "daily") === cat.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newTest.testType || "daily") === cat.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
+                        <Text style={{ fontSize: 11, fontWeight: "bold", color: (newTest.testType || "daily") === cat.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{cat.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
 
                   <Text style={[styles.label, darkMode && styles.labelDark]}>Test Mode:</Text>
                   <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
-                    {[{ label: "🌐 Online", value: "online" }, { label: "🏢 Offline", value: "offline" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
+                    {[{ label: "🌐 Online", value: "online" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
                       <TouchableOpacity key={modeOpt.value} onPress={() => setNewTest({ ...newTest, testMode: modeOpt.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
                         <Text style={{ fontSize: 11, fontWeight: "bold", color: (newTest.testMode || "online") === modeOpt.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{modeOpt.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
 
-                  <Text style={[styles.label, darkMode && styles.labelDark]}>Subject Name:</Text>
-                  {(() => {
-                    const uniqueSubjects = [...new Set(lmsSubjects.map(s => s.name || s.title || ""))].filter(Boolean);
-                    return (
-                      <select
-                        value={newTest.subject || ""}
-                        onChange={e => {
-                          const val = e.target.value;
-                          setNewTest({ ...newTest, subject: val, topic: "" });
-                        }}
-                        style={{
-                          width: "100%",
-                          height: 40,
-                          borderRadius: 8,
-                          paddingLeft: 10,
-                          paddingRight: 10,
-                          fontSize: 14,
-                          backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
-                          color: darkMode ? "#e0e0e0" : "#212121",
-                          border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
-                          marginBottom: 12,
-                          outline: "none"
-                        }}
-                      >
-                        <option value="">-- Select Subject --</option>
-                        {uniqueSubjects.map(sName => (
-                          <option key={sName} value={sName}>{sName}</option>
-                        ))}
-                      </select>
-                    );
-                  })()}
+                  {/* Show Subject Name and Sub-Topic ONLY for Daily Test */}
+                  {(newTest.testType || "daily") === "daily" && (
+                    <>
+                      <Text style={[styles.label, darkMode && styles.labelDark]}>Subject Name:</Text>
+                      {(() => {
+                        const uniqueSubjects = [...new Set(lmsSubjects.map(s => s.name || s.title || ""))].filter(Boolean);
+                        return (
+                          <select
+                            value={newTest.subject || ""}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setNewTest({ ...newTest, subject: val, topic: "" });
+                            }}
+                            style={{
+                              width: "100%",
+                              height: 40,
+                              borderRadius: 8,
+                              paddingLeft: 10,
+                              paddingRight: 10,
+                              fontSize: 14,
+                              backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
+                              color: darkMode ? "#e0e0e0" : "#212121",
+                              border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
+                              marginBottom: 12,
+                              outline: "none"
+                            }}
+                          >
+                            <option value="">-- Select Subject --</option>
+                            {uniqueSubjects.map(sName => (
+                              <option key={sName} value={sName}>{sName}</option>
+                            ))}
+                          </select>
+                        );
+                      })()}
 
-                  <Text style={[styles.label, darkMode && styles.labelDark]}>Sub-Topic:</Text>
-                  {(() => {
-                    const matchedSubjectIds = lmsSubjects.filter(s => (s.name || s.title) === newTest.subject).map(s => s.id);
-                    const filteredTopics = lmsTopics.filter(t => matchedSubjectIds.includes(t.subjectId));
-                    const uniqueTopics = [...new Set(filteredTopics.map(t => t.name || t.title || ""))].filter(Boolean);
-                    return (
-                      <select
-                        disabled={!newTest.subject}
-                        value={newTest.topic || ""}
-                        onChange={e => {
-                          setNewTest({ ...newTest, topic: e.target.value });
-                        }}
-                        style={{
-                          width: "100%",
-                          height: 40,
-                          borderRadius: 8,
-                          paddingLeft: 10,
-                          paddingRight: 10,
-                          fontSize: 14,
-                          backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
-                          color: darkMode ? "#e0e0e0" : "#212121",
-                          border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
-                          marginBottom: 12,
-                          outline: "none",
-                          opacity: !newTest.subject ? 0.5 : 1
-                        }}
-                      >
-                        <option value="">-- Select Sub-Topic --</option>
-                        {uniqueTopics.map(tName => (
-                          <option key={tName} value={tName}>{tName}</option>
-                        ))}
-                      </select>
-                    );
-                  })()}
+                      <Text style={[styles.label, darkMode && styles.labelDark]}>Sub-Topic:</Text>
+                      {(() => {
+                        const matchedSubjectIds = lmsSubjects.filter(s => (s.name || s.title) === newTest.subject).map(s => s.id);
+                        const filteredTopics = lmsTopics.filter(t => matchedSubjectIds.includes(t.subjectId));
+                        const uniqueTopics = [...new Set(filteredTopics.map(t => t.name || t.title || ""))].filter(Boolean);
+                        return (
+                          <select
+                            disabled={!newTest.subject}
+                            value={newTest.topic || ""}
+                            onChange={e => {
+                              setNewTest({ ...newTest, topic: e.target.value });
+                            }}
+                            style={{
+                              width: "100%",
+                              height: 40,
+                              borderRadius: 8,
+                              paddingLeft: 10,
+                              paddingRight: 10,
+                              fontSize: 14,
+                              backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
+                              color: darkMode ? "#e0e0e0" : "#212121",
+                              border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
+                              marginBottom: 12,
+                              outline: "none",
+                              opacity: !newTest.subject ? 0.5 : 1
+                            }}
+                          >
+                            <option value="">-- Select Sub-Topic --</option>
+                            {uniqueTopics.map(tName => (
+                              <option key={tName} value={tName}>{tName}</option>
+                            ))}
+                          </select>
+                        );
+                      })()}
+                    </>
+                  )}
 
                   <Text style={[styles.label, darkMode && styles.labelDark]}>Test Description:</Text>
                   <TextInput style={[styles.input, darkMode && styles.inputDark]} placeholder="Test Description" placeholderTextColor="#999" value={newTest.description} onChangeText={d => setNewTest({ ...newTest, description: d })} />
@@ -8768,7 +9887,133 @@ function MainApp() {
   };
 
   // When activeAttempt, reviewMode, or studyModalVisible is set, skip this block so those screens can render
-  if ((!user || user?.role === "guest") && !activeAttempt && !reviewMode && !studyModalVisible) {
+  if (!user && !activeAttempt && !reviewMode && !studyModalVisible) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: "#7b0000" }]}>
+        <StatusBar style="light" />
+        <ScrollView
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center", padding: 20 }}
+          style={Platform.OS === "web" ? { backgroundImage: "radial-gradient(ellipse at 30% 20%, #b71c1c 0%, #7b0000 55%, #3e0000 100%)" } as any : { backgroundColor: "#7b0000" }}
+        >
+          {/* Header/Logo */}
+          <View style={{ alignItems: "center", marginBottom: 24 }}>
+            <Image source={require("./assets/logo.png")} style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: "#FFD700" }} />
+            <Text style={{ fontSize: 24, fontWeight: "900", color: "#FFD700", marginTop: 12, letterSpacing: 1 }}>NERMAI IAS ACADEMY</Text>
+            <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>Public Learning & Examination Portal</Text>
+          </View>
+
+          {/* Tab Switcher */}
+          <View style={{ width: "100%", maxWidth: 440, backgroundColor: "#ffffff", borderRadius: 20, padding: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 15 }}>
+            <View style={{ flexDirection: "row", backgroundColor: "#f0f0f0", borderRadius: 12, padding: 3, marginBottom: 20 }}>
+              <TouchableOpacity
+                onPress={() => { setShowAuthFlip(false); setLoginError(null); }}
+                style={{ flex: 1, paddingVertical: 11, borderRadius: 10, backgroundColor: !showAuthFlip ? "#c62828" : "transparent", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+              >
+                <Ionicons name="person-add-outline" size={16} color={!showAuthFlip ? "#fff" : "#757575"} />
+                <Text style={{ color: !showAuthFlip ? "#fff" : "#757575", fontWeight: "800", fontSize: 13 }}>Register</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowAuthFlip(true)}
+                style={{ flex: 1, paddingVertical: 11, borderRadius: 10, backgroundColor: showAuthFlip ? "#1565c0" : "transparent", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+              >
+                <Ionicons name="log-in-outline" size={16} color={showAuthFlip ? "#fff" : "#757575"} />
+                <Text style={{ color: showAuthFlip ? "#fff" : "#757575", fontWeight: "800", fontSize: 13 }}>Sign In</Text>
+              </TouchableOpacity>
+            </View>
+
+            {!showAuthFlip ? (
+              // REGISTER PANEL
+              <View style={{ gap: 12 }}>
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Your Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your full name"
+                    placeholderTextColor="#999"
+                    value={guestNameInput}
+                    onChangeText={setGuestNameInput}
+                  />
+                </View>
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Contact Number *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="10-digit mobile number"
+                    placeholderTextColor="#999"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    value={guestPhoneInput}
+                    onChangeText={v => setGuestPhoneInput(cleanPhone(v))}
+                  />
+                </View>
+                {(() => {
+                  const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
+                  const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
+                  return (
+                    <View style={{ gap: 8 }}>
+                      <TouchableOpacity
+                        onPress={() => { setPendingGuestTab("courses"); handleGoogleAuthSignIn(); }}
+                        disabled={!isFormFilled}
+                        style={[styles.primaryBtn, { backgroundColor: isFormFilled ? "#4285F4" : "#e0e0e0", marginVertical: 0, gap: 8 }]}
+                      >
+                        <Ionicons name="logo-google" size={18} color={isFormFilled ? "#fff" : "#9e9e9e"} />
+                        <Text style={[styles.primaryBtnTxt, { color: isFormFilled ? "#fff" : "#9e9e9e" }]}>Continue with Google</Text>
+                      </TouchableOpacity>
+                      {!isFormFilled && (
+                        <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
+                          {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })()}
+                <TouchableOpacity onPress={() => setShowAuthFlip(true)} style={{ alignItems: "center", marginTop: 8 }}>
+                  <Text style={{ fontSize: 13, color: "#1565c0", fontWeight: "700" }}>Already a registered student? Sign in →</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              // SIGN IN PANEL
+              <View style={{ gap: 12 }}>
+                {showIpConfig && (
+                  <View style={styles.ipConfigBox}>
+                    <Text style={styles.ipConfigLabel}>Host Server IP Address:</Text>
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} value={hostIp} onChangeText={setHostIp} placeholder="192.168.x.x" placeholderTextColor="#999" />
+                      <TouchableOpacity onPress={() => setShowIpConfig(false)} style={styles.ipSaveBtn}><Text style={{ color: "#ffffff", fontWeight: "bold" }}>Save</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Username / Roll Number</Text>
+                  <TextInput style={styles.input} placeholder="Enter Username" placeholderTextColor="#999" value={username} onChangeText={val => { setUsername(val); setLoginError(null); }} autoCapitalize="none" />
+                </View>
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Password</Text>
+                  <TextInput style={styles.input} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry />
+                </View>
+                {loginError && (
+                  <View style={{ backgroundColor: "#ffebee", borderWidth: 1, borderColor: "#ef9a9a", borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Ionicons name="alert-circle" size={16} color="#c62828" />
+                    <Text style={{ fontSize: 12, color: "#c62828", fontWeight: "bold", flex: 1 }}>{loginError}</Text>
+                  </View>
+                )}
+                <TouchableOpacity onPress={() => !authLoading && handleAuth()} disabled={authLoading} style={[styles.primaryBtn, { backgroundColor: authLoading ? "#1976d2" : "#1565c0", marginVertical: 0, opacity: authLoading ? 0.85 : 1 }]}>
+                  {authLoading ? <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} /> : <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />}
+                  <Text style={styles.primaryBtnTxt}>{authLoading ? "SIGNING IN..." : "LOG IN"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => { setShowAuthFlip(false); setLoginError(null); }} style={{ alignItems: "center", marginTop: 8 }}>
+                  <Text style={{ fontSize: 13, color: "#c62828", fontWeight: "700" }}>← New here? Register as guest</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // When activeAttempt, reviewMode, or studyModalVisible is set, skip this block so those screens can render
+  if (user?.role === "guest" && !activeAttempt && !reviewMode && !studyModalVisible) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
@@ -9607,150 +10852,577 @@ function MainApp() {
           </Modal>
         )}
 
-        <View style={[styles.header, darkMode && styles.headerDark]}>
-
+        {/* ─── NEW GUEST PORTAL HEADER ───────────────────────────────────────── */}
+        <View style={[styles.header, darkMode && styles.headerDark, { paddingVertical: 10 }]}>
+          {/* Left: Logo + Name */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Image source={require("./assets/logo.png")} style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: darkMode ? "#444" : "#fff" }} />
+            <Image source={require("./assets/logo.png")} style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: darkMode ? "#c62828" : "#e0e0e0" }} />
             <View>
-              <Text style={[styles.headerTitle, darkMode && { color: "#f5f5f5" }]}>NERMAI IAS ACADEMY</Text>
-              <Text style={{ color: darkMode ? "#e5e5e5" : "#424242", opacity: 0.85, fontSize: 11 }}>
+              <Text style={[styles.headerTitle, darkMode && { color: "#f5f5f5" }, { fontSize: 14 }]}>NERMAI IAS ACADEMY</Text>
+              <Text style={{ color: darkMode ? "#b0b0b0" : "#757575", fontSize: 10 }}>
                 {user ? `Welcome, ${user.name}` : "Public Learning Portal"}
               </Text>
             </View>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            {!user ? (
-              <TouchableOpacity
-                onPress={() => setShowNavbarSignInModal(true)}
-                style={{
-                  backgroundColor: darkMode ? "#303030" : "#ffffff",
-                  paddingHorizontal: 14,
-                  paddingVertical: 6,
-                  borderRadius: 20,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  borderWidth: 1,
-                  borderColor: darkMode ? "#444" : "#e0e0e0"
-                }}
-              >
-                <Ionicons name="log-in-outline" size={16} color={darkMode ? "#ffb74d" : "#c62828"} />
-                <Text style={{ color: darkMode ? "#ffb74d" : "#c62828", fontWeight: "bold", fontSize: 12 }}>Sign In</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12, fontWeight: "bold" }}>{user.name}</Text>
-                  <Text style={{ color: darkMode ? "#b0bec5" : "#616161", fontSize: 9 }}>{user.email}</Text>
-                </View>
-                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "#c62828", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: darkMode ? "#444" : "#e0e0e0" }}>
-                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
-                    {user.email ? user.email[0].toUpperCase() : "G"}
+
+          {/* Right: Notices Bell + Contact Info + Hamburger */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+
+            {/* 🔔 Notices Bell */}
+            <TouchableOpacity
+              id="guest-notices-btn"
+              onPress={() => { setShowNoticesPanel(!showNoticesPanel); setShowContactPanel(false); }}
+              style={{ position: "relative", width: 38, height: 38, borderRadius: 19, backgroundColor: darkMode ? "rgba(255,255,255,0.12)" : "rgba(198,40,40,0.08)", alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name="notifications-outline" size={20} color={darkMode ? "#ffffff" : "#c62828"} />
+              {(guestNotifications.length > 0 || announcements.filter((a: any) => !a.read).length > 0) && (
+                <View style={{ position: "absolute", top: 4, right: 4, width: 14, height: 14, borderRadius: 7, backgroundColor: "#FFD700", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#c62828" }}>
+                  <Text style={{ fontSize: 8, color: "#7b0000", fontWeight: "900" }}>
+                    {Math.min(guestNotifications.length + announcements.filter((a: any) => !a.read).length, 9)}
                   </Text>
                 </View>
-                <TouchableOpacity onPress={() => setShowHamburger(true)} style={[styles.hamburgerBtn, darkMode && { backgroundColor: "#303030" }]}>
-                  <Ionicons name="ellipsis-vertical" size={20} color={darkMode ? "#ffffff" : "#424242"} />
-                </TouchableOpacity>
-              </View>
-            )}
+              )}
+            </TouchableOpacity>
+
+            {/* ℹ️ Contact Info */}
+            <TouchableOpacity
+              id="guest-contact-btn"
+              onPress={() => { setShowContactPanel(!showContactPanel); setShowNoticesPanel(false); setContactFormType(null); }}
+              style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: darkMode ? "rgba(255,255,255,0.12)" : "rgba(198,40,40,0.08)", alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name="information-circle-outline" size={20} color={darkMode ? "#ffffff" : "#c62828"} />
+            </TouchableOpacity>
+
+            {/* ☰ Hamburger */}
+            <TouchableOpacity
+              id="guest-hamburger-btn"
+              onPress={() => setShowHamburger(true)}
+              style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: darkMode ? "rgba(255,255,255,0.12)" : "rgba(198,40,40,0.08)", alignItems: "center", justifyContent: "center" }}
+            >
+              <Ionicons name="menu-outline" size={22} color={darkMode ? "#ffffff" : "#c62828"} />
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Navbar Student & Staff Sign In Modal */}
-        <Modal visible={showNavbarSignInModal} animationType="slide" transparent>
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-            <View style={[styles.authCard, { width: "100%", maxWidth: 420, padding: 24, borderRadius: 16, backgroundColor: "#ffffff" }]}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, borderBottomWidth: 1, borderColor: "#eeeeee", paddingBottom: 12 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <Image source={require("./assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 19 }} />
-                  <View>
-                    <Text style={{ fontSize: 15, fontWeight: "bold", color: "#1a237e" }}>NERMAI IAS ACADEMY</Text>
-                    <Text style={{ fontSize: 11, color: "#757575" }}>Student & Staff Sign In</Text>
+        {/* ─── NOTICES PANEL (dropdown below header) ──────────────────────────── */}
+        {showNoticesPanel && (
+          <View style={{
+            position: "absolute", top: 60, right: 10, left: 10, zIndex: 500,
+            backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+            borderRadius: 16, borderWidth: 1,
+            borderColor: darkMode ? "#333" : "#e0e0e0",
+            shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 12,
+            maxHeight: 380, overflow: "hidden"
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="notifications" size={18} color="#c62828" />
+                <Text style={{ fontWeight: "800", fontSize: 14, color: darkMode ? "#fff" : "#212121" }}>Notices & Updates</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowNoticesPanel(false)}>
+                <Ionicons name="close" size={20} color={darkMode ? "#9e9e9e" : "#757575"} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ padding: 12, gap: 10 }}>
+              {[...guestNotifications, ...announcements.filter((a: any) => !a.targetBatch || a.targetDashboard === "all" || a.targetDashboard === "guest")]
+                .slice(0, 20)
+                .map((n: any, idx: number) => (
+                <View key={n.id || idx} style={{
+                  borderRadius: 10, borderWidth: 1,
+                  borderColor: darkMode ? "#2a2a2a" : "#f0f0f0",
+                  backgroundColor: darkMode ? "#252525" : "#fafafa",
+                  padding: 12
+                }}>
+                  <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#c62828", marginTop: 4 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: darkMode ? "#f0f0f0" : "#212121", lineHeight: 18 }}>
+                        {n.title}
+                      </Text>
+                      {(n.content || n.message) && (
+                        <Text style={{ fontSize: 12, color: darkMode ? "#9e9e9e" : "#616161", marginTop: 3, lineHeight: 16 }}>
+                          {n.content || n.message}
+                        </Text>
+                      )}
+                      <Text style={{ fontSize: 10, color: "#c62828", marginTop: 4 }}>
+                        {n.publishedAt || n.sentAt ? new Date(n.publishedAt || n.sentAt).toLocaleDateString() : ""}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-                <TouchableOpacity onPress={() => { setShowNavbarSignInModal(false); setLoginError(null); }}>
-                  <Ionicons name="close" size={24} color="#757575" />
+              ))}
+              {guestNotifications.length === 0 && announcements.length === 0 && (
+                <View style={{ alignItems: "center", paddingVertical: 24 }}>
+                  <Ionicons name="notifications-off-outline" size={36} color={darkMode ? "#555" : "#bdbdbd"} />
+                  <Text style={{ color: darkMode ? "#666" : "#9e9e9e", marginTop: 8, fontSize: 13 }}>No notices yet</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ─── CONTACT PANEL (dropdown below header) ──────────────────────────── */}
+        {showContactPanel && (
+          <View style={{
+            position: "absolute", top: 60, right: 10, left: 10, zIndex: 500,
+            backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+            borderRadius: 16, borderWidth: 1,
+            borderColor: darkMode ? "#333" : "#e0e0e0",
+            shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 16, elevation: 12
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="call" size={18} color="#c62828" />
+                <Text style={{ fontWeight: "800", fontSize: 14, color: darkMode ? "#fff" : "#212121" }}>Contact Nermai</Text>
+              </View>
+              <TouchableOpacity onPress={() => { setShowContactPanel(false); setContactFormType(null); }}>
+                <Ionicons name="close" size={20} color={darkMode ? "#9e9e9e" : "#757575"} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ padding: 14, gap: 10 }}>
+              {/* Contact Details */}
+              {!contactFormType && [{icon:"mail-outline",label:"Email",text:"nermaiiasacademy@gmail.com",color:"#1565c0"},{icon:"logo-whatsapp",label:"WhatsApp",text:"9643553043",color:"#4caf50"},{icon:"logo-instagram",label:"Instagram",text:"nermaiias",color:"#e1306c"},{icon:"location-outline",label:"Address",text:"Nermai IAS Academy, Puducherry",color:"#c62828"}].map((item, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: darkMode ? "#252525" : "#fafafa", borderRadius: 10, padding: 10 }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: item.color + "18", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name={item.icon as any} size={17} color={item.color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 9, color: "#9e9e9e", fontWeight: "600", textTransform: "uppercase" }}>{item.label}</Text>
+                    <Text style={{ color: darkMode ? "#e0e0e0" : "#333", fontSize: 13, fontWeight: "600" }}>{item.text}</Text>
+                  </View>
+                </View>
+              ))}
+
+              {/* Action buttons */}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+                <TouchableOpacity
+                  id="contact-admission-btn"
+                  onPress={() => {
+                    setShowContactPanel(false);
+                    setShowAdmissionForm(true);
+                  }}
+                  style={[styles.primaryBtn, { flex: 1, backgroundColor: "#c62828", marginVertical: 0 }]}
+                >
+                  <Ionicons name="school-outline" size={14} color="#fff" />
+                  <Text style={[styles.primaryBtnTxt, { fontSize: 12 }]}>Admission Form</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  id="contact-inquiry-btn"
+                  onPress={() => {
+                    setShowContactPanel(false);
+                    setShowInquiryForm(true);
+                  }}
+                  style={[styles.primaryBtn, { flex: 1, backgroundColor: "#1565c0", marginVertical: 0 }]}
+                >
+                  <Ionicons name="chatbox-ellipses-outline" size={14} color="#fff" />
+                  <Text style={[styles.primaryBtnTxt, { fontSize: 12 }]}>Any Questions?</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        )}
+
+        {/* ─── FLIP CARD SIGN-IN MODAL ──────────────────────────────────────────── */}
+        {/* Navbar Student & Staff Sign In Modal */}
+        <Modal visible={showNavbarSignInModal} animationType="fade" transparent>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ width: "100%", maxWidth: 440, alignSelf: "center" }}>
+
+              {/* Inject flip card CSS for web */}
+              {Platform.OS === "web" && (
+                <style>{`
+                  .flip-wrap { perspective: 900px; }
+                  .flip-inner { position: relative; transition: transform 0.65s cubic-bezier(0.4,0,0.2,1); transform-style: preserve-3d; }
+                  .flip-inner.flipped { transform: rotateY(180deg); }
+                  .flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+                  .flip-face-back { transform: rotateY(180deg); position: absolute; top: 0; left: 0; right: 0; }
+                `}</style>
+              )}
+
+              {/* Close button */}
+              <TouchableOpacity
+                onPress={() => { setShowNavbarSignInModal(false); setLoginError(null); setShowAuthFlip(false); }}
+                style={{ position: "absolute", top: -12, right: -12, zIndex: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: "#f5f5f5", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#e0e0e0" }}
+              >
+                <Ionicons name="close" size={18} color="#757575" />
+              </TouchableOpacity>
+
+              {/* Tab Switcher (works on all platforms) */}
+              <View style={{ flexDirection: "row", backgroundColor: "#f0f0f0", borderRadius: 12, padding: 3, marginBottom: 16 }}>
+                <TouchableOpacity
+                  onPress={() => { setShowAuthFlip(false); setLoginError(null); }}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: !showAuthFlip ? "#c62828" : "transparent", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+                >
+                  <Ionicons name="person-add-outline" size={15} color={!showAuthFlip ? "#fff" : "#757575"} />
+                  <Text style={{ color: !showAuthFlip ? "#fff" : "#757575", fontWeight: "800", fontSize: 13 }}>Register</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowAuthFlip(true)}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: showAuthFlip ? "#1565c0" : "transparent", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 }}
+                >
+                  <Ionicons name="log-in-outline" size={15} color={showAuthFlip ? "#fff" : "#757575"} />
+                  <Text style={{ color: showAuthFlip ? "#fff" : "#757575", fontWeight: "800", fontSize: 13 }}>Sign In</Text>
                 </TouchableOpacity>
               </View>
 
-              {showIpConfig && (
-                <View style={styles.ipConfigBox}>
-                  <Text style={styles.ipConfigLabel}>Host Server IP Address:</Text>
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TextInput
-                      style={[styles.input, { flex: 1, marginBottom: 0 }]}
-                      value={hostIp}
-                      onChangeText={setHostIp}
-                      placeholder="192.168.x.x"
-                      placeholderTextColor="#999"
-                    />
-                    <TouchableOpacity onPress={() => setShowIpConfig(false)} style={styles.ipSaveBtn}>
-                      <Text style={{ color: "#ffffff", fontWeight: "bold" }}>Save</Text>
+              {/* Card Content */}
+              <View style={{ backgroundColor: "#ffffff", borderRadius: 16, padding: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 }}>
+                {/* Header */}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16, paddingBottom: 14, borderBottomWidth: 1, borderColor: "#f0f0f0" }}>
+                  <Image source={require("./assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 19 }} />
+                  <View>
+                    <Text style={{ fontSize: 15, fontWeight: "800", color: !showAuthFlip ? "#c62828" : "#1565c0" }}>NERMAI IAS ACADEMY</Text>
+                    <Text style={{ fontSize: 11, color: "#757575" }}>{!showAuthFlip ? "New Student Registration" : "Student & Staff Sign In"}</Text>
+                  </View>
+                </View>
+
+                {!showAuthFlip ? (
+                  // REGISTER PANEL
+                  <View style={{ gap: 12 }}>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Your Name *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Enter your full name"
+                        placeholderTextColor="#999"
+                        value={guestNameInput}
+                        onChangeText={setGuestNameInput}
+                      />
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Contact Number *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="10-digit mobile number"
+                        placeholderTextColor="#999"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={guestPhoneInput}
+                        onChangeText={v => setGuestPhoneInput(cleanPhone(v))}
+                      />
+                    </View>
+                    {(() => {
+                      const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
+                      const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
+                      return (
+                        <View style={{ gap: 8 }}>
+                          <TouchableOpacity
+                            onPress={() => { setShowNavbarSignInModal(false); setPendingGuestTab("courses"); setShowGuestGoogleAuthModal(true); }}
+                            disabled={!isFormFilled}
+                            style={[styles.primaryBtn, { backgroundColor: isFormFilled ? "#4285F4" : "#e0e0e0", marginVertical: 0, gap: 8 }]}
+                          >
+                            <Ionicons name="logo-google" size={18} color={isFormFilled ? "#fff" : "#9e9e9e"} />
+                            <Text style={[styles.primaryBtnTxt, { color: isFormFilled ? "#fff" : "#9e9e9e" }]}>Continue with Google</Text>
+                          </TouchableOpacity>
+                          {!isFormFilled && (
+                            <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
+                              {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })()}
+                    <TouchableOpacity onPress={() => setShowAuthFlip(true)} style={{ alignItems: "center", marginTop: 4 }}>
+                      <Text style={{ fontSize: 13, color: "#1565c0", fontWeight: "700" }}>Already a registered student? Sign in →</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
-              )}
-
-              <View style={{ gap: 12, marginTop: 4 }}>
-                <Text style={{ fontSize: 12, color: "#616161", lineHeight: 17 }}>
-                  Enter your assigned username and password to log in to your student/staff dashboard.
-                </Text>
-
-                <View style={{ gap: 4 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "bold", color: "#424242" }}>USERNAME / ROLL NUMBER</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter Username"
-                    placeholderTextColor="#999"
-                    value={username}
-                    onChangeText={(val) => { setUsername(val); setLoginError(null); }}
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                <View style={{ gap: 4 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "bold", color: "#424242" }}>PASSWORD</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter Password"
-                    placeholderTextColor="#999"
-                    value={password}
-                    onChangeText={(val) => { setPassword(val); setLoginError(null); }}
-                    secureTextEntry
-                  />
-                </View>
-
-                {loginError && (
-                  <View style={{
-                    backgroundColor: "#ffebee",
-                    borderWidth: 1,
-                    borderColor: "#ef9a9a",
-                    borderRadius: 8,
-                    padding: 10,
-                    marginVertical: 4,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8
-                  }}>
-                    <Ionicons name="alert-circle" size={16} color="#c62828" />
-                    <Text style={{ fontSize: 12, color: "#c62828", fontWeight: "bold", flex: 1 }}>
-                      {loginError}
-                    </Text>
+                ) : (
+                  // SIGN IN PANEL
+                  <View style={{ gap: 12 }}>
+                    {showIpConfig && (
+                      <View style={styles.ipConfigBox}>
+                        <Text style={styles.ipConfigLabel}>Host Server IP Address:</Text>
+                        <View style={{ flexDirection: "row", gap: 10 }}>
+                          <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} value={hostIp} onChangeText={setHostIp} placeholder="192.168.x.x" placeholderTextColor="#999" />
+                          <TouchableOpacity onPress={() => setShowIpConfig(false)} style={styles.ipSaveBtn}><Text style={{ color: "#ffffff", fontWeight: "bold" }}>Save</Text></TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Username / Roll Number</Text>
+                      <TextInput style={styles.input} placeholder="Enter Username" placeholderTextColor="#999" value={username} onChangeText={val => { setUsername(val); setLoginError(null); }} autoCapitalize="none" />
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Password</Text>
+                      <TextInput style={styles.input} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry />
+                    </View>
+                    {loginError && (
+                      <View style={{ backgroundColor: "#ffebee", borderWidth: 1, borderColor: "#ef9a9a", borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Ionicons name="alert-circle" size={16} color="#c62828" />
+                        <Text style={{ fontSize: 12, color: "#c62828", fontWeight: "bold", flex: 1 }}>{loginError}</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity onPress={() => !authLoading && handleAuth()} disabled={authLoading} style={[styles.primaryBtn, { backgroundColor: authLoading ? "#1976d2" : "#1565c0", marginVertical: 0, opacity: authLoading ? 0.85 : 1 }]}>
+                      {authLoading ? <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} /> : <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />}
+                      <Text style={styles.primaryBtnTxt}>{authLoading ? "SIGNING IN..." : "LOG IN"}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setShowAuthFlip(false); setLoginError(null); }} style={{ alignItems: "center", marginTop: 4 }}>
+                      <Text style={{ fontSize: 13, color: "#c62828", fontWeight: "700" }}>← New here? Register as guest</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
-
-                <TouchableOpacity onPress={() => !authLoading && handleAuth()} disabled={authLoading} style={[styles.primaryBtn, { marginTop: 6, backgroundColor: authLoading ? "#1976d2" : "#1565c0", opacity: authLoading ? 0.85 : 1 }]}>
-                  {authLoading ? (
-                    <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-                  ) : (
-                    <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                  )}
-                  <Text style={styles.primaryBtnTxt}>{authLoading ? "SIGNING IN..." : "LOG IN"}</Text>
-                </TouchableOpacity>
               </View>
             </View>
           </View>
         </Modal>
+
+        {/* Admission Form Modal popup container */}
+        {showAdmissionForm && (
+          <Modal visible={true} animationType="slide" transparent>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "95%", maxWidth: 680, borderRadius: 16, padding: 20, alignSelf: "center", maxHeight: "90%", borderTopWidth: 5, borderTopColor: "#c62828" }]}>
+                {/* Header */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                  <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "900", color: "#c62828" }]}>
+                    📋 Admission Form
+                  </Text>
+                  <TouchableOpacity onPress={() => setShowAdmissionForm(false)}>
+                    <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={true} contentContainerStyle={{ gap: 14 }}>
+                  <Text style={{ fontSize: 11, fontWeight: "800", color: darkMode ? "#aaa" : "#757575", letterSpacing: 0.6 }}>PERSONAL INFORMATION</Text>
+                  
+                  {/* Name Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Full Name *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your full name"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={admissionForm.name}
+                      onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
+                    />
+                  </View>
+
+                  {/* Phone Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Phone Number *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your mobile number"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      value={admissionForm.phone}
+                      onChangeText={v => setAdmissionForm({ ...admissionForm, phone: cleanPhone(v) })}
+                    />
+                  </View>
+
+                  {/* Email Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Email (Optional)</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your email address"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      keyboardType="email-address"
+                      value={admissionForm.email}
+                      onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
+                    />
+                  </View>
+
+                  {/* City Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>City</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your city"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={admissionForm.city}
+                      onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
+                    />
+                  </View>
+
+                  {/* Course Preference Grid */}
+                  <View style={{ gap: 6, marginTop: 6 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Preferred Course *</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {[
+                        "UPSC Civil Services",
+                        "TNPSC Group 1",
+                        "TNPSC Group 2",
+                        "TNPSC Group 4",
+                        "UDC / LDC / VAO",
+                        "SSC / PC / SI",
+                        "Banking / RRB",
+                        "Puducherry Govt Exams",
+                        "Others"
+                      ].map(course => {
+                        const isSelected = admissionForm.preferredCourse === course;
+                        return (
+                          <TouchableOpacity
+                            key={course}
+                            onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: course })}
+                            style={{
+                              paddingVertical: 7,
+                              paddingHorizontal: 12,
+                              borderRadius: 20,
+                              borderWidth: 1.5,
+                              borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#ccc"),
+                              backgroundColor: isSelected ? (darkMode ? "rgba(198,40,40,0.18)" : "rgba(198,40,40,0.06)") : (darkMode ? "#2a2a2a" : "#ffffff"),
+                              alignItems: "center",
+                              justifyContent: "center"
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: isSelected ? "800" : "600", color: isSelected ? "#c62828" : (darkMode ? "#ccc" : "#616161") }}>
+                              {course}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* Mode of Education Tabs */}
+                  <View style={{ gap: 6, marginTop: 6 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Preferred Mode of Education *</Text>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {["Offline", "Online", "Recorded"].map(mode => {
+                        const isSelected = admissionForm.preferredMode === mode.toLowerCase();
+                        return (
+                          <TouchableOpacity
+                            key={mode}
+                            onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.toLowerCase() })}
+                            style={{
+                              flex: 1,
+                              paddingVertical: 10,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#ccc"),
+                              backgroundColor: isSelected ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"),
+                              alignItems: "center",
+                              justifyContent: "center"
+                            }}
+                          >
+                            <Text style={{ fontSize: 12, fontWeight: "800", color: isSelected ? "#ffffff" : (darkMode ? "#ccc" : "#616161") }}>
+                              {mode}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
+
+                {/* Footer Buttons */}
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 20, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", paddingTop: 14 }}>
+                  <TouchableOpacity
+                    onPress={() => setShowAdmissionForm(false)}
+                    style={[styles.outlineBtn, { flex: 1, marginVertical: 0, justifyContent: "center" }]}
+                  >
+                    <Text style={styles.outlineBtnTxt}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={submittingAdmission}
+                    onPress={handleGuestAdmission}
+                    style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828", marginVertical: 0 }]}
+                  >
+                    {submittingAdmission ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnTxt}>Submit Application</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
+
+        {/* Any Questions Inquiry Modal popup container */}
+        {showInquiryForm && (
+          <Modal visible={true} animationType="slide" transparent>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "90%", maxWidth: 520, borderRadius: 16, padding: 20, alignSelf: "center", maxHeight: "90%", borderTopWidth: 5, borderTopColor: "#c62828" }]}>
+                {/* Header */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                  <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "900", color: "#c62828" }]}>
+                    General Enquiry
+                  </Text>
+                  <TouchableOpacity onPress={() => setShowInquiryForm(false)}>
+                    <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={true} contentContainerStyle={{ gap: 12 }}>
+                  {/* Name Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Your Name *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your name"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={enquiryForm.name}
+                      onChangeText={v => setEnquiryForm({ ...enquiryForm, name: v })}
+                    />
+                  </View>
+
+                  {/* Phone Number Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Phone Number *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="10-digit mobile"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      value={enquiryForm.phone}
+                      onChangeText={v => setEnquiryForm({ ...enquiryForm, phone: cleanPhone(v) })}
+                    />
+                  </View>
+
+                  {/* Inquiry Subject Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Inquiry Subject</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Subject of your inquiry or course"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={enquiryForm.subject}
+                      onChangeText={v => setEnquiryForm({ ...enquiryForm, subject: v })}
+                    />
+                  </View>
+
+                  {/* Message Details Input */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242" }}>Message Details *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0, minHeight: 80, textAlignVertical: "top" }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter inquiry details..."
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      multiline
+                      value={enquiryForm.message}
+                      onChangeText={v => setEnquiryForm({ ...enquiryForm, message: v })}
+                    />
+                  </View>
+                </ScrollView>
+
+                {/* Footer Buttons */}
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 20, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", paddingTop: 14 }}>
+                  <TouchableOpacity
+                    onPress={() => setShowInquiryForm(false)}
+                    style={[styles.outlineBtn, { flex: 1, marginVertical: 0, justifyContent: "center", borderColor: "#c62828" }]}
+                  >
+                    <Text style={[styles.outlineBtnTxt, { color: "#c62828" }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    disabled={submittingEnquiry}
+                    onPress={handleGuestEnquiry}
+                    style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828", marginVertical: 0, flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
+                  >
+                    {submittingEnquiry ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="send" size={14} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.primaryBtnTxt}>Submit Enquiry</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
 
         {/* Firebase Google Auth Modal for Guests */}
         <Modal visible={showGuestGoogleAuthModal} animationType="slide" transparent>
@@ -9806,8 +11478,8 @@ function MainApp() {
 
               {/* Firebase Google Sign In Button */}
               {(() => {
-                const cleanPhone = guestPhoneInput.trim().replace(/\D/g, "");
-                const isPhoneValid = cleanPhone.length === 10;
+                const cleanGuestPhone = guestPhoneInput.trim().replace(/\D/g, "");
+                const isPhoneValid = cleanGuestPhone.length === 10;
                 const isFormFilled = guestNameInput.trim() !== "" && isPhoneValid;
                 return (
                   <View style={{ gap: 8 }}>
@@ -9841,7 +11513,7 @@ function MainApp() {
                         {!guestNameInput.trim()
                           ? "* Please enter your Name to proceed."
                           : !isPhoneValid
-                            ? `* Contact number must be exactly 10 digits (Current: ${cleanPhone.length}/10).`
+                            ? `* Contact number must be exactly 10 digits (Current: ${cleanGuestPhone.length}/10).`
                             : "* Ready to sign in."}
                       </Text>
                     )}
@@ -9852,753 +11524,56 @@ function MainApp() {
           </View>
         </Modal>
 
-        {/* Guest Bottom Nav - 4 Tabs */}
-        <View style={{ flexDirection: "row", backgroundColor: "#fff", borderTopWidth: 1, borderColor: "#e0e0e0", position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 100, paddingBottom: 4 }}>
-          {([
-            { key: "home", label: "Home", icon: "home-outline" },
-            { key: "courses", label: "Free Resources", icon: "library-outline" },
-            { key: "freetest", label: "Free Tests", icon: "clipboard-outline" },
-            { key: "register", label: "Contact Us", icon: "call-outline" }
-          ] as const).map(tab => (
-            <TouchableOpacity
-              key={tab.key}
-              onPress={() => {
-                if (tab.key === "home" || tab.key === "register") {
-                  setGuestTab(tab.key);
-                } else if (!user) {
-                  setPendingGuestTab(tab.key);
-                  setShowGuestGoogleAuthModal(true);
-                } else {
-                  setGuestTab(tab.key);
-                }
-              }}
-              style={{ flex: 1, paddingVertical: 8, alignItems: "center", borderTopWidth: 2, borderTopColor: guestTab === tab.key ? "#c62828" : "transparent" }}
-            >
-              <Ionicons name={tab.icon as any} size={20} color={guestTab === tab.key ? "#c62828" : "#757575"} />
-              <Text style={{ fontSize: 9, color: guestTab === tab.key ? "#c62828" : "#757575", fontWeight: "bold", marginTop: 2, textAlign: "center" }}>{tab.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 100 }}>
-
-          {/* HOME TAB */}
-          {guestTab === "home" && (
-            <View style={{ gap: 15 }}>
-              {/* Academy Courses Banner (Home About - Red Colored Block) */}
-              <View style={[styles.card, { backgroundColor: "#800000", padding: 20, borderRadius: 12 }]}>
-                <Text style={{ fontSize: 14, fontWeight: "bold", color: "#fff", lineHeight: 22, marginBottom: 15, textAlign: "center" }}>
-                  Renowned Coaching Institute for UPSC (Civil Services), Puducherry UDC, LDC, Sub-Inspector, Deputy Tahsildar, TNPSC Group II and Other Competitive Examinations.
-                </Text>
-                <View style={{ gap: 12 }}>
-                  {[
-                    "UPSC CIVIL SERVICE ( IAS / IPS )",
-                    "TNPSC / RAILWAYS",
-                    "UDC / LDC / VAO",
-                    "BANKING",
-                    "PUDUCHERRY EXAM",
-                    "SSC / PC / DT / SI"
-                  ].map((course, idx) => (
-                    <View key={idx} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                      <Ionicons name="thumbs-up" size={18} color="#fff" />
-                      <Text style={{ color: "#fff", fontSize: 14, fontWeight: "bold", letterSpacing: 0.5 }}>
-                        {course}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* Active Guest Campaign Banners (Ad Containers) */}
-              {campaigns.filter((c: any) => c.showInDashboard && c.posterUrl).length > 0 && (
-                <View style={{ marginBottom: 18 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Ionicons name="ribbon-outline" size={18} color="#c62828" />
-                      <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Featured Programs & Offers</Text>
-                    </View>
-                    <View style={{ backgroundColor: "#ffebee", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
-                      <Text style={{ fontSize: 10, color: "#c62828", fontWeight: "bold" }}>Swipe &rarr;</Text>
-                    </View>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: "row", paddingVertical: 4 }}>
-                    {campaigns.filter((c: any) => c.showInDashboard && c.posterUrl).map((cp: any) => (
-                      <TouchableOpacity
-                        key={cp.id}
-                        onPress={() => setSelectedCampaignModal(cp)}
-                        activeOpacity={0.9}
-                        style={{
-                          width: 300,
-                          marginRight: 16,
-                          borderRadius: 16,
-                          backgroundColor: "#ffffff",
-                          borderWidth: 1,
-                          borderColor: "#eaeaea",
-                          overflow: "hidden",
-                          shadowColor: "#000",
-                          shadowOffset: { width: 0, height: 6 },
-                          shadowOpacity: 0.08,
-                          shadowRadius: 12,
-                          elevation: 4
-                        }}
-                      >
-                        <View style={{ width: "100%", height: 145, position: "relative", backgroundColor: "#3f51b5" }}>
-                          {cp.posterUrl ? (
-                            <Image source={{ uri: cp.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
-                          ) : (
-                            <View style={{ width: "100%", height: "100%", backgroundColor: "#1a237e", alignItems: "center", justifyContent: "center" }}>
-                              <Ionicons name="school" size={40} color="rgba(255,255,255,0.3)" />
-                            </View>
-                          )}
-                          <View style={{ position: "absolute", top: 12, left: 12, backgroundColor: "rgba(198,40,40,0.95)", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, flexDirection: "row", alignItems: "center", gap: 4, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 3 }}>
-                            <Ionicons name="star" size={10} color="#fff" />
-                            <Text style={{ color: "#fff", fontSize: 9, fontWeight: "900", letterSpacing: 0.5 }}>FEATURED</Text>
-                          </View>
-                        </View>
-                        <View style={{ padding: 16, gap: 6 }}>
-                          <Text style={{ fontWeight: "800", color: "#1a237e", fontSize: 15, lineHeight: 20 }} numberOfLines={1}>{cp.title}</Text>
-                          {cp.description ? (
-                            <Text style={{ color: "#616161", fontSize: 12, lineHeight: 18 }} numberOfLines={2}>{cp.description}</Text>
-                          ) : null}
-                          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderColor: "#f3f4f6" }}>
-                            <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 12 }}>View Details & Apply</Text>
-                            <Ionicons name="chevron-forward-circle" size={22} color="#c62828" />
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-
-              {/* Text Promo Banners for Guest (Non-poster dashboard items) */}
-              {campaigns.filter((c: any) => c.showInDashboard && !c.posterUrl).map((cp: any) => (
+        {/* Campaign Closable Advertisement Banner Modal */}
+        {activeCampaignBanner && (
+          <Modal visible={true} transparent animationType="fade" onRequestClose={handleCloseCampaignBanner}>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+              <View style={[styles.card, darkMode && styles.cardDark, { width: "90%", maxWidth: 440, borderRadius: 20, overflow: "hidden", elevation: 15, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12, borderTopWidth: 5, borderTopColor: "#c62828" }]}>
+                {/* Close 'X' Button on top-right */}
                 <TouchableOpacity
-                  key={cp.id}
-                  onPress={() => setSelectedCampaignModal(cp)}
-                  style={[styles.card, { borderLeftWidth: 5, borderLeftColor: "#1565c0", backgroundColor: "#f0f7ff", marginVertical: 6, borderRadius: 12, padding: 16 }]}
+                  onPress={handleCloseCampaignBanner}
+                  style={{ position: "absolute", top: 12, right: 12, zIndex: 10, backgroundColor: "rgba(0,0,0,0.5)", width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }}
                 >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    <Ionicons name="sparkles" size={14} color="#1565c0" />
-                    <Text style={{ fontWeight: "800", color: "#1565c0", fontSize: 10, letterSpacing: 0.5 }}>SPECIAL ANNOUNCEMENT</Text>
-                  </View>
-                  <Text style={{ fontWeight: "800", color: "#1a237e", fontSize: 14 }}>{cp.title}</Text>
-                  {cp.description ? <Text style={{ color: "#424242", fontSize: 12, marginTop: 4, lineHeight: 18 }}>{cp.description}</Text> : null}
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 10 }}>
-                    <Text style={{ color: "#1565c0", fontWeight: "bold", fontSize: 11 }}>Explore Offer</Text>
-                    <Ionicons name="arrow-forward" size={12} color="#1565c0" />
-                  </View>
+                  <Ionicons name="close" size={20} color="#ffffff" />
                 </TouchableOpacity>
-              ))}
 
-              {/* Campaign Notification Alerts for Guest (Filter out duplicates already shown in Featured Carousel) */}
-              {campaigns.filter((c: any) => c.sendNotification && !(c.showInDashboard && c.posterUrl)).map((cp: any) => (
-                <TouchableOpacity
-                  key={cp.id}
-                  onPress={() => setSelectedCampaignModal(cp)}
-                  style={[styles.card, { borderLeftWidth: 5, borderLeftColor: "#2e7d32", backgroundColor: "#f4fbf7", marginVertical: 6, borderRadius: 12, padding: 16 }]}
-                >
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    <Ionicons name="volume-high" size={16} color="#2e7d32" />
-                    <Text style={{ fontWeight: "800", color: "#2e7d32", fontSize: 10, letterSpacing: 0.5 }}>ACADEMY BROADCAST</Text>
+                {/* Poster Image */}
+                {activeCampaignBanner.posterUrl ? (
+                  <View style={{ width: "100%", height: 240, backgroundColor: "#000" }}>
+                    <Image source={{ uri: activeCampaignBanner.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                   </View>
-                  <Text style={{ fontWeight: "800", color: "#212121", fontSize: 14 }}>{cp.title}</Text>
-                  <Text style={{ color: "#424242", fontSize: 12, marginTop: 4, lineHeight: 18 }}>
-                    {cp.notificationMessage || cp.description}
+                ) : null}
+
+                {/* Text Content */}
+                <View style={{ padding: 20, gap: 8 }}>
+                  <Text style={{ fontSize: 18, fontWeight: "900", color: darkMode ? "#ffffff" : "#1a237e" }}>
+                    {activeCampaignBanner.title}
                   </Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* Guest Official Announcement & Notice Board */}
-              <View style={{ marginTop: 5 }}>
-                <Text style={styles.sectionTitle}>Official Announcements & Notices</Text>
-                {(() => {
-                  const filtered = announcements.filter((n: any) => !((n.title || "").includes("Fee Payment Alert") || (n.content || "").toLowerCase().includes("pay your pending") || (n.content || "").toLowerCase().includes("pending tuition fee")));
-                  if (filtered.length === 0) {
-                    return (
-                      <View style={[styles.card, { padding: 15, alignItems: "center" }]}>
-                        <Ionicons name="megaphone-outline" size={32} color="#bdbdbd" style={{ marginBottom: 6 }} />
-                        <Text style={styles.emptyText}>No active announcements posted yet.</Text>
-                      </View>
-                    );
-                  }
-                  return filtered.map((n: any) => (
-                    <View
-                      key={n.id}
-                      style={[
-                        styles.card,
-                        {
-                          marginBottom: 10,
-                          borderLeftWidth: 4,
-                          borderLeftColor: n.priority === "high" ? "#c62828" : "#1565c0",
-                          backgroundColor: n.priority === "high" ? "#fff5f5" : "#f4f8fb"
-                        }
-                      ]}
-                    >
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <Ionicons name="megaphone" size={16} color={n.priority === "high" ? "#c62828" : "#1565c0"} />
-                          <Text style={{ fontWeight: "bold", fontSize: 11, color: n.priority === "high" ? "#c62828" : "#1565c0" }}>
-                            {n.priority === "high" ? "HIGH PRIORITY NOTICE" : "NOTICE"}
-                          </Text>
-                        </View>
-                        {n.publishedAt && (
-                          <Text style={{ fontSize: 10, color: "#757575" }}>
-                            {new Date(n.publishedAt).toLocaleDateString()}
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 14, marginBottom: 4 }}>{n.title}</Text>
-                      <Text style={{ color: "#424242", fontSize: 13, lineHeight: 19 }}>{n.content}</Text>
-                    </View>
-                  ));
-                })()}
-              </View>
-
-              {/* Core Offerings Grid (Image 2) */}
-              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 10, marginVertical: 10 }}>
-                {[
-                  { title: "Non Profit Initiative", icon: "heart-outline", color: "#1976d2" },
-                  { title: "Comprehensive syllabus coverage", icon: "book-outline", color: "#4caf50" },
-                  { title: "Regular Test Practice", icon: "create-outline", color: "#e65100" },
-                  { title: "Personal Guidance/ Counseling", icon: "people-outline", color: "#9c27b0" },
-                  { title: "Offline & Online", icon: "laptop-outline", color: "#00acc1" },
-                  { title: "Digitally interactive Classroom", icon: "desktop-outline", color: "#e53935" },
-                  { title: "Result Driven Learning", icon: "trophy-outline", color: "#8d6e63" },
-                  { title: "Video Library", icon: "play-circle-outline", color: "#3f51b5" }
-                ].map((item, i) => (
-                  <View key={i} style={[styles.card, { width: "48%", alignItems: "center", paddingVertical: 18, paddingHorizontal: 10, margin: 0, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2 }]}>
-                    <Ionicons name={item.icon as any} size={28} color={item.color} style={{ marginBottom: 8 }} />
-                    <Text style={{ fontSize: 11, fontWeight: "700", color: "#2c3e50", textAlign: "center", lineHeight: 15 }}>
-                      {item.title}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              {/* Academy Key Features (Image 3) */}
-              <View style={{ marginVertical: 10 }}>
-                <Text style={[styles.sectionTitle, { textAlign: "center", fontSize: 18, color: "#1a237e", marginBottom: 12, borderBottomWidth: 0 }]}>
-                  Our Features
-                </Text>
-                <View style={{ gap: 12 }}>
-                  {[
-                    {
-                      title: "Digitally interactive Classroom",
-                      desc: "Even for a service based institution, what really matters is? Coaching. That's the prime of everything, so that we said goodbye to the old school model i.e. Marker Board Presentation.",
-                      icon: "videocam-outline",
-                      color: "#c62828",
-                      bgColor: "#ffebee"
-                    },
-                    {
-                      title: "Friendly Environment",
-                      desc: "Our tagline denotes \"an institute run by volunteers, students and service minded teachers\". Like what mentioned above, we run this academy with the direct and indirect participation of the students in various fields of administration.",
-                      icon: "people-outline",
-                      color: "#1565c0",
-                      bgColor: "#e3f2fd"
-                    },
-                    {
-                      title: "Video Library",
-                      desc: "The entire class in a batch is compiled as video and the same is uploaded in the cloud storage. So that aspirants can get it whenever they are in need during their course period. No matter what?",
-                      icon: "film-outline",
-                      color: "#2e7d32",
-                      bgColor: "#e8f5e9"
-                    }
-                  ].map((feat, idx) => (
-                    <View key={idx} style={[styles.card, { padding: 16 }]}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                        <View style={{ padding: 6, borderRadius: 8, backgroundColor: feat.bgColor }}>
-                          <Ionicons name={feat.icon as any} size={20} color={feat.color} />
-                        </View>
-                        <Text style={{ fontSize: 14, fontWeight: "bold", color: "#1a237e", flex: 1 }}>
-                          {feat.title}
-                        </Text>
-                      </View>
-                      <Text style={{ fontSize: 12, color: "#555", lineHeight: 18 }}>
-                        {feat.desc}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* Admission CTA */}
-              {admissionSubmitted ? (
-                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50", borderWidth: 2, alignItems: "center", paddingVertical: 30 }]}>
-                  <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#c8e6c9", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
-                    <Ionicons name="checkmark-circle" size={50} color="#2e7d32" />
-                  </View>
-                  <Text style={{ fontSize: 18, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Submitted Successfully</Text>
-                  <Text style={{ color: "#4caf50", textAlign: "center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
-                    Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
-                  </Text>
-                </View>
-              ) : showAdmissionForm ? (
-                <View style={styles.card}>
-                  <Text style={styles.sectionTitle}>Admission Application</Text>
-
-                  {/* Personal Info */}
-                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10, marginTop: 10 }}>PERSONAL INFORMATION</Text>
-
-                  <Text style={styles.label}>Full Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your full name"
-                    placeholderTextColor="#bbb"
-                    value={admissionForm.name}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
-                  />
-
-                  <Text style={styles.label}>Phone Number *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your mobile number"
-                    placeholderTextColor="#bbb"
-                    keyboardType="phone-pad"
-                    value={admissionForm.phone}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: cleanPhone(v) })}
-                    maxLength={10}
-                  />
-
-                  <Text style={styles.label}>Email (Optional)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your email address"
-                    placeholderTextColor="#bbb"
-                    keyboardType="email-address"
-                    value={admissionForm.email}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
-                  />
-
-                  <Text style={styles.label}>City</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your city"
-                    placeholderTextColor="#bbb"
-                    value={admissionForm.city}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
-                  />
-
-                  <View style={{ height: 1, backgroundColor: "#f0f0f0", marginVertical: 16 }} />
-
-                  {/* Course Preference */}
-                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10 }}>COURSE PREFERENCE</Text>
-
-                  <Text style={styles.label}>Preferred Course *</Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                    {[
-                      "UPSC Civil Services",
-                      "TNPSC Group 1",
-                      "TNPSC Group 2",
-                      "LDC / UDC / VAO",
-                      "SSC / PC / SI",
-                      "Banking / RRB",
-                      "Puducherry Exam",
-                      "Others"
-                    ].map(c => (
-                      <TouchableOpacity
-                        key={c}
-                        onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })}
-                        style={[
-                          styles.roleBtn,
-                          admissionForm.preferredCourse === c && styles.roleBtnActive,
-                          { borderRadius: 20, flex: 0, paddingHorizontal: 14, paddingVertical: 8 }
-                        ]}
-                      >
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 12 }]}>
-                          {c}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={styles.label}>Preferred Mode of Education *</Text>
-                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
-                    {[
-                      { label: "Offline", value: "offline" },
-                      { label: "Online", value: "online" },
-                      { label: "Recorded", value: "recorded" }
-                    ].map(mode => (
-                      <TouchableOpacity
-                        key={mode.value}
-                        onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.value })}
-                        style={[
-                          {
-                            flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center", borderWidth: 2,
-                            borderColor: admissionForm.preferredMode === mode.value ? "#c62828" : "#e0e0e0",
-                            backgroundColor: admissionForm.preferredMode === mode.value ? "#fff5f5" : "#fafafa"
-                          }
-                        ]}
-                      >
-                        <Text style={[
-                          { fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
-                          { color: admissionForm.preferredMode === mode.value ? "#c62828" : "#757575" }
-                        ]}>
-                          {mode.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <View style={{ flexDirection: "row", gap: 10 }}>
-                    <TouchableOpacity onPress={() => setShowAdmissionForm(false)} style={[styles.outlineBtn, { flex: 1 }]}>
-                      <Text style={styles.outlineBtnTxt}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      disabled={submittingAdmission}
-                      onPress={handleGuestAdmission}
-                      style={[styles.primaryBtn, { flex: 1, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
-                    >
-                      {submittingAdmission ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <Text style={styles.primaryBtnTxt}>Submit Application</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                <TouchableOpacity onPress={() => { setShowAdmissionForm(true); setAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city: "", preferredCourse: "", preferredMode: "" }); }} style={[styles.primaryBtn, { paddingVertical: 18 }]}>
-                  <Text style={[styles.primaryBtnTxt, { fontSize: 16 }]}>Register Nermai IAS Academy</Text>
-                </TouchableOpacity>
-              )}
-
-              {renderContactUsCard()}
-            </View>
-          )}
-
-          {/* COURSES TAB */}
-          {guestTab === "courses" && (
-            <View style={{ gap: 12 }}>
-              <Text style={styles.sectionTitle}>Available Courses</Text>
-              {courses.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="book-outline" size={40} color="#757575" />
-                  <Text style={styles.emptyText}>No courses available yet. Check back soon!</Text>
-                </View>
-              ) : (
-                courses.map(course => (
-                  <View key={course.id} style={styles.card}>
-                    <Text style={{ fontSize: 15, fontWeight: "bold", color: "#c62828", marginBottom: 4 }}>{course.name}</Text>
-                    {course.category && <Text style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>Category: {course.category}</Text>}
-                    {course.description && <Text style={{ color: "#555", fontSize: 13, marginBottom: 8 }}>{course.description}</Text>}
-                    {course.duration && <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4 }}>Duration: {course.duration}</Text>}
-                    {course.fee > 0 && <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 14, marginBottom: 10 }}>₹{course.fee}</Text>}
-                    <TouchableOpacity onPress={() => markCourseInterest(course)} style={[styles.primaryBtn, { backgroundColor: "#1565c0" }]}>
-                      <Text style={styles.primaryBtnTxt}>I'm Interested</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </View>
-          )}
-
-
-
-          {/* FREE TESTS TAB */}
-          {guestTab === "freetest" && (
-            <View style={{ gap: 15 }}>
-              <Text style={styles.sectionTitle}>Free Mock Tests</Text>
-              {tests.length === 0 ? (
-                <View style={[styles.card, { padding: 20, alignItems: "center" }]}>
-                  <Ionicons name="document-text-outline" size={40} color="#757575" />
-                  <Text style={[styles.emptyText, { marginTop: 10 }]}>No free mock tests available at the moment.</Text>
-                </View>
-              ) : (
-                tests.map(t => {
-                  const statusInfo = getTestStatusForStudent(t);
-                  return (
-                    <View key={t.id} style={styles.card}>
-                      <Text style={styles.noticeTitle}>{t.title}</Text>
-                      <Text style={styles.noticeContent}>{t.description}</Text>
-
-                      <View style={{ marginTop: 6, gap: 2, marginBottom: 6 }}>
-                        {t.startTime && (
-                          <Text style={{ fontSize: 11, color: "#757575" }}>
-                            Starts: {new Date(t.startTime).toLocaleString()}
-                          </Text>
-                        )}
-                        {t.endTime && (
-                          <Text style={{ fontSize: 11, color: "#757575" }}>
-                            Ends: {new Date(t.endTime).toLocaleString()}
-                          </Text>
-                        )}
-                      </View>
-
-                      <Text style={styles.noticeMeta}>Duration: {t.durationMinutes} Mins | Passing: {t.passingMarks}</Text>
-
-                      <TouchableOpacity
-                        disabled={statusInfo.disabled || startingTestId === t.id}
-                        onPress={() => startExam(t)}
-                        style={[
-                          styles.primaryBtn,
-                          { marginTop: 10, backgroundColor: "#c62828", flexDirection: "row", gap: 6, justifyContent: "center", alignItems: "center" },
-                          (statusInfo.disabled || startingTestId === t.id) && { backgroundColor: "#bdbdbd" }
-                        ]}
-                      >
-                        {startingTestId === t.id
-                          ? <ActivityIndicator size="small" color="#ffffff" />
-                          : <Text style={styles.primaryBtnTxt}>{statusInfo.label}</Text>
-                        }
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })
-              )}
-            </View>
-          )}
-
-          {/* APPLICATION PORTAL TAB */}
-          {guestTab === "register" && (
-            <View style={{ gap: 15 }}>
-
-              {/* Hero Header */}
-              <View style={{ borderRadius: 18, overflow: "hidden", marginBottom: 4 }}>
-                <View style={{ backgroundColor: "#c62828", padding: 24, alignItems: "center" }}>
-                  <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <Ionicons name="school-outline" size={36} color="#fff" />
-                  </View>
-                  <Text style={{ fontSize: 20, fontWeight: "900", color: "#fff", textAlign: "center", letterSpacing: 0.5 }}>Admission Application Portal</Text>
-                  <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.82)", textAlign: "center", marginTop: 6, lineHeight: 18 }}>
-                    Fill in your details and our counsellors will reach out to you within 24 hours.
-                  </Text>
-                </View>
-              </View>
-
-              {admissionSubmitted ? (
-                <View style={[styles.card, { backgroundColor: "#e8f5e9", borderColor: "#4caf50", borderWidth: 2, alignItems: "center", paddingVertical: 30 }]}>
-                  <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: "#c8e6c9", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
-                    <Ionicons name="checkmark-circle" size={50} color="#2e7d32" />
-                  </View>
-                  <Text style={{ fontSize: 18, fontWeight: "bold", color: "#2e7d32", textAlign: "center" }}>Submitted Successfully</Text>
-                  <Text style={{ color: "#4caf50", textAlign: "center", marginTop: 8, fontSize: 13, lineHeight: 20 }}>
-                    Thank you! Our admissions team will contact you{"\n"}shortly to guide you through next steps.
-                  </Text>
-                  <View style={{ marginTop: 16, flexDirection: "row", gap: 10 }}>
-                    <View style={{ backgroundColor: "#f1f8e9", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Ionicons name="call-outline" size={14} color="#2e7d32" />
-                      <Text style={{ color: "#2e7d32", fontSize: 12, fontWeight: "600" }}>+91 99999 00000</Text>
-                    </View>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.card}>
-                  {/* Step indicator */}
-                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 20 }}>
-                    <View style={{ flex: 1, height: 3, backgroundColor: "#c62828", borderRadius: 2 }} />
-                    <View style={{ backgroundColor: "#c62828", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, marginHorizontal: 8 }}>
-                      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>ADMISSION FORM</Text>
-                    </View>
-                    <View style={{ flex: 1, height: 3, backgroundColor: "#e0e0e0", borderRadius: 2 }} />
-                  </View>
-
-                  {/* Personal Info */}
-                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10 }}>PERSONAL INFORMATION</Text>
-
-                  <Text style={styles.label}>Full Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your full name"
-                    placeholderTextColor="#bbb"
-                    value={admissionForm.name}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, name: v })}
-                  />
-
-                  <Text style={styles.label}>Phone Number *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your mobile number"
-                    placeholderTextColor="#bbb"
-                    keyboardType="phone-pad"
-                    value={admissionForm.phone}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, phone: cleanPhone(v) })}
-                    maxLength={10}
-                  />
-
-                  <Text style={styles.label}>Email (Optional)</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your email address"
-                    placeholderTextColor="#bbb"
-                    keyboardType="email-address"
-                    value={admissionForm.email}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, email: v })}
-                  />
-
-                  <Text style={styles.label}>City</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your city"
-                    placeholderTextColor="#bbb"
-                    value={admissionForm.city}
-                    onChangeText={v => setAdmissionForm({ ...admissionForm, city: v })}
-                  />
-
-                  <View style={{ height: 1, backgroundColor: "#f0f0f0", marginVertical: 16 }} />
-
-                  {/* Course Preference */}
-                  <Text style={{ fontSize: 11, fontWeight: "800", color: "#757575", letterSpacing: 1, marginBottom: 10 }}>COURSE PREFERENCE</Text>
-
-                  <Text style={styles.label}>Preferred Course *</Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                    {[
-                      "UPSC Civil Services",
-                      "TNPSC Group 1",
-                      "TNPSC Group 2",
-                      "LDC / UDC / VAO",
-                      "SSC / PC / SI",
-                      "Banking / RRB",
-                      "Puducherry Exam",
-                      "Others"
-                    ].map(c => (
-                      <TouchableOpacity
-                        key={c}
-                        onPress={() => setAdmissionForm({ ...admissionForm, preferredCourse: c })}
-                        style={[
-                          styles.roleBtn,
-                          admissionForm.preferredCourse === c && styles.roleBtnActive,
-                          { borderRadius: 20, flex: 0, paddingHorizontal: 14, paddingVertical: 8 }
-                        ]}
-                      >
-                        <Text style={[styles.roleBtnTxt, admissionForm.preferredCourse === c && styles.roleBtnTxtActive, { fontSize: 12 }]}>
-                          {c}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={styles.label}>Preferred Mode of Education *</Text>
-                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
-                    {[
-                      { label: "Offline", value: "offline" },
-                      { label: "Online", value: "online" },
-                      { label: "Recorded", value: "recorded" }
-                    ].map(mode => (
-                      <TouchableOpacity
-                        key={mode.value}
-                        onPress={() => setAdmissionForm({ ...admissionForm, preferredMode: mode.value })}
-                        style={[
-                          {
-                            flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center", borderWidth: 2,
-                            borderColor: admissionForm.preferredMode === mode.value ? "#c62828" : "#e0e0e0",
-                            backgroundColor: admissionForm.preferredMode === mode.value ? "#fff5f5" : "#fafafa"
-                          }
-                        ]}
-                      >
-                        <Text style={[
-                          { fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
-                          { color: admissionForm.preferredMode === mode.value ? "#c62828" : "#757575" }
-                        ]}>
-                          {mode.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  {/* Submit */}
-                  <TouchableOpacity
-                    disabled={submittingAdmission}
-                    onPress={handleGuestAdmission}
-                    style={[styles.primaryBtn, { paddingVertical: 16, borderRadius: 14, backgroundColor: submittingAdmission ? "#e57373" : "#c62828", flexDirection: "row", justifyContent: "center", alignItems: "center" }]}
-                  >
-                    {submittingAdmission ? (
-                      <ActivityIndicator size="small" color="#ffffff" />
-                    ) : (
-                      <>
-                        <Ionicons name="send-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={[styles.primaryBtnTxt, { fontSize: 15 }]}>Submit Application</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <Text style={{ fontSize: 10, color: "#9e9e9e", textAlign: "center", marginTop: 10 }}>
-                    By submitting, you agree to be contacted by our admissions team.
-                  </Text>
-                </View>
-              )}
-
-              {/* Contact Section */}
-              {renderContactUsCard()}
-
-            </View>
-          )}
-
-        </ScrollView>
-
-        {/* Campaign Detail Overlay Modal for Guests */}
-        {selectedCampaignModal && (
-          <Modal visible={true} transparent animationType="fade" onRequestClose={() => setSelectedCampaignModal(null)}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-              <View style={[styles.card, darkMode && styles.cardDark, { width: "100%", maxWidth: 460, maxHeight: "85%", padding: 0, overflow: "hidden", borderRadius: 16, borderTopWidth: 4, borderTopColor: "#c62828" }]}>
-                {selectedCampaignModal.posterUrl ? (
-                  <View style={{ width: "100%", height: 180, backgroundColor: "#000", position: "relative" }}>
-                    <Image source={{ uri: selectedCampaignModal.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
-                    <TouchableOpacity
-                      onPress={() => setSelectedCampaignModal(null)}
-                      style={{ position: "absolute", top: 10, right: 10, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 16, width: 32, height: 32, alignItems: "center", justifyContent: "center" }}
-                    >
-                      <Ionicons name="close" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#eee" }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Ionicons name="megaphone" size={20} color="#c62828" />
-                      <Text style={{ fontWeight: "bold", fontSize: 16, color: darkMode ? "#fff" : "#212121" }}>Campaign Offer</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setSelectedCampaignModal(null)}>
-                      <Ionicons name="close" size={22} color={darkMode ? "#aaa" : "#757575"} />
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                <ScrollView contentContainerStyle={{ padding: 20, gap: 12 }}>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                    <View style={{ backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 }}>
-                      <Text style={{ fontSize: 10, color: "#c62828", fontWeight: "bold" }}>FEATURED CAMPAIGN</Text>
-                    </View>
-                    {selectedCampaignModal.targetUsers && (
-                      <View style={{ backgroundColor: "#e3f2fd", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 }}>
-                        <Text style={{ fontSize: 10, color: "#1565c0", fontWeight: "bold" }}>Target: {selectedCampaignModal.targetUsers.toUpperCase()}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#1a237e", lineHeight: 24 }}>
-                    {selectedCampaignModal.title}
-                  </Text>
-
-                  {selectedCampaignModal.description ? (
-                    <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#424242", lineHeight: 22 }}>
-                      {selectedCampaignModal.description}
+                  {activeCampaignBanner.description ? (
+                    <Text style={{ fontSize: 13, color: darkMode ? "#b0bec5" : "#616161", lineHeight: 18 }}>
+                      {activeCampaignBanner.description}
                     </Text>
                   ) : null}
+                </View>
 
-                  {selectedCampaignModal.notificationMessage && selectedCampaignModal.notificationMessage !== selectedCampaignModal.description ? (
-                    <View style={{ backgroundColor: darkMode ? "#222" : "#f5f5f5", borderRadius: 8, padding: 12, marginTop: 4 }}>
-                      <Text style={{ fontSize: 11, fontWeight: "bold", color: "#c62828", marginBottom: 2 }}>BROADCAST NOTE:</Text>
-                      <Text style={{ fontSize: 12, color: darkMode ? "#bbb" : "#616161" }}>{selectedCampaignModal.notificationMessage}</Text>
-                    </View>
-                  ) : null}
-                </ScrollView>
-
-                <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: "row", gap: 10 }}>
+                {/* Action Buttons */}
+                <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 20, paddingBottom: 20, paddingTop: 10, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0" }}>
                   <TouchableOpacity
-                    onPress={() => setSelectedCampaignModal(null)}
-                    style={[styles.outlineBtn, { flex: 1 }]}
+                    onPress={handleCloseCampaignBanner}
+                    style={[styles.outlineBtn, { flex: 1, marginVertical: 0, justifyContent: "center", borderColor: "#c62828" }]}
                   >
-                    <Text style={styles.outlineBtnTxt}>Close</Text>
+                    <Text style={[styles.outlineBtnTxt, { color: "#c62828" }]}>Close</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => {
-                      setSelectedCampaignModal(null);
-                      if (!user || user?.role === "guest") {
+                      handleCloseCampaignBanner();
+                      if (user?.role === "guest" || !user) {
                         setShowAdmissionForm(true);
                       } else {
                         Alert.alert("Enquiry Recorded", "Thank you for your interest! Our team has logged your response.");
                       }
                     }}
-                    style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828" }]}
+                    style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828", marginVertical: 0 }]}
                   >
                     <Text style={styles.primaryBtnTxt}>Register / Enquire Now</Text>
                   </TouchableOpacity>
@@ -10607,6 +11582,206 @@ function MainApp() {
             </View>
           </Modal>
         )}
+
+        {/* ─── NEW: Single-page with Resources/Tests toggle ──────────────────── */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 32 }}
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => { setShowNoticesPanel(false); setShowContactPanel(false); }}
+        >
+          {/* Welcome Banner */}
+          <View style={{ backgroundColor: darkMode ? "#1a1a1a" : "#7b0000", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 22 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 18, fontWeight: "900", color: "#FFD700", letterSpacing: 0.5 }}>
+                  {user ? `Welcome back, ${user.name.split(" ")[0]}! 👋` : "Explore Free Content 🎓"}
+                </Text>
+                <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", marginTop: 4, lineHeight: 18 }}>
+                  {user ? "Browse free resources & take practice tests" : "Register with Google to access free resources"}
+                </Text>
+              </View>
+              {!user && (
+                <TouchableOpacity
+                  onPress={() => { setShowAuthFlip(false); setShowNavbarSignInModal(true); }}
+                  style={{ backgroundColor: "#FFD700", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginLeft: 12 }}
+                >
+                  <Text style={{ color: "#7b0000", fontWeight: "900", fontSize: 12 }}>Register</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+          </View>
+
+          {/* Toggle Pill: Resources | Tests */}
+          <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
+            <View style={{
+              flexDirection: "row",
+              backgroundColor: darkMode ? "#252525" : "#f0f0f0",
+              borderRadius: 30,
+              padding: 4,
+              alignSelf: "center",
+              width: "100%",
+              maxWidth: 360
+            }}>
+              <TouchableOpacity
+                id="toggle-resources"
+                onPress={() => setGuestContentTab("resources")}
+                style={{
+                  flex: 1,
+                  paddingVertical: 11,
+                  borderRadius: 28,
+                  alignItems: "center",
+                  backgroundColor: guestContentTab === "resources" ? "#c62828" : "transparent",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  gap: 6
+                }}
+              >
+                <Ionicons name="library-outline" size={16} color={guestContentTab === "resources" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575")} />
+                <Text style={{ fontSize: 13, fontWeight: "800", color: guestContentTab === "resources" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575") }}>Free Resources</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                id="toggle-tests"
+                onPress={() => {
+                  if (!user) { setPendingGuestTab("freetest"); setShowGuestGoogleAuthModal(true); }
+                  else { setGuestContentTab("tests"); }
+                }}
+                style={{
+                  flex: 1,
+                  paddingVertical: 11,
+                  borderRadius: 28,
+                  alignItems: "center",
+                  backgroundColor: guestContentTab === "tests" ? "#1565c0" : "transparent",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  gap: 6
+                }}
+              >
+                <Ionicons name="clipboard-outline" size={16} color={guestContentTab === "tests" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575")} />
+                <Text style={{ fontSize: 13, fontWeight: "800", color: guestContentTab === "tests" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575") }}>Free Tests</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* ── FREE RESOURCES CONTENT ──────────────────────────────────────── */}
+          {guestContentTab === "resources" && (
+            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#c62828" }} />
+                <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Resources</Text>
+              </View>
+              {!user ? (
+                // Not logged in: show teaser + register CTA
+                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { alignItems: "center", padding: 28 }]}>
+                  <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: "#ffebee", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
+                    <Ionicons name="lock-open-outline" size={36} color="#c62828" />
+                  </View>
+                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121", textAlign: "center" }}>Unlock Free Resources</Text>
+                  <Text style={{ fontSize: 12, color: darkMode ? "#9e9e9e" : "#757575", textAlign: "center", marginTop: 8, lineHeight: 18 }}>
+                    Register with your name, phone number and Google account to access all free study materials.
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => { setShowAuthFlip(false); setShowNavbarSignInModal(true); }}
+                    style={[styles.primaryBtn, { backgroundColor: "#c62828", marginTop: 18, paddingHorizontal: 28 }]}
+                  >
+                    <Ionicons name="logo-google" size={16} color="#fff" />
+                    <Text style={styles.primaryBtnTxt}>Register with Google</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : courses.length === 0 ? (
+                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
+                  <Ionicons name="book-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
+                  <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free resources published yet.</Text>
+                </View>
+              ) : (
+                courses.map((course: any) => (
+                  <View key={course.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#c62828" }]}>
+                    <Text style={{ fontSize: 15, fontWeight: "800", color: "#c62828", marginBottom: 4 }}>{course.name}</Text>
+                    {course.category && <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#888", marginBottom: 4 }}>📁 {course.category}</Text>}
+                    {course.description && <Text style={{ color: darkMode ? "#ccc" : "#555", fontSize: 13, marginBottom: 8, lineHeight: 18 }}>{course.description}</Text>}
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+                      {course.duration && <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12 }}>⏱ {course.duration}</Text>}
+                      {course.fee > 0 && <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 14 }}>₹{course.fee}</Text>}
+                    </View>
+                    <TouchableOpacity onPress={() => markCourseInterest(course)} style={[styles.primaryBtn, { backgroundColor: "#1565c0", marginTop: 12, marginVertical: 0 }]}>
+                      <Ionicons name="heart-outline" size={15} color="#fff" />
+                      <Text style={styles.primaryBtnTxt}>I'm Interested</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+
+          {/* ── FREE TESTS CONTENT ───────────────────────────────────────────── */}
+          {guestContentTab === "tests" && user && (
+            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#1565c0" }} />
+                <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Mock Tests</Text>
+              </View>
+              {tests.length === 0 ? (
+                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
+                  <Ionicons name="document-text-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
+                  <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free mock tests available yet.</Text>
+                </View>
+              ) : (
+                tests.map((t: any) => {
+                  const statusInfo = getTestStatusForStudent(t);
+                  return (
+                    <View key={t.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#1565c0" }]}>
+                      <Text style={[styles.noticeTitle, darkMode && styles.noticeTitleDark]}>{t.title}</Text>
+                      {t.description ? <Text style={[styles.noticeContent, darkMode && styles.noticeContentDark, { marginBottom: 6 }]}>{t.description}</Text> : null}
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                        {t.startTime && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="play-circle-outline" size={12} color="#1565c0" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{new Date(t.startTime).toLocaleString()}</Text></View>}
+                        {t.durationMinutes && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="time-outline" size={12} color="#c62828" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{t.durationMinutes} mins</Text></View>}
+                      </View>
+                      <TouchableOpacity
+                        disabled={statusInfo.disabled || startingTestId === t.id}
+                        onPress={() => startExam(t)}
+                        style={[styles.primaryBtn, { backgroundColor: statusInfo.disabled ? "#bdbdbd" : "#1565c0", marginVertical: 0 }]}
+                      >
+                        {startingTestId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnTxt}>{statusInfo.label}</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          )}
+
+          {/* Campaign Modal */}
+          {selectedCampaignModal && (
+            <Modal visible={true} animationType="slide" transparent>
+              <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+                <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { maxHeight: "82%" }]}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    {selectedCampaignModal.posterUrl ? (
+                      <Image source={{ uri: selectedCampaignModal.posterUrl }} style={{ width: "100%", height: 160, borderRadius: 12, resizeMode: "cover" }} />
+                    ) : (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                        <Ionicons name="ribbon-outline" size={20} color="#c62828" />
+                        <Text style={{ fontWeight: "bold", fontSize: 16, color: darkMode ? "#fff" : "#212121" }}>Campaign Offer</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={{ position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, padding: 4 }}>
+                      <Ionicons name="close" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#1a237e", lineHeight: 24 }}>{selectedCampaignModal.title}</Text>
+                    {selectedCampaignModal.description && <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#424242", lineHeight: 22 }}>{selectedCampaignModal.description}</Text>}
+                  </ScrollView>
+                  <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: "row", gap: 10 }}>
+                    <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={[styles.outlineBtn, { flex: 1 }]}><Text style={styles.outlineBtnTxt}>Close</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setSelectedCampaignModal(null); setShowContactPanel(true); setContactFormType("admission"); }} style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828" }]}><Text style={styles.primaryBtnTxt}>Enquire Now</Text></TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          )}
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -12693,6 +13868,101 @@ function MainApp() {
                               </View>
                             )}
 
+                            {/* ADMIN: OFFLINE STUDENT TEST REQUESTS MANAGER */}
+                            {isAdmin && (
+                              <View style={{ marginBottom: 16, backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 }}>
+                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                    <Ionicons name="key-outline" size={20} color="#c62828" />
+                                    <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>
+                                      Offline Student Test Requests ({offlineTestRequests.filter((r: any) => r.status === "pending").length} Pending)
+                                    </Text>
+                                  </View>
+                                  <View style={{ flexDirection: "row", gap: 6 }}>
+                                    <TouchableOpacity
+                                      onPress={() => loadOfflineTestRequests()}
+                                      style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: darkMode ? "#1a3a1a" : "#e8f5e9" }}
+                                    >
+                                      <Text style={{ fontSize: 10, color: "#2e7d32", fontWeight: "bold" }}>↻ Refresh</Text>
+                                    </TouchableOpacity>
+                                    {offlineTestRequests.length > 0 && (
+                                      <TouchableOpacity
+                                        onPress={async () => {
+                                          try {
+                                            await api.delete("/test-portal/test-creation/permission-requests/clear-all");
+                                            setOfflineTestRequests([]);
+                                          } catch (e: any) {
+                                            Alert.alert("Error", e.message || "Failed to clear requests");
+                                          }
+                                        }}
+                                        style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5" }}
+                                      >
+                                        <Text style={{ fontSize: 10, color: darkMode ? "#aaa" : "#666", fontWeight: "bold" }}>Clear All</Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                </View>
+
+                                {offlineTestRequests.length === 0 ? (
+                                  <Text style={{ fontSize: 12, color: "#9e9e9e", fontStyle: "italic" }}>No offline student permission requests yet.</Text>
+                                ) : (
+                                  <View style={{ gap: 8, marginTop: 6 }}>
+                                    {offlineTestRequests.map((req: any) => (
+                                      <View key={req.id} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 10, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#eee" }}>
+                                        <View style={{ flex: 1, paddingRight: 10 }}>
+                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                            <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>{req.studentName}</Text>
+                                            <Text style={{ fontSize: 11, color: "#757575" }}>(Roll: {req.rollNumber})</Text>
+                                            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: req.status === "approved" ? "#e8f5e9" : req.status === "rejected" ? "#ffebee" : "#fff3e0" }}>
+                                              <Text style={{ fontSize: 9, fontWeight: "bold", color: req.status === "approved" ? "#2e7d32" : req.status === "rejected" ? "#c62828" : "#e65100", textTransform: "uppercase" }}>{req.status}</Text>
+                                            </View>
+                                          </View>
+                                          <Text style={{ fontSize: 11, color: "#9e9e9e", marginTop: 2 }}>
+                                            Test: <Text style={{ fontWeight: "600", color: darkMode ? "#ccc" : "#444" }}>{req.testTitle}</Text> • Batch: {req.batch}
+                                          </Text>
+                                        </View>
+
+                                        <View style={{ flexDirection: "row", gap: 6 }}>
+                                          {req.status !== "approved" && (
+                                            <TouchableOpacity
+                                              onPress={async () => {
+                                                try {
+                                                  await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "approved" });
+                                                  setOfflineTestRequests(prev => prev.map((r: any) => r.id === req.id ? { ...r, status: "approved" } : r));
+                                                  Alert.alert("Permission Granted", `Granted test access to ${req.studentName}.`);
+                                                } catch (e: any) {
+                                                  Alert.alert("Error", e.message || "Failed to approve request");
+                                                }
+                                              }}
+                                              style={{ backgroundColor: "#2e7d32", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
+                                            >
+                                              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve</Text>
+                                            </TouchableOpacity>
+                                          )}
+                                          {req.status !== "rejected" && (
+                                            <TouchableOpacity
+                                              onPress={async () => {
+                                                try {
+                                                  await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "rejected" });
+                                                  setOfflineTestRequests(prev => prev.map((r: any) => r.id === req.id ? { ...r, status: "rejected" } : r));
+                                                  Alert.alert("Request Rejected", `Rejected test request for ${req.studentName}.`);
+                                                } catch (e: any) {
+                                                  Alert.alert("Error", e.message || "Failed to reject request");
+                                                }
+                                              }}
+                                              style={{ backgroundColor: "#c62828", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
+                                            >
+                                              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
+                                            </TouchableOpacity>
+                                          )}
+                                        </View>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
+                              </View>
+                            )}
+
                             {/* LIVE TESTS */}
                             {liveTests.length > 0 && (
                               <>
@@ -12708,6 +13978,18 @@ function MainApp() {
                                   const hoursLeft = minutesLeft ? Math.floor(minutesLeft / 60) : null;
                                   const timeLeftStr = minutesLeft !== null
                                     ? (hoursLeft && hoursLeft > 0 ? `${hoursLeft}h ${minutesLeft % 60}m left` : `${minutesLeft}m left`)
+                                    : null;
+
+                                  const myStudent = getLoggedInStudent(user, students);
+                                  const isOfflineStudent = !isAdmin && (
+                                    (myStudent?.type || "").toLowerCase() === "offline" ||
+                                    (myStudent?.mode || "").toLowerCase() === "offline" ||
+                                    (myStudent?.admissionType || "").toLowerCase() === "offline" ||
+                                    myStudent?.isOffline === true
+                                  );
+
+                                  const req = isOfflineStudent
+                                    ? offlineTestRequests.find((r: any) => r.testId === t.id && (r.studentId === myStudent?.id || r.rollNumber === myStudent?.rollNumber || r.username === user?.username))
                                     : null;
 
                                   return (
@@ -12758,6 +14040,44 @@ function MainApp() {
                                             <Ionicons name="trash-outline" size={20} color="#c62828" />
                                           </TouchableOpacity>
                                         </View>
+                                      ) : isOfflineStudent && statusInfo.status !== "completed" && req?.status !== "approved" ? (
+                                        req?.status === "pending" ? (
+                                          <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: "#fff3e0", borderWidth: 1, borderColor: "#ffe0b2", flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                            <ActivityIndicator size="small" color="#e65100" />
+                                            <Text style={{ fontSize: 12, fontWeight: "bold", color: "#e65100", flex: 1 }}>
+                                              ⏳ Permission Requested — Awaiting Admin Approval
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <TouchableOpacity
+                                            onPress={async () => {
+                                              const reqObj = {
+                                                id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                                                testId: t.id,
+                                                testTitle: t.title,
+                                                studentId: myStudent?.id || user?.userId || user?.username,
+                                                studentName: getStudentName(myStudent) || user?.fullName || user?.username || "Offline Student",
+                                                rollNumber: myStudent?.rollNumber || user?.username || "—",
+                                                batch: myStudent?.batch || myStudent?.batchName || "Offline",
+                                                username: user?.username || "",
+                                                status: "pending",
+                                                requestedAt: new Date().toISOString()
+                                              };
+                                              try {
+                                                await api.post("/test-portal/test-creation/permission-requests", reqObj);
+                                                // Update local state so UI shows "pending" immediately
+                                                setOfflineTestRequests(prev => [reqObj, ...prev.filter((r: any) => !(r.testId === t.id && (r.studentId === reqObj.studentId || r.rollNumber === reqObj.rollNumber)))]);
+                                                Alert.alert("Permission Requested", "Your request to attend this test has been sent to Super Admin / Admin for approval.");
+                                              } catch (e: any) {
+                                                Alert.alert("Error", e.message || "Failed to send permission request. Please check your connection.");
+                                              }
+                                            }}
+                                            style={[styles.primaryBtn, { marginTop: 10, backgroundColor: "#e65100", flexDirection: "row", gap: 6 }]}
+                                          >
+                                            <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                                            <Text style={styles.primaryBtnTxt}>{req?.status === "rejected" ? "❌ Request Rejected (Tap to Re-send)" : "✋ Request Permission to Attend Test"}</Text>
+                                          </TouchableOpacity>
+                                        )
                                       ) : (
                                         <TouchableOpacity
                                           disabled={statusInfo.disabled || startingTestId === t.id || reviewLoading}
@@ -12766,7 +14086,7 @@ function MainApp() {
                                         >
                                           {startingTestId === t.id || (statusInfo.status === "completed" && reviewLoading)
                                             ? <ActivityIndicator size="small" color="#ffffff" />
-                                            : <Text style={styles.primaryBtnTxt}>{statusInfo.label}</Text>
+                                            : <Text style={styles.primaryBtnTxt}>{req?.status === "approved" ? "🚀 Start Exam (Permission Granted)" : statusInfo.label}</Text>
                                           }
                                         </TouchableOpacity>
                                       )}
@@ -12887,87 +14207,92 @@ function MainApp() {
                           <Text style={[styles.label, darkMode && styles.labelDark]}>Test Category:</Text>
                           <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
                             {[{ label: "📅 Daily Test", value: "daily" }, { label: "📆 Weekly Test", value: "weekly" }, { label: "🏆 Mock Test", value: "mock" }].map(cat => (
-                              <TouchableOpacity key={cat.value} onPress={() => setNewPdfTest({ ...newPdfTest, testType: cat.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newPdfTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newPdfTest.testType || "mock") === cat.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
-                                <Text style={{ fontSize: 11, fontWeight: "bold", color: (newPdfTest.testType || "mock") === cat.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{cat.label}</Text>
+                              <TouchableOpacity key={cat.value} onPress={() => setNewPdfTest({ ...newPdfTest, testType: cat.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newPdfTest.testType || "daily") === cat.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newPdfTest.testType || "daily") === cat.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
+                                <Text style={{ fontSize: 11, fontWeight: "bold", color: (newPdfTest.testType || "daily") === cat.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{cat.label}</Text>
                               </TouchableOpacity>
                             ))}
                           </View>
 
                           <Text style={[styles.label, darkMode && styles.labelDark]}>Test Mode:</Text>
                           <View style={{ flexDirection: "row", gap: 6, marginBottom: 15 }}>
-                            {[{ label: "🌐 Online", value: "online" }, { label: "🏢 Offline", value: "offline" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
+                            {[{ label: "🌐 Online", value: "online" }, { label: "🎥 Recorded", value: "recorded" }].map(modeOpt => (
                               <TouchableOpacity key={modeOpt.value} onPress={() => setNewPdfTest({ ...newPdfTest, testMode: modeOpt.value })} style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: (newPdfTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#2a2a2a" : "#f5f5f5"), borderWidth: 1, borderColor: (newPdfTest.testMode || "online") === modeOpt.value ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"), alignItems: "center" }}>
                                 <Text style={{ fontSize: 11, fontWeight: "bold", color: (newPdfTest.testMode || "online") === modeOpt.value ? "#fff" : (darkMode ? "#aaa" : "#555") }}>{modeOpt.label}</Text>
                               </TouchableOpacity>
                             ))}
                           </View>
 
-                          <Text style={[styles.label, darkMode && styles.labelDark]}>Subject Name:</Text>
-                          {(() => {
-                            const uniqueSubjects = [...new Set(lmsSubjects.map(s => s.name || s.title || ""))].filter(Boolean);
-                            return (
-                              <select
-                                value={newPdfTest.subject || ""}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setNewPdfTest({ ...newPdfTest, subject: val, topic: "" });
-                                }}
-                                style={{
-                                  width: "100%",
-                                  height: 40,
-                                  borderRadius: 8,
-                                  paddingLeft: 10,
-                                  paddingRight: 10,
-                                  fontSize: 14,
-                                  backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
-                                  color: darkMode ? "#e0e0e0" : "#212121",
-                                  border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
-                                  marginBottom: 12,
-                                  outline: "none"
-                                }}
-                              >
-                                <option value="">-- Select Subject --</option>
-                                {uniqueSubjects.map(sName => (
-                                  <option key={sName} value={sName}>{sName}</option>
-                                ))}
-                              </select>
-                            );
-                          })()}
+                          {/* Show Subject Name and Sub-Topic ONLY for Daily Test */}
+                          {(newPdfTest.testType || "daily") === "daily" && (
+                            <>
+                              <Text style={[styles.label, darkMode && styles.labelDark]}>Subject Name:</Text>
+                              {(() => {
+                                const uniqueSubjects = [...new Set(lmsSubjects.map(s => s.name || s.title || ""))].filter(Boolean);
+                                return (
+                                  <select
+                                    value={newPdfTest.subject || ""}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      setNewPdfTest({ ...newPdfTest, subject: val, topic: "" });
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      height: 40,
+                                      borderRadius: 8,
+                                      paddingLeft: 10,
+                                      paddingRight: 10,
+                                      fontSize: 14,
+                                      backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
+                                      color: darkMode ? "#e0e0e0" : "#212121",
+                                      border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
+                                      marginBottom: 12,
+                                      outline: "none"
+                                    }}
+                                  >
+                                    <option value="">-- Select Subject --</option>
+                                    {uniqueSubjects.map(sName => (
+                                      <option key={sName} value={sName}>{sName}</option>
+                                    ))}
+                                  </select>
+                                );
+                              })()}
 
-                          <Text style={[styles.label, darkMode && styles.labelDark]}>Sub-Topic:</Text>
-                          {(() => {
-                            const matchedSubjectIds = lmsSubjects.filter(s => (s.name || s.title) === newPdfTest.subject).map(s => s.id);
-                            const filteredTopics = lmsTopics.filter(t => matchedSubjectIds.includes(t.subjectId));
-                            const uniqueTopics = [...new Set(filteredTopics.map(t => t.name || t.title || ""))].filter(Boolean);
-                            return (
-                              <select
-                                disabled={!newPdfTest.subject}
-                                value={newPdfTest.topic || ""}
-                                onChange={e => {
-                                  setNewPdfTest({ ...newPdfTest, topic: e.target.value });
-                                }}
-                                style={{
-                                  width: "100%",
-                                  height: 40,
-                                  borderRadius: 8,
-                                  paddingLeft: 10,
-                                  paddingRight: 10,
-                                  fontSize: 14,
-                                  backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
-                                  color: darkMode ? "#e0e0e0" : "#212121",
-                                  border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
-                                  marginBottom: 12,
-                                  outline: "none",
-                                  opacity: !newPdfTest.subject ? 0.5 : 1
-                                }}
-                              >
-                                <option value="">-- Select Sub-Topic --</option>
-                                {uniqueTopics.map(tName => (
-                                  <option key={tName} value={tName}>{tName}</option>
-                                ))}
-                              </select>
-                            );
-                          })()}
+                              <Text style={[styles.label, darkMode && styles.labelDark]}>Sub-Topic:</Text>
+                              {(() => {
+                                const matchedSubjectIds = lmsSubjects.filter(s => (s.name || s.title) === newPdfTest.subject).map(s => s.id);
+                                const filteredTopics = lmsTopics.filter(t => matchedSubjectIds.includes(t.subjectId));
+                                const uniqueTopics = [...new Set(filteredTopics.map(t => t.name || t.title || ""))].filter(Boolean);
+                                return (
+                                  <select
+                                    disabled={!newPdfTest.subject}
+                                    value={newPdfTest.topic || ""}
+                                    onChange={e => {
+                                      setNewPdfTest({ ...newPdfTest, topic: e.target.value });
+                                    }}
+                                    style={{
+                                      width: "100%",
+                                      height: 40,
+                                      borderRadius: 8,
+                                      paddingLeft: 10,
+                                      paddingRight: 10,
+                                      fontSize: 14,
+                                      backgroundColor: darkMode ? "#2a2a2a" : "#fcfcfc",
+                                      color: darkMode ? "#e0e0e0" : "#212121",
+                                      border: "1px solid " + (darkMode ? "#3a3a3a" : "#e0e0e0"),
+                                      marginBottom: 12,
+                                      outline: "none",
+                                      opacity: !newPdfTest.subject ? 0.5 : 1
+                                    }}
+                                  >
+                                    <option value="">-- Select Sub-Topic --</option>
+                                    {uniqueTopics.map(tName => (
+                                      <option key={tName} value={tName}>{tName}</option>
+                                    ))}
+                                  </select>
+                                );
+                              })()}
+                            </>
+                          )}
 
                           {genMode !== "json" && (
                             <>
@@ -14554,6 +15879,13 @@ PASTED QUESTION PAPER TEXT:
                         {renderSidebarItem("fees", erpSub, "Fees", "cash-outline", () => changeErpSub("fees"), "erp-fees", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("marks", erpSub, "Marks Ledger", "checkbox-outline", () => { changeErpSub("marks"); if (tests.length > 0) { setSelectedErpTestId(tests[0].id); loadErpTestResults(tests[0].id); } }, "erp-marks", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("offline-attendance", erpSub, "Offline Attendance", "clipboard-outline", () => { changeErpSub("offline-attendance"); loadStudents(); loadBatches(); }, "erp-offline-attendance", undefined, erpSidebarCollapsed && !isMobile)}
+
+                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>SYSTEM</Text> : null}
+                        {(user.role === "super_admin" || user.role === "developer") && (
+                          <>
+                            {renderSidebarItem("drive", erpSub, "Drive & Storage", "cloud-upload-outline", () => { changeErpSub("drive"); loadDriveConfig(); }, "erp-drive", undefined, erpSidebarCollapsed && !isMobile)}
+                          </>
+                        )}
                       </>
                     ) : (
                       <>
@@ -14981,6 +16313,39 @@ PASTED QUESTION PAPER TEXT:
                                   })}
                                 </View>
                               </View>
+
+                              {/* Status Filter Buttons */}
+                              <View style={{ flex: 1, minWidth: 180 }}>
+                                <Text style={{ fontSize: 11, fontWeight: "bold", color: "#555", marginBottom: 4 }}>Filter Status:</Text>
+                                <View style={{ flexDirection: "row", gap: 5 }}>
+                                  {([
+                                    { key: "all", label: "ALL" },
+                                    { key: "active", label: "ACTIVE" },
+                                    { key: "pending", label: "PENDING" }
+                                  ] as const).map(item => {
+                                    const isSelected = filterDirStatus === item.key;
+                                    return (
+                                      <TouchableOpacity
+                                        key={item.key}
+                                        onPress={() => setFilterDirStatus(item.key)}
+                                        style={{
+                                          flex: 1,
+                                          paddingVertical: 8,
+                                          borderRadius: 6,
+                                          borderWidth: 1,
+                                          borderColor: isSelected ? "#e65100" : "#e0e0e0",
+                                          backgroundColor: isSelected ? "#fff3e0" : "#f9f9f9",
+                                          alignItems: "center"
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 11, color: isSelected ? "#e65100" : "#555", fontWeight: isSelected ? "bold" : "normal" }}>
+                                          {item.label}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </View>
                             </View>
                           </View>
 
@@ -14999,6 +16364,12 @@ PASTED QUESTION PAPER TEXT:
                                     if (filterDirBatch !== "all" && s.batch !== filterDirBatch) return false;
                                     if (filterDirType !== "all" && String(s.type || "").toLowerCase() !== filterDirType.toLowerCase()) return false;
 
+                                    if (filterDirStatus !== "all") {
+                                      const isPending = s.status === "pending";
+                                      if (filterDirStatus === "pending" && !isPending) return false;
+                                      if (filterDirStatus === "active" && isPending) return false;
+                                    }
+
                                     return true;
                                   });
 
@@ -15008,6 +16379,7 @@ PASTED QUESTION PAPER TEXT:
 
                                   return filtered.map((s) => {
                                     const isSelected = selectedDirectoryStudent?.id === s.id;
+                                    const isPending = s.status === "pending";
                                     return (
                                       <TouchableOpacity
                                         key={s.id}
@@ -15016,18 +16388,25 @@ PASTED QUESTION PAPER TEXT:
                                           padding: 12,
                                           borderRadius: 8,
                                           borderWidth: 1,
-                                          borderColor: isSelected ? "#1976d2" : "#e0e0e0",
-                                          backgroundColor: isSelected ? "#e3f2fd" : "#ffffff",
+                                          borderColor: isSelected ? "#1976d2" : isPending ? "#fbc02d" : "#e0e0e0",
+                                          backgroundColor: isSelected ? "#e3f2fd" : isPending ? "#fffde7" : "#ffffff",
                                           marginBottom: 8
                                         }}
                                       >
                                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                                          <View style={{ flex: 1 }}>
-                                            <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>{getStudentName(s)}</Text>
+                                          <View style={{ flex: 1, paddingRight: 8 }}>
+                                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                              <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>{getStudentName(s)}</Text>
+                                              {isPending && (
+                                                <View style={{ backgroundColor: "#ffe0b2", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                                                  <Text style={{ fontSize: 9, color: "#e65100", fontWeight: "bold" }}>PENDING</Text>
+                                                </View>
+                                              )}
+                                            </View>
                                             <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"}</Text>
                                           </View>
-                                          <View style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "#1976d2", borderRadius: 4 }}>
-                                            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>View Details</Text>
+                                          <View style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: isPending ? "#f57c00" : "#1976d2", borderRadius: 4 }}>
+                                            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>{isPending ? "Review" : "View Details"}</Text>
                                           </View>
                                         </View>
                                       </TouchableOpacity>
@@ -15072,14 +16451,41 @@ PASTED QUESTION PAPER TEXT:
                                     {/* Scrollable Content */}
                                     {(() => {
                                       const s = selectedDirectoryStudent;
-                                      const hasPhoto = !!s.photoBase64;
-                                      const hasPhotoId = !!s.photoIdBase64;
+
+                                      const getDirectImgUrl = (urlStr: string) => {
+                                        if (!urlStr) return "";
+                                        if (urlStr.startsWith("data:") || urlStr.startsWith("blob:")) return urlStr;
+                                        const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                                        const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                                        const m3 = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                                        const driveId = m1 ? m1[1] : m2 ? m2[1] : m3 ? m3[1] : null;
+                                        if (driveId) return `https://lh3.googleusercontent.com/d/${driveId}`;
+                                        return resolveFileUrl(urlStr);
+                                      };
+
+                                      const photoRaw = s?.photoBase64 || s?.passportPhoto || s?.passportPhotoUrl || s?.photoUrl || s?.passportPhotoBase64 || "";
+                                      const photoIdRaw = s?.photoIdBase64 || s?.photoId || s?.photoIdUrl || s?.idProof || s?.idProofUrl || "";
+
+                                      const photoUri = getDirectImgUrl(photoRaw);
+                                      const photoIdUri = getDirectImgUrl(photoIdRaw);
+
+                                      const hasPhoto = !!photoUri;
+                                      const hasPhotoId = !!photoIdUri;
+
                                       return (
                                         <ScrollView showsVerticalScrollIndicator={false}>
+                                          {s.status === "pending" && (
+                                            <View style={{ backgroundColor: darkMode ? "#3a2a00" : "#fffde7", borderLeftWidth: 4, borderLeftColor: "#fbc02d", padding: 12, borderRadius: 6, marginBottom: 15, flexDirection: "row", gap: 8, alignItems: "center" }}>
+                                              <Ionicons name="time-outline" size={18} color="#f57f17" />
+                                              <Text style={{ fontSize: 12, color: darkMode ? "#fff" : "#5d4037", fontWeight: "600", flex: 1 }}>
+                                                Waiting for Super Admin approval before this student profile is activated.
+                                              </Text>
+                                            </View>
+                                          )}
                                           <View style={{ flexDirection: "row", gap: 10, alignItems: "center", marginBottom: 12 }}>
                                             <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#e0e0e0", justifyContent: "center", alignItems: "center", overflow: "hidden" }}>
-                                              {hasPhoto && s.photoBase64 !== "test" ? (
-                                                <Image source={{ uri: s.photoBase64 }} style={{ width: "100%", height: "100%" }} />
+                                              {hasPhoto && photoRaw !== "test" ? (
+                                                <Image source={{ uri: photoUri }} style={{ width: "100%", height: "100%" }} />
                                               ) : (
                                                 <Ionicons name="person" size={28} color="#999" />
                                               )}
@@ -15126,7 +16532,7 @@ PASTED QUESTION PAPER TEXT:
                                               <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 4 }}>Passport Photo</Text>
                                               {hasPhoto ? (
                                                 <TouchableOpacity onPress={() => {
-                                                  if (s.photoBase64 === "test") {
+                                                  if (photoRaw === "test") {
                                                     Alert.alert("Passport Photo (Mock)", "This is a mock placeholder uploaded by the student.");
                                                   } else {
                                                     setPreviewImageTitle("Passport Photo");
@@ -20476,6 +21882,389 @@ PASTED QUESTION PAPER TEXT:
                     );
                   })()}
 
+                  {erpSub === "drive" && (user.role === "super_admin" || user.role === "developer") && (() => {
+                    return (
+                      <View style={{ gap: 18, paddingHorizontal: 4 }}>
+                        {/* Header Banner */}
+                        <View style={{
+                          backgroundColor: darkMode ? "#1a237e30" : "#e8eaf6",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#3f51b540" : "#c5cae9",
+                          borderRadius: 12,
+                          padding: 16,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12
+                        }}>
+                          <View style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 22,
+                            backgroundColor: "#1976d2",
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}>
+                            <Ionicons name="cloud-upload" size={24} color="#fff" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: "bold", color: darkMode ? "#e8eaf6" : "#1a237e", fontSize: 15 }}>Google Drive Cloud Storage</Text>
+                            <Text style={{ color: darkMode ? "#9fa8da" : "#5c6bc0", fontSize: 11, marginTop: 2 }}>
+                              Offload all binary documents, images, PDFs, and question papers directly to your Google Drive to keep Firestore size lightweight and efficient.
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Configuration Card */}
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 18, gap: 14 }]}>
+                          <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#eee", paddingBottom: 8 }}>
+                            Configuration Settings
+                          </Text>
+
+                          <View style={{ gap: 6 }}>
+                            <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#424242" }}>Google Apps Script Web App URL</Text>
+                            <TextInput
+                              style={{
+                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
+                                borderRadius: 8,
+                                paddingHorizontal: 12,
+                                paddingVertical: 10,
+                                fontSize: 13,
+                                color: darkMode ? "#fff" : "#212121",
+                                borderWidth: 1,
+                                borderColor: darkMode ? "#444" : "#e0e0e0"
+                              }}
+                              placeholder="https://script.google.com/macros/s/.../exec"
+                              placeholderTextColor="#888"
+                              value={driveAppsScriptUrl}
+                              onChangeText={setDriveAppsScriptUrl}
+                            />
+                            <Text style={{ fontSize: 10, color: "#888" }}>
+                              Provide the URL generated when deploying your Apps Script Web App with "Execute as: Me" and "Who has access: Anyone".
+                            </Text>
+                          </View>
+
+                          <View style={{ gap: 6 }}>
+                            <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#424242" }}>Google Drive Root Folder ID</Text>
+                            <TextInput
+                              style={{
+                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
+                                borderRadius: 8,
+                                paddingHorizontal: 12,
+                                paddingVertical: 10,
+                                fontSize: 13,
+                                color: darkMode ? "#fff" : "#212121",
+                                borderWidth: 1,
+                                borderColor: darkMode ? "#444" : "#e0e0e0"
+                              }}
+                              placeholder="1nPahkENBlw1St-4gjky5HRxZRznGT_97"
+                              placeholderTextColor="#888"
+                              value={driveRootFolderId}
+                              onChangeText={setDriveRootFolderId}
+                            />
+                            <Text style={{ fontSize: 10, color: "#888" }}>
+                              The alphanumeric ID of your root directory folder from its Google Drive address URL. If blank, files will be saved in your Drive's root.
+                            </Text>
+                          </View>
+
+                          {/* Action Buttons */}
+                          <View style={{ flexDirection: "row", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                            <TouchableOpacity
+                              onPress={handleTestDriveConnection}
+                              disabled={driveIsTesting}
+                              style={{
+                                backgroundColor: darkMode ? "#37474f" : "#eceff1",
+                                borderWidth: 1,
+                                borderColor: darkMode ? "#455a64" : "#cfd8dc",
+                                paddingHorizontal: 16,
+                                paddingVertical: 10,
+                                borderRadius: 8,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6
+                              }}
+                            >
+                              {driveIsTesting ? (
+                                <ActivityIndicator size="small" color="#1976d2" />
+                              ) : (
+                                <Ionicons name="git-network-outline" size={16} color={darkMode ? "#90a4ae" : "#455a64"} />
+                              )}
+                              <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#cfd8dc" : "#37474f" }}>
+                                {driveIsTesting ? "Testing..." : "Test Connection"}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={handleSaveDriveConfig}
+                              style={{
+                                backgroundColor: "#1976d2",
+                                paddingHorizontal: 20,
+                                paddingVertical: 10,
+                                borderRadius: 8,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                                flex: 1,
+                                justifyContent: "center",
+                                minWidth: 120
+                              }}
+                            >
+                              <Ionicons name="save-outline" size={16} color="#fff" />
+                              <Text style={{ fontSize: 12, fontWeight: "bold", color: "#fff" }}>Save Configuration</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Test Status Banner */}
+                          {driveTestResult && (
+                            <View style={{
+                              backgroundColor: driveTestResult.status === "success" ? (darkMode ? "#1b5e2030" : "#e8f5e9") : (darkMode ? "#b71c1c30" : "#ffebee"),
+                              borderWidth: 1,
+                              borderColor: driveTestResult.status === "success" ? (darkMode ? "#2e7d3240" : "#c8e6c9") : (darkMode ? "#c6282840" : "#ffcdd2"),
+                              borderRadius: 8,
+                              padding: 12,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 4
+                            }}>
+                              <Ionicons
+                                name={driveTestResult.status === "success" ? "checkmark-circle" : "alert-circle"}
+                                size={18}
+                                color={driveTestResult.status === "success" ? "#2e7d32" : "#c62828"}
+                              />
+                              <Text style={{ fontSize: 12, fontWeight: "500", color: driveTestResult.status === "success" ? (darkMode ? "#a5d6a7" : "#2e7d32") : (darkMode ? "#ef9a9a" : "#c62828"), flex: 1 }}>
+                                {driveTestResult.status === "success"
+                                  ? driveTestResult.message
+                                  : `Connection Failed: ${driveTestResult.error}`}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Save Result Banner */}
+                          {driveSaveResult && (
+                            <View style={{
+                              backgroundColor: driveSaveResult.status === "success" ? (darkMode ? "#1b5e2030" : "#e8f5e9") : (darkMode ? "#b71c1c30" : "#ffebee"),
+                              borderWidth: 1,
+                              borderColor: driveSaveResult.status === "success" ? (darkMode ? "#2e7d3240" : "#c8e6c9") : (darkMode ? "#c6282840" : "#ffcdd2"),
+                              borderRadius: 8,
+                              padding: 12,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 4
+                            }}>
+                              <Ionicons
+                                name={driveSaveResult.status === "success" ? "checkmark-circle" : "alert-circle"}
+                                size={18}
+                                color={driveSaveResult.status === "success" ? "#2e7d32" : "#c62828"}
+                              />
+                              <Text style={{ fontSize: 12, fontWeight: "500", color: driveSaveResult.status === "success" ? (darkMode ? "#a5d6a7" : "#2e7d32") : (darkMode ? "#ef9a9a" : "#c62828"), flex: 1 }}>
+                                {driveSaveResult.status === "success"
+                                  ? `✅ ${driveSaveResult.message}`
+                                  : `❌ Save Failed: ${driveSaveResult.message}`}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Interactive Folder Structure Guide */}
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 18, gap: 10 }]}>
+                          <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#eee", paddingBottom: 8 }}>
+                            Google Drive Folder Structure Preview
+                          </Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#666" }}>
+                            The system will automatically organize and generate folders recursively for your uploads:
+                          </Text>
+
+                          <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#f9f9f9", borderRadius: 8, padding: 12, borderWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0", gap: 6 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                              <Ionicons name="folder-open" size={16} color="#ffa000" />
+                              <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{driveRootFolderId ? "Custom Root (Your Folder)" : "My Drive (Root)"}</Text>
+                            </View>
+                            <View style={{ paddingLeft: 18, borderLeftWidth: 1, borderLeftColor: darkMode ? "#444" : "#ccc", gap: 6, marginLeft: 7 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                <Ionicons name="folder" size={14} color="#ffa000" />
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333" }}>LMS</Text>
+                              </View>
+                              <View style={{ paddingLeft: 18, borderLeftWidth: 1, borderLeftColor: darkMode ? "#444" : "#ccc", gap: 6, marginLeft: 5 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                  <Ionicons name="folder" size={12} color="#ffa000" />
+                                  <Text style={{ fontSize: 11, color: "#757575" }}>Daily Content / <Text style={{ fontSize: 10, fontStyle: "italic" }}>(e.g. 2026-08-19_Polity_Lecture.pdf)</Text></Text>
+                                </View>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                  <Ionicons name="folder" size={12} color="#ffa000" />
+                                  <Text style={{ fontSize: 11, color: "#757575" }}>Resources / <Text style={{ fontSize: 10, fontStyle: "italic" }}>(e.g. 1787163011244_General_Studies.pdf)</Text></Text>
+                                </View>
+                              </View>
+
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                <Ionicons name="folder" size={14} color="#ffa000" />
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333" }}>ERP</Text>
+                              </View>
+                              <View style={{ paddingLeft: 18, borderLeftWidth: 1, borderLeftColor: darkMode ? "#444" : "#ccc", gap: 6, marginLeft: 5 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                  <Ionicons name="folder" size={12} color="#ffa000" />
+                                  <Text style={{ fontSize: 11, color: "#757575" }}>Students / STU001 / <Text style={{ fontSize: 10, fontStyle: "italic" }}>(e.g. passport_photo.jpg)</Text></Text>
+                                </View>
+                              </View>
+
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                <Ionicons name="folder" size={14} color="#ffa000" />
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333" }}>Test Portal</Text>
+                              </View>
+                              <View style={{ paddingLeft: 18, borderLeftWidth: 1, borderLeftColor: darkMode ? "#444" : "#ccc", gap: 6, marginLeft: 5 }}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                  <Ionicons name="folder" size={12} color="#ffa000" />
+                                  <Text style={{ fontSize: 11, color: "#757575" }}>Question Papers / <Text style={{ fontSize: 10, fontStyle: "italic" }}>(e.g. MockTest_Paper.pdf)</Text></Text>
+                                </View>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                  <Ionicons name="folder" size={12} color="#ffa000" />
+                                  <Text style={{ fontSize: 11, color: "#757575" }}>Answer Keys / <Text style={{ fontSize: 10, fontStyle: "italic" }}>(e.g. MockTest_AnswerKey.pdf)</Text></Text>
+                                </View>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Collapsible Apps Script Code Guide */}
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 18, gap: 10 }]}>
+                          <TouchableOpacity
+                            onPress={() => setShowAppsScriptGuide(!showAppsScriptGuide)}
+                            style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+                          >
+                            <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>
+                              Apps Script Deployment Guide
+                            </Text>
+                            <Ionicons name={showAppsScriptGuide ? "chevron-up" : "chevron-down"} size={18} color="#757575" />
+                          </TouchableOpacity>
+
+                          {showAppsScriptGuide && (
+                            <View style={{ gap: 12, marginTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee", paddingTop: 10 }}>
+                              <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", lineHeight: 16 }}>
+                                Follow these steps to deploy your Google Apps Script bypass:
+                              </Text>
+
+                              <View style={{ gap: 8, paddingLeft: 6 }}>
+                                <TouchableOpacity onPress={() => Linking.openURL("https://script.google.com")} style={{ paddingVertical: 4 }}>
+                                  <Text style={{ fontSize: 11, color: "#1976d2", textDecorationLine: "underline", fontWeight: "bold" }}>
+                                    1. Click here to open Google Apps Script dashboard (script.google.com)
+                                  </Text>
+                                </TouchableOpacity>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555" }}>
+                                  2. Click <Text style={{ fontWeight: "bold" }}>"New Project"</Text> and replace all code in <Text style={{ fontWeight: "bold" }}>Code.gs</Text> with the following script:
+                                </Text>
+                              </View>
+
+                              {/* Script Code Block */}
+                              <ScrollView style={{
+                                backgroundColor: darkMode ? "#121212" : "#f4f4f4",
+                                borderRadius: 8,
+                                padding: 10,
+                                maxHeight: 180,
+                                borderWidth: 1,
+                                borderColor: darkMode ? "#333" : "#e0e0e0"
+                              }}>
+                                <Text style={{ fontFamily: "monospace", fontSize: 9, color: darkMode ? "#81c784" : "#2e7d32" }}>
+{`function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var rootFolderId = data.rootFolderId;
+    var rootFolder = rootFolderId ? DriveApp.getFolderById(rootFolderId) : DriveApp.getRootFolder();
+    
+    // Support Action: test connection
+    if (data.test) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        status: "success",
+        folderName: rootFolder.getName(),
+        message: 'Connected successfully! Folder: "' + rootFolder.getName() + '"'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Support Action: delete
+    if (data.action === "delete" && data.fileId) {
+      DriveApp.getFileById(data.fileId).setTrashed(true);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "File deleted successfully"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    if (!data.fileName || !data.mimeType || !data.base64) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: "Missing required properties: fileName, mimeType, or base64"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var activeFolder = rootFolder;
+    
+    // Support recursive sub-folder paths
+    if (data.subPath) {
+      var parts = data.subPath.split("/").filter(Boolean);
+      for (var i = 0; i < parts.length; i++) {
+        var partName = parts[i].trim();
+        var subFolders = activeFolder.getFoldersByName(partName);
+        if (subFolders.hasNext()) {
+          activeFolder = subFolders.next();
+        } else {
+          activeFolder = activeFolder.createFolder(partName);
+        }
+      }
+    }
+    
+    // Decoded base64 bytes
+    var decoded = Utilities.base64Decode(data.base64);
+    var blob = Utilities.newBlob(decoded, data.mimeType, data.fileName);
+    var file = activeFolder.createFile(blob);
+    
+    // Set view permissions
+    file.setSharing(DriveApp.Access.ANYONE, DriveApp.Permission.VIEW);
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      fileId: file.getId(),
+      name: file.getName(),
+      previewUrl: "https://drive.google.com/file/d/" + file.getId() + "/preview",
+      webViewLink: file.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`}
+                                </Text>
+                              </ScrollView>
+
+                              <View style={{ gap: 4, marginTop: 4 }}>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                  3. Click <Text style={{ fontWeight: "bold" }}>"Deploy" &gt; "New deployment"</Text> at the top-right.
+                                </Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                  4. Click the gear icon next to "Select type" and select <Text style={{ fontWeight: "bold" }}>"Web app"</Text>.
+                                </Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                  5. Choose Configuration options:
+                                </Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+                                  • Execute as: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Me (your-email)"</Text>
+                                </Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+                                  • Who has access: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Anyone"</Text> (Required for API routing)
+                                </Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                  6. Click <Text style={{ fontWeight: "bold" }}>"Deploy"</Text> and copy the <Text style={{ fontWeight: "bold" }}>Web app URL</Text> into the Settings panel above.
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })()}
+
                 </ScrollView>
 
               </View>
@@ -22651,18 +24440,25 @@ PASTED QUESTION PAPER TEXT:
                               return <Text style={{ color: darkMode ? "#ccc" : "#333" }}>Preview is not available for this item.</Text>;
                             }
 
-                            // 1. If running on native mobile phone (Android / iOS), do NOT render HTML iframe or img tags to avoid crashes
+                            // Helper to extract Google Drive file ID
+                            const getGoogleDriveId = (urlStr: string) => {
+                              if (!urlStr) return null;
+                              const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                              if (m1) return m1[1];
+                              const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                              if (m2) return m2[1];
+                              return null;
+                            };
+
+                            const driveId = getGoogleDriveId(displaySrc);
+                            if (selectedDailyContentPreview.type === "image" && driveId) {
+                              displaySrc = `https://lh3.googleusercontent.com/d/${driveId}`;
+                            }
+
+                             // 1. If running on native mobile phone (Android / iOS), do NOT render HTML iframe or img tags to avoid crashes
                             if (Platform.OS !== "web") {
                               if (selectedDailyContentPreview.type === "image") {
-                                return (
-                                  <ScrollView contentContainerStyle={{ alignItems: "center", justifyContent: "center", minHeight: "100%" }} style={{ width: "100%" }}>
-                                    <Image
-                                      source={{ uri: displaySrc }}
-                                      style={{ width: "100%", height: 450, borderRadius: 8 }}
-                                      resizeMode="contain"
-                                    />
-                                  </ScrollView>
-                                );
+                                return <NativeDailyImageZoomView imgSrc={displaySrc} darkMode={darkMode} />;
                               }
                               // For PDFs and other documents — use WebView to render inline inside the modal (no browser redirect)
                               const { WebView } = require("react-native-webview");
@@ -22702,26 +24498,45 @@ PASTED QUESTION PAPER TEXT:
                               );
                             }
 
-                            if (selectedDailyContentPreview.type === "pdf" && !isAdmin) {
+                            // Don't append #toolbar=0 to Drive URLs — it breaks the preview
+                            if (selectedDailyContentPreview.type === "pdf" && !isAdmin && !displaySrc.includes("drive.google.com")) {
                               displaySrc = `${displaySrc}#toolbar=0`;
                             }
                             if (selectedDailyContentPreview.type === "image") {
-                              return (
-                                <ScrollView contentContainerStyle={{ alignItems: "center", justifyContent: "center", minHeight: "100%" }} style={{ width: "100%" }}>
-                                  <img
-                                    src={displaySrc}
-                                    alt={selectedDailyContentPreview.title}
-                                    style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 8 }}
-                                  />
-                                </ScrollView>
-                              );
+                              const imgSrc = driveId 
+                                ? `https://lh3.googleusercontent.com/d/${driveId}` 
+                                : displaySrc;
+                              return <WebDailyImageZoomView imgSrc={imgSrc} alt={selectedDailyContentPreview.title} driveId={driveId} darkMode={darkMode} />;
+                            }
+
+                            // Ensure Google Drive file URLs are converted to /preview embed format
+                            const isDriveUrl = displaySrc.includes("drive.google.com") || displaySrc.includes("docs.google.com");
+                            if (isDriveUrl && !displaySrc.includes("/preview") && !displaySrc.includes("/embeddedfolderview")) {
+                              displaySrc = formatGoogleDriveUrl(displaySrc);
                             }
                             return (
-                              <iframe
-                                src={displaySrc}
-                                title={selectedDailyContentPreview.title}
-                                style={{ width: "100%", height: "100%", border: "none", borderRadius: 8, backgroundColor: "#fff" }}
-                              />
+                              <View style={{ flex: 1, width: "100%", position: "relative" }}>
+                                <iframe
+                                  key={displaySrc}
+                                  src={displaySrc}
+                                  title={selectedDailyContentPreview.title}
+                                  style={{ width: "100%", height: "100%", border: "none", borderRadius: 8, backgroundColor: "#fff" }}
+                                  allow="autoplay; encrypted-media; fullscreen"
+                                  allowFullScreen
+                                  referrerPolicy="no-referrer-when-downgrade"
+                                />
+                                {isDriveUrl && (
+                                  <View style={{ position: "absolute", bottom: 12, right: 12 }}>
+                                    <TouchableOpacity
+                                      onPress={() => { if (typeof window !== "undefined") window.open(displaySrc.replace("/preview", "/view"), "_blank"); }}
+                                      style={{ backgroundColor: "#1a73e8", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                                    >
+                                      <Ionicons name="open-outline" size={14} color="#fff" />
+                                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Open in Google Drive</Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                )}
+                              </View>
                             );
                           })()}
                         </View>
@@ -24648,19 +26463,65 @@ PASTED QUESTION PAPER TEXT:
           onRequestClose={() => setPreviewImageUri(null)}
         >
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
-            <View style={{ width: "90%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, overflow: "hidden", padding: 16 }}>
+            <View style={{ width: "90%", maxWidth: 650, maxHeight: "85%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, overflow: "hidden", padding: 16 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121" }}>{previewImageTitle}</Text>
                 <TouchableOpacity onPress={() => setPreviewImageUri(null)}>
                   <Ionicons name="close-circle" size={26} color="#c62828" />
                 </TouchableOpacity>
               </View>
-              <View style={{ alignItems: "center", justifyContent: "center" }}>
+              <View style={{ alignItems: "center", justifyContent: "center", minHeight: 350 }}>
                 {previewImageUri ? (
-                  <Image
-                    source={{ uri: previewImageUri }}
-                    style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
-                  />
+                  (() => {
+                    const getDriveId = (urlStr: string) => {
+                      if (!urlStr) return null;
+                      const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                      const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                      const m3 = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                      return m1 ? m1[1] : m2 ? m2[1] : m3 ? m3[1] : null;
+                    };
+                    const driveId = getDriveId(previewImageUri);
+                    const isDrive = !!driveId || previewImageUri.includes("drive.google.com");
+
+                    if (Platform.OS === 'web' && isDrive) {
+                      const directThumbnailUrl = driveId
+                        ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`
+                        : `https://lh3.googleusercontent.com/d/${driveId}=w1600`;
+                      const iframeUrl = driveId
+                        ? `https://drive.google.com/file/d/${driveId}/preview`
+                        : previewImageUri.replace(/\/view.*$/, "/preview").replace(/\/edit.*$/, "/preview");
+
+                      return (
+                        <View style={{ width: "100%", minHeight: 350, alignItems: "center", justifyContent: "center" }}>
+                          <img
+                            src={directThumbnailUrl}
+                            alt={previewImageTitle || "Preview"}
+                            style={{ maxWidth: "100%", maxHeight: "420px", objectFit: "contain", borderRadius: "8px" }}
+                            onError={(e) => {
+                              const target = e.target as HTMLElement;
+                              target.style.display = 'none';
+                              const iframeParent = target.parentElement?.querySelector('.drive-iframe-fallback') as HTMLElement;
+                              if (iframeParent) iframeParent.style.display = 'block';
+                            }}
+                          />
+                          <div className="drive-iframe-fallback" style={{ display: 'none', width: '100%', height: '420px', borderRadius: '8px', overflow: 'hidden' }}>
+                            <iframe
+                              src={iframeUrl}
+                              style={{ width: '100%', height: '100%', border: 'none' }}
+                              title={previewImageTitle || "Document Preview"}
+                            />
+                          </div>
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <Image
+                        source={{ uri: previewImageUri }}
+                        style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
+                      />
+                    );
+                  })()
                 ) : null}
               </View>
             </View>
@@ -24929,11 +26790,121 @@ PASTED QUESTION PAPER TEXT:
           </View>
         </Modal>
       )}
+
+      {/* Campaign Closable Advertisement Banner Modal */}
+      {activeCampaignBanner && (
+        <Modal visible={true} transparent animationType="fade" onRequestClose={handleCloseCampaignBanner}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={[styles.card, darkMode && styles.cardDark, { width: "90%", maxWidth: 440, borderRadius: 20, overflow: "hidden", elevation: 15, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12, borderTopWidth: 5, borderTopColor: "#c62828" }]}>
+              {/* Close 'X' Button on top-right */}
+              <TouchableOpacity
+                onPress={handleCloseCampaignBanner}
+                style={{ position: "absolute", top: 12, right: 12, zIndex: 10, backgroundColor: "rgba(0,0,0,0.5)", width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }}
+              >
+                <Ionicons name="close" size={20} color="#ffffff" />
+              </TouchableOpacity>
+
+              {/* Poster Image */}
+              {activeCampaignBanner.posterUrl ? (
+                <View style={{ width: "100%", height: 240, backgroundColor: "#000" }}>
+                  <Image source={{ uri: activeCampaignBanner.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                </View>
+              ) : null}
+
+              {/* Text Content */}
+              <View style={{ padding: 20, gap: 8 }}>
+                <Text style={{ fontSize: 18, fontWeight: "900", color: darkMode ? "#ffffff" : "#1a237e" }}>
+                  {activeCampaignBanner.title}
+                </Text>
+                {activeCampaignBanner.description ? (
+                  <Text style={{ fontSize: 13, color: darkMode ? "#b0bec5" : "#616161", lineHeight: 18 }}>
+                    {activeCampaignBanner.description}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* Action Buttons */}
+              <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 20, paddingBottom: 20, paddingTop: 10, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0" }}>
+                <TouchableOpacity
+                  onPress={handleCloseCampaignBanner}
+                  style={[styles.outlineBtn, { flex: 1, marginVertical: 0, justifyContent: "center", borderColor: "#c62828" }]}
+                >
+                  <Text style={[styles.outlineBtnTxt, { color: "#c62828" }]}>Close</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    handleCloseCampaignBanner();
+                    if (user?.role === "guest" || !user) {
+                      setShowAdmissionForm(true);
+                    } else {
+                      Alert.alert("Enquiry Recorded", "Thank you for your interest! Our team has logged your response.");
+                    }
+                  }}
+                  style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828", marginVertical: 0 }]}
+                >
+                  <Text style={styles.primaryBtnTxt}>Register / Enquire Now</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
 
 export default function App() {
+  const [splashDone, setSplashDone] = useState(false);
+  const [onboardDone, setOnboardDone] = useState(() => {
+    try {
+      if (Platform.OS === "web") {
+        const isRegisteredGuest = !!localStorage.getItem("nermai_guest_email");
+        const isLoggedInStudent = !!localStorage.getItem("nermai_auth_user");
+        
+        if (!isRegisteredGuest && !isLoggedInStudent) {
+          return false;
+        }
+        
+        if (window.location && window.location.hash && window.location.hash.includes("onboarding")) {
+          return false;
+        }
+        
+        return localStorage.getItem(ONBOARDING_KEY) === "true";
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const handleHashChange = () => {
+        if (window.location.hash && window.location.hash.includes("onboarding")) {
+          setOnboardDone(false);
+        }
+      };
+      window.addEventListener("hashchange", handleHashChange);
+      return () => window.removeEventListener("hashchange", handleHashChange);
+    }
+  }, []);
+
+  if (!splashDone) {
+    return (
+      <SafeAreaProvider>
+        <SplashScreen onDone={() => setSplashDone(true)} />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (!onboardDone) {
+    return (
+      <SafeAreaProvider>
+        <OnboardingScreens onDone={() => setOnboardDone(true)} />
+      </SafeAreaProvider>
+    );
+  }
+
   if (Platform.OS !== "web") {
     return (
       <SafeAreaProvider>
