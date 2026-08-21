@@ -1898,6 +1898,18 @@ function MainApp() {
       }
     };
 
+    if (Platform.OS !== "web") {
+      return (
+        <View style={{ flex: 1, width: "100%", height: "100%", position: "relative", overflow: "hidden", justifyContent: "center", alignItems: "center" }}>
+          <Image
+            source={{ uri: imgSrc }}
+            style={{ width: "100%", height: "100%", borderRadius: 8 }}
+            resizeMode="contain"
+          />
+        </View>
+      );
+    }
+
     return (
       <View style={{ flex: 1, width: "100%", height: "100%", position: "relative", overflow: "hidden" }}>
         <div
@@ -2121,6 +2133,17 @@ function MainApp() {
   const [admissionSubmitted, setAdmissionSubmitted] = useState(false);
   const [submittingAdmission, setSubmittingAdmission] = useState(false);
   const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "", preferredMode: "" });
+  // Guest Posters + per-course application forms
+  const [guestPosters, setGuestPosters] = useState<any[]>([]);
+  const [selectedCourseForm, setSelectedCourseForm] = useState<string | null>(null);
+  const [courseAdmissionForm, setCourseAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", mode: "" });
+  const [submittingCourseAdmission, setSubmittingCourseAdmission] = useState(false);
+  // CRM Guest Posters admin state
+  const [guestPosterList, setGuestPosterList] = useState<any[]>([]);
+  const [guestPosterUploading, setGuestPosterUploading] = useState(false);
+  const [guestPosterTitle, setGuestPosterTitle] = useState("");
+  const [guestPosterBase64, setGuestPosterBase64] = useState<string | null>(null);
+  const [guestPosterFileName, setGuestPosterFileName] = useState<string | null>(null);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", content: "", priority: "normal", targetDashboard: "all", targetBatch: "" });
   const [newStudent, setNewStudent] = useState({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [] as string[], batchModes: {} as Record<string, string[]> });
   const [editingStudent, setEditingStudent] = useState<any | null>(null);
@@ -4191,6 +4214,7 @@ function MainApp() {
       loadGuestNotifications(user.leadId || user.userId || "");
       loadCampaigns();
       loadTests();
+      loadGuestPosters();
     }
     loadCourses();
     loadLmsDailyContent();
@@ -5063,7 +5087,8 @@ function MainApp() {
       if (user.role === "student") {
         // Student path: backend filters by batch membership and appends SACS access decision
         const res = await api.get("/students/me/lms-resources");
-        setLmsResources(res?.data || res || []);
+        const list = res?.data?.data || res?.data || res || [];
+        setLmsResources(Array.isArray(list) ? list : []);
       } else {
         // Admin / teacher / staff path: unchanged
         const res = await api.get("/resources");
@@ -5100,7 +5125,8 @@ function MainApp() {
       if (user.role === "student") {
         // Student path: backend filters by batch membership and appends SACS access decision
         const res = await api.get("/students/me/lms-classes");
-        const allClasses = res?.data || res || [];
+        const list = res?.data?.data || res?.data || res || [];
+        const allClasses = Array.isArray(list) ? list : [];
         setLmsRecordedClasses(allClasses);
       } else {
         // Admin / teacher / staff path: unchanged
@@ -5936,6 +5962,99 @@ function MainApp() {
       Alert.alert("Error", e.message || "Failed to submit application.");
     } finally {
       setSubmittingAdmission(false);
+    }
+  };
+
+  // Load guest posters (public)
+  const loadGuestPosters = async () => {
+    try {
+      const res = await api.get("/crm/guest-posters");
+      const list = res?.data?.data || res?.data || res || [];
+      setGuestPosters(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.log("Failed loading guest posters:", e);
+    }
+  };
+
+  // Load CRM guest poster list (admin)
+  const loadAdminGuestPosters = async () => {
+    try {
+      const res = await api.get("/crm/guest-posters");
+      const list = res?.data?.data || res?.data || res || [];
+      setGuestPosterList(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.log("Failed loading admin guest posters:", e);
+      setGuestPosterList([]);
+    }
+  };
+
+  // Handle per-course admission submission
+  const handleCourseAdmission = async (courseName: string) => {
+    if (!courseAdmissionForm.name || !courseAdmissionForm.phone) {
+      Alert.alert("Required", "Please enter your name and phone number.");
+      return;
+    }
+    if (courseAdmissionForm.phone.replace(/\D/g, "").length !== 10) {
+      Alert.alert("Required", "Phone number must be 10 digits.");
+      return;
+    }
+    if (!courseAdmissionForm.mode) {
+      Alert.alert("Required", "Please select your preferred mode of education.");
+      return;
+    }
+    setSubmittingCourseAdmission(true);
+    try {
+      await api.post("/crm/admission", {
+        name: courseAdmissionForm.name,
+        phone: courseAdmissionForm.phone,
+        email: courseAdmissionForm.email || user?.email || "",
+        city: courseAdmissionForm.city,
+        preferredCourse: courseName,
+        preferredMode: courseAdmissionForm.mode,
+        createdBy: user?.email || "guest",
+      });
+      setSelectedCourseForm(null);
+      setCourseAdmissionForm({ name: "", phone: "", email: "", city: "", mode: "" });
+      Alert.alert("Submitted!", `Your application for ${courseName} has been submitted. We will contact you shortly!`);
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to submit application.");
+    } finally {
+      setSubmittingCourseAdmission(false);
+    }
+  };
+
+  // Upload new guest poster (admin CRM)
+  const handleUploadGuestPoster = async () => {
+    if (!guestPosterBase64) {
+      Alert.alert("Required", "Please select a poster image.");
+      return;
+    }
+    setGuestPosterUploading(true);
+    try {
+      await api.post("/crm/guest-posters", {
+        title: guestPosterTitle,
+        posterBase64: guestPosterBase64,
+        createdBy: user?.email || "admin",
+      });
+      setGuestPosterTitle("");
+      setGuestPosterBase64(null);
+      setGuestPosterFileName(null);
+      await loadAdminGuestPosters();
+      Alert.alert("Success", "Poster uploaded successfully!");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to upload poster.");
+    } finally {
+      setGuestPosterUploading(false);
+    }
+  };
+
+  // Delete guest poster (admin CRM)
+  const handleDeleteGuestPoster = async (id: string) => {
+    try {
+      await api.delete(`/crm/guest-posters/${id}`);
+      setGuestPosterList(prev => prev.filter(p => p.id !== id));
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to delete poster.");
     }
   };
 
@@ -11908,10 +12027,137 @@ function MainApp() {
           </Modal>
         )}
 
-        {/* ─── NEW: Single-page with Resources/Tests toggle ──────────────────── */}
+        {/* ─── GUEST PORTAL — Bottom Tab Navigation ──────────────────────── */}
+
+        {/* Per-Course Application Modal */}
+        {selectedCourseForm && (
+          <Modal visible={true} animationType="slide" transparent>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "95%", maxWidth: 520, borderRadius: 18, padding: 20, maxHeight: "88%", borderTopWidth: 5, borderTopColor: "#c62828" }]}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "900", color: "#c62828" }}>📋 Application Form</Text>
+                    <Text style={{ fontSize: 12, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 2 }}>{selectedCourseForm}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => { setSelectedCourseForm(null); setCourseAdmissionForm({ name: "", phone: "", email: "", city: "", mode: "" }); }}>
+                    <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                  {/* Full Name */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242", letterSpacing: 0.8 }}>FULL NAME *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your full name"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={courseAdmissionForm.name}
+                      onChangeText={v => setCourseAdmissionForm({ ...courseAdmissionForm, name: v })}
+                    />
+                  </View>
+                  {/* Phone */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242", letterSpacing: 0.8 }}>PHONE NUMBER *</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="10-digit mobile number"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      keyboardType="phone-pad"
+                      maxLength={10}
+                      value={courseAdmissionForm.phone}
+                      onChangeText={v => setCourseAdmissionForm({ ...courseAdmissionForm, phone: cleanPhone(v) })}
+                    />
+                  </View>
+                  {/* Email */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242", letterSpacing: 0.8 }}>EMAIL (OPTIONAL)</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your email"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      keyboardType="email-address"
+                      value={courseAdmissionForm.email}
+                      onChangeText={v => setCourseAdmissionForm({ ...courseAdmissionForm, email: v })}
+                    />
+                  </View>
+                  {/* City */}
+                  <View style={{ gap: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242", letterSpacing: 0.8 }}>CITY</Text>
+                    <TextInput
+                      style={[styles.input, { marginBottom: 0 }, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                      placeholder="Enter your city"
+                      placeholderTextColor={darkMode ? "#666" : "#bbb"}
+                      value={courseAdmissionForm.city}
+                      onChangeText={v => setCourseAdmissionForm({ ...courseAdmissionForm, city: v })}
+                    />
+                  </View>
+                  {/* Mode */}
+                  <View style={{ gap: 6 }}>
+                    <Text style={{ fontSize: 10, fontWeight: "800", color: darkMode ? "#ccc" : "#424242", letterSpacing: 0.8 }}>PREFERRED MODE *</Text>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {["Offline", "Online", "Recorded"].map(mode => {
+                        const isSelected = courseAdmissionForm.mode === mode.toLowerCase();
+                        return (
+                          <TouchableOpacity
+                            key={mode}
+                            onPress={() => setCourseAdmissionForm({ ...courseAdmissionForm, mode: mode.toLowerCase() })}
+                            style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1.5, borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#ddd"), backgroundColor: isSelected ? "#c62828" : (darkMode ? "#2a2a2a" : "#f8f8f8"), alignItems: "center" }}
+                          >
+                            <Text style={{ fontSize: 12, fontWeight: "800", color: isSelected ? "#fff" : (darkMode ? "#ccc" : "#616161") }}>{mode}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
+                <View style={{ flexDirection: "row", gap: 10, marginTop: 18, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", paddingTop: 14 }}>
+                  <TouchableOpacity onPress={() => { setSelectedCourseForm(null); setCourseAdmissionForm({ name: "", phone: "", email: "", city: "", mode: "" }); }} style={[styles.outlineBtn, { flex: 1, marginVertical: 0, justifyContent: "center" }]}>
+                    <Text style={styles.outlineBtnTxt}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity disabled={submittingCourseAdmission} onPress={() => handleCourseAdmission(selectedCourseForm)} style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828", marginVertical: 0 }]}>
+                    {submittingCourseAdmission ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnTxt}>Submit Application</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
+
+        {/* Campaign Modal */}
+        {selectedCampaignModal && (
+          <Modal visible={true} animationType="slide" transparent>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { maxHeight: "82%" }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  {selectedCampaignModal.posterUrl ? (
+                    <Image source={{ uri: getDirectImageUrl(selectedCampaignModal.posterUrl) }} style={{ width: "100%", height: 160, borderRadius: 12, resizeMode: "cover" }} />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <Ionicons name="ribbon-outline" size={20} color="#c62828" />
+                      <Text style={{ fontWeight: "bold", fontSize: 16, color: darkMode ? "#fff" : "#212121" }}>Campaign Offer</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={{ position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, padding: 4 }}>
+                    <Ionicons name="close" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#1a237e", lineHeight: 24 }}>{selectedCampaignModal.title}</Text>
+                  {selectedCampaignModal.description && <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#424242", lineHeight: 22 }}>{selectedCampaignModal.description}</Text>}
+                </ScrollView>
+                <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={[styles.outlineBtn, { flex: 1 }]}><Text style={styles.outlineBtnTxt}>Close</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={() => { setSelectedCampaignModal(null); setShowContactPanel(true); setContactFormType("admission"); }} style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828" }]}><Text style={styles.primaryBtnTxt}>Enquire Now</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
+
+        {/* Main Scrollable Content */}
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 32 }}
+          contentContainerStyle={{ paddingBottom: 90 }}
           keyboardShouldPersistTaps="handled"
           onScrollBeginDrag={() => { setShowNoticesPanel(false); setShowContactPanel(false); }}
         >
@@ -11935,113 +12181,78 @@ function MainApp() {
                 </TouchableOpacity>
               )}
             </View>
-
           </View>
 
-          {/* Toggle Pill: Resources | Tests */}
-          <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
-            <View style={{
-              flexDirection: "row",
-              backgroundColor: darkMode ? "#252525" : "#f0f0f0",
-              borderRadius: 30,
-              padding: 4,
-              alignSelf: "center",
-              width: "100%",
-              maxWidth: 360
-            }}>
-              <TouchableOpacity
-                id="toggle-resources"
-                onPress={() => setGuestContentTab("resources")}
-                style={{
-                  flex: 1,
-                  paddingVertical: 11,
-                  borderRadius: 28,
-                  alignItems: "center",
-                  backgroundColor: guestContentTab === "resources" ? "#c62828" : "transparent",
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  gap: 6
-                }}
-              >
-                <Ionicons name="library-outline" size={16} color={guestContentTab === "resources" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575")} />
-                <Text style={{ fontSize: 13, fontWeight: "800", color: guestContentTab === "resources" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575") }}>Free Resources</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                id="toggle-tests"
-                onPress={() => {
-                  if (!user) { setPendingGuestTab("freetest"); setShowGuestGoogleAuthModal(true); }
-                  else { setGuestContentTab("tests"); }
-                }}
-                style={{
-                  flex: 1,
-                  paddingVertical: 11,
-                  borderRadius: 28,
-                  alignItems: "center",
-                  backgroundColor: guestContentTab === "tests" ? "#1565c0" : "transparent",
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  gap: 6
-                }}
-              >
-                <Ionicons name="clipboard-outline" size={16} color={guestContentTab === "tests" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575")} />
-                <Text style={{ fontSize: 13, fontWeight: "800", color: guestContentTab === "tests" ? "#fff" : (darkMode ? "#9e9e9e" : "#757575") }}>Free Tests</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* ── FREE RESOURCES CONTENT ──────────────────────────────────────── */}
+          {/* ── HOME TAB ─────────────────────────────────────────────────────── */}
           {guestContentTab === "resources" && (
-            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 8 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#c62828" }} />
-                <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Resources</Text>
-              </View>
-              {!user ? (
-                // Not logged in: show teaser + register CTA
-                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { alignItems: "center", padding: 28 }]}>
-                  <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: "#ffebee", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
-                    <Ionicons name="lock-open-outline" size={36} color="#c62828" />
-                  </View>
-                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121", textAlign: "center" }}>Unlock Free Resources</Text>
-                  <Text style={{ fontSize: 12, color: darkMode ? "#9e9e9e" : "#757575", textAlign: "center", marginTop: 8, lineHeight: 18 }}>
-                    Register with your name, phone number and Google account to access all free study materials.
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => { setShowAuthFlip(false); setShowNavbarSignInModal(true); }}
-                    style={[styles.primaryBtn, { backgroundColor: "#c62828", marginTop: 18, paddingHorizontal: 28 }]}
-                  >
-                    <Ionicons name="logo-google" size={16} color="#fff" />
-                    <Text style={styles.primaryBtnTxt}>Register with Google</Text>
-                  </TouchableOpacity>
+            <View>
+              {/* Poster Carousel */}
+              {guestPosters.length > 0 && (
+                <View style={{ marginTop: 14 }}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}>
+                    {guestPosters.map((poster: any) => (
+                      <View key={poster.id} style={{ width: 280, borderRadius: 14, overflow: "hidden", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderWidth: 1, borderColor: darkMode ? "#333" : "#eee", shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 }}>
+                        <Image source={{ uri: getDirectImageUrl(poster.posterUrl) }} style={{ width: 280, height: 160, resizeMode: "cover" }} />
+                        {poster.title ? (
+                          <View style={{ padding: 10 }}>
+                            <Text style={{ fontSize: 13, fontWeight: "700", color: darkMode ? "#f0f0f0" : "#212121" }}>{poster.title}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+                  </ScrollView>
                 </View>
-              ) : courses.length === 0 ? (
-                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
-                  <Ionicons name="book-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
-                  <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free resources published yet.</Text>
+              )}
+
+
+              {/* Free Resources Section */}
+              <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 20 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                  <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#c62828" }} />
+                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Resources</Text>
                 </View>
-              ) : (
-                courses.map((course: any) => (
-                  <View key={course.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#c62828" }]}>
-                    <Text style={{ fontSize: 15, fontWeight: "800", color: "#c62828", marginBottom: 4 }}>{course.name}</Text>
-                    {course.category && <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#888", marginBottom: 4 }}>📁 {course.category}</Text>}
-                    {course.description && <Text style={{ color: darkMode ? "#ccc" : "#555", fontSize: 13, marginBottom: 8, lineHeight: 18 }}>{course.description}</Text>}
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
-                      {course.duration && <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12 }}>⏱ {course.duration}</Text>}
-                      {course.fee > 0 && <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 14 }}>₹{course.fee}</Text>}
+                {!user ? (
+                  <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { alignItems: "center", padding: 28 }]}>
+                    <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: "#ffebee", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
+                      <Ionicons name="lock-open-outline" size={36} color="#c62828" />
                     </View>
-                    <TouchableOpacity onPress={() => markCourseInterest(course)} style={[styles.primaryBtn, { backgroundColor: "#1565c0", marginTop: 12, marginVertical: 0 }]}>
-                      <Ionicons name="heart-outline" size={15} color="#fff" />
-                      <Text style={styles.primaryBtnTxt}>I'm Interested</Text>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121", textAlign: "center" }}>Unlock Free Resources</Text>
+                    <Text style={{ fontSize: 12, color: darkMode ? "#9e9e9e" : "#757575", textAlign: "center", marginTop: 8, lineHeight: 18 }}>
+                      Register with your name, phone number and Google account to access all free study materials.
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => { setShowAuthFlip(false); setShowNavbarSignInModal(true); }}
+                      style={[styles.primaryBtn, { backgroundColor: "#c62828", marginTop: 18, paddingHorizontal: 28 }]}
+                    >
+                      <Ionicons name="logo-google" size={16} color="#fff" />
+                      <Text style={styles.primaryBtnTxt}>Register with Google</Text>
                     </TouchableOpacity>
                   </View>
-                ))
-              )}
+                ) : courses.length === 0 ? (
+                  <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
+                    <Ionicons name="book-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
+                    <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free resources published yet.</Text>
+                  </View>
+                ) : (
+                  courses.map((course: any) => (
+                    <View key={course.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#c62828" }]}>
+                      <Text style={{ fontSize: 15, fontWeight: "800", color: "#c62828", marginBottom: 4 }}>{course.name}</Text>
+                      {course.category && <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#888", marginBottom: 4 }}>📁 {course.category}</Text>}
+                      {course.description && <Text style={{ color: darkMode ? "#ccc" : "#555", fontSize: 13, marginBottom: 8, lineHeight: 18 }}>{course.description}</Text>}
+                      <TouchableOpacity onPress={() => markCourseInterest(course)} style={[styles.primaryBtn, { backgroundColor: "#1565c0", marginTop: 12, marginVertical: 0 }]}>
+                        <Ionicons name="heart-outline" size={15} color="#fff" />
+                        <Text style={styles.primaryBtnTxt}>I'm Interested</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </View>
             </View>
           )}
 
-          {/* ── FREE TESTS CONTENT ───────────────────────────────────────────── */}
+          {/* ── FREE TESTS TAB ────────────────────────────────────────────────── */}
           {guestContentTab === "tests" && user && (
-            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 8 }}>
+            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 16 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
                 <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#1565c0" }} />
                 <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Mock Tests</Text>
@@ -12076,37 +12287,93 @@ function MainApp() {
             </View>
           )}
 
-          {/* Campaign Modal */}
-          {selectedCampaignModal && (
-            <Modal visible={true} animationType="slide" transparent>
-              <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-                <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { maxHeight: "82%" }]}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                    {selectedCampaignModal.posterUrl ? (
-                      <Image source={{ uri: getDirectImageUrl(selectedCampaignModal.posterUrl) }} style={{ width: "100%", height: 160, borderRadius: 12, resizeMode: "cover" }} />
-                    ) : (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                        <Ionicons name="ribbon-outline" size={20} color="#c62828" />
-                        <Text style={{ fontWeight: "bold", fontSize: 16, color: darkMode ? "#fff" : "#212121" }}>Campaign Offer</Text>
-                      </View>
-                    )}
-                    <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={{ position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 14, padding: 4 }}>
-                      <Ionicons name="close" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
-                    <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#1a237e", lineHeight: 24 }}>{selectedCampaignModal.title}</Text>
-                    {selectedCampaignModal.description && <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#424242", lineHeight: 22 }}>{selectedCampaignModal.description}</Text>}
-                  </ScrollView>
-                  <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: "row", gap: 10 }}>
-                    <TouchableOpacity onPress={() => setSelectedCampaignModal(null)} style={[styles.outlineBtn, { flex: 1 }]}><Text style={styles.outlineBtnTxt}>Close</Text></TouchableOpacity>
-                    <TouchableOpacity onPress={() => { setSelectedCampaignModal(null); setShowContactPanel(true); setContactFormType("admission"); }} style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828" }]}><Text style={styles.primaryBtnTxt}>Enquire Now</Text></TouchableOpacity>
-                  </View>
+          {/* ── APPLY TAB — Per-Course Application Forms ─────────────────────── */}
+          {guestContentTab === "apply" && (
+            <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <View style={{ width: 4, height: 22, borderRadius: 2, backgroundColor: "#2e7d32" }} />
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Apply for a Course</Text>
+                  <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 1 }}>Select a course to apply</Text>
                 </View>
               </View>
-            </Modal>
+              {[
+                { name: "UPSC Civil Services", icon: "🏛️", color: "#7b0000", desc: "Civil Services Exam Preparation" },
+                { name: "TNPSC Group 1", icon: "⭐", color: "#1565c0", desc: "Group 1 — Combined Civil Services" },
+                { name: "TNPSC Group 2", icon: "📘", color: "#1976d2", desc: "Group 2 — Sub-Ordinate Services" },
+                { name: "TNPSC Group 4", icon: "📗", color: "#2196f3", desc: "Group 4 — VAO & Office Assistant" },
+                { name: "UDC / LDC / VAO", icon: "🗂️", color: "#6a1b9a", desc: "Clerk & Village Administrative Officer" },
+                { name: "SSC / PC / SI", icon: "🎖️", color: "#e65100", desc: "Police Constable & Sub-Inspector" },
+                { name: "Banking / RRB", icon: "🏦", color: "#00695c", desc: "Banking & Railway Recruitment Board" },
+                { name: "Puducherry Govt Exams", icon: "🌊", color: "#c62828", desc: "Puducherry State Government Exams" },
+                { name: "Others", icon: "📌", color: "#546e7a", desc: "Any other competitive exams" },
+              ].map(course => (
+                <TouchableOpacity
+                  key={course.name}
+                  onPress={() => {
+                    if (!user) { setPendingGuestTab("courses"); setShowGuestGoogleAuthModal(true); return; }
+                    setCourseAdmissionForm({ name: user?.name || "", phone: user?.phone || "", email: user?.email || "", city: "", mode: "" });
+                    setSelectedCourseForm(course.name);
+                  }}
+                  style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { flexDirection: "row", alignItems: "center", gap: 14, borderLeftWidth: 4, borderLeftColor: course.color, paddingVertical: 16 }]}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: course.color + "18", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 22 }}>{course.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: course.color }}>{course.name}</Text>
+                    <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 2 }}>{course.desc}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={darkMode ? "#555" : "#bdbdbd"} />
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 10 }} />
+            </View>
           )}
         </ScrollView>
+
+        {/* Bottom Tab Navigation Bar */}
+        <View style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          backgroundColor: darkMode ? "#1a1a1a" : "#ffffff",
+          borderTopWidth: 1,
+          borderTopColor: darkMode ? "#2a2a2a" : "#e0e0e0",
+          flexDirection: "row",
+          paddingBottom: Platform.OS === "ios" ? 20 : 8,
+          paddingTop: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          elevation: 12,
+        }}>
+          {[
+            { key: "resources", label: "Home", icon: "home-outline", iconActive: "home", color: "#c62828" },
+            { key: "tests", label: "Free Tests", icon: "clipboard-outline", iconActive: "clipboard", color: "#1565c0" },
+            { key: "apply", label: "Apply", icon: "school-outline", iconActive: "school", color: "#2e7d32" },
+          ].map(tab => {
+            const isActive = guestContentTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                id={`guest-bottom-tab-${tab.key}`}
+                onPress={() => {
+                  if (tab.key === "tests" && !user) { setPendingGuestTab("freetest"); setShowGuestGoogleAuthModal(true); return; }
+                  setGuestContentTab(tab.key as any);
+                }}
+                style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 3 }}
+              >
+                <View style={isActive ? { backgroundColor: tab.color + "18", borderRadius: 16, paddingHorizontal: 16, paddingVertical: 4 } : {}}>
+                  <Ionicons name={(isActive ? tab.iconActive : tab.icon) as any} size={22} color={isActive ? tab.color : (darkMode ? "#666" : "#9e9e9e")} />
+                </View>
+                <Text style={{ fontSize: 10, fontWeight: isActive ? "800" : "600", color: isActive ? tab.color : (darkMode ? "#666" : "#9e9e9e") }}>
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </SafeAreaView>
     );
   }
@@ -12358,10 +12625,7 @@ function MainApp() {
                 >
                   <Ionicons name="warning-outline" size={14} color={userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "#c62828" : "#757575"} />
                   <Text style={{ fontSize: 11, fontWeight: "700", color: userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "#c62828" : "#616161" }}>
-                    {userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`)
-                      ? `Reported (${(questionReports[activeAttempt.testId] || {})[`Q.N ${currentQIdx + 1}`] || 1})`
-                      : `Report Wrong Answer (${(questionReports[activeAttempt.testId] || {})[`Q.N ${currentQIdx + 1}`] || 0})`
-                    }
+                    {userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "Reported" : "Report Wrong Answer"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -23419,8 +23683,8 @@ PASTED QUESTION PAPER TEXT:
                     {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile)}
                     {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile)}
                     {/* Student: My Courses & Live page */}
-                    {!isAdmin && Platform.OS === 'web' && renderSidebarItem("my-courses", lmsSub, "My Courses", "school-outline", () => changeLmsSub("my-courses"), "lms-my-courses", undefined, lmsTabsCollapsed && !isMobile)}
-                    {!isAdmin && Platform.OS === 'web' && renderSidebarItem("my-live", lmsSub, "Live Classes", "radio-outline", () => changeLmsSub("my-live"), "lms-my-live", undefined, lmsTabsCollapsed && !isMobile)}
+                    {!isAdmin && renderSidebarItem("my-courses", lmsSub, "My Courses", "school-outline", () => changeLmsSub("my-courses"), "lms-my-courses", undefined, lmsTabsCollapsed && !isMobile)}
+                    {!isAdmin && renderSidebarItem("my-live", lmsSub, "Live Classes", "radio-outline", () => changeLmsSub("my-live"), "lms-my-live", undefined, lmsTabsCollapsed && !isMobile)}
 
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>MATERIALS</Text> : null}
                     {renderSidebarItem("resources", lmsSub, "Resources", "folder-outline", () => changeLmsSub("resources"), "lms-resources", undefined, lmsTabsCollapsed && !isMobile)}
@@ -25403,8 +25667,8 @@ PASTED QUESTION PAPER TEXT:
 
                 
 
-                {/* ─── WEB ONLY: Admin LMS Management Pages ─────────────── */}
-                {Platform.OS === 'web' && (
+                {/* ─── WEB/MOBILE: Admin LMS (Web) & Student LMS (Web/Mobile) ─────────────── */}
+                {(Platform.OS === 'web' || !isAdmin) && (
                   <LMSProvider>
                     <>
                       {/* Admin — Course Management */}
@@ -25650,6 +25914,7 @@ PASTED QUESTION PAPER TEXT:
                     showsVerticalScrollIndicator={false}
                   >
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS</Text> : null}
+                    {renderSidebarItem("guest-posters", crmSub, "Guest Posters", "images-outline", () => { changeCrmSub("guest-posters"); loadAdminGuestPosters(); }, "crm-guest-posters", undefined, lmsTabsCollapsed && !isMobile)}
                     {renderSidebarItem("admissions", crmSub, "Admissions application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile)}
                     {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile)}
                     {renderSidebarItem("inquiries", crmSub, "Inquiries", "chatbubble-ellipses-outline", () => changeCrmSub("inquiries"), "crm-inquiries", undefined, crmSidebarCollapsed && !isMobile)}
@@ -26260,6 +26525,119 @@ PASTED QUESTION PAPER TEXT:
                                 <Text style={{ fontSize: 10, color: "#aaa" }}>
                                   Sent: {cp.createdAt ? new Date(cp.createdAt).toLocaleDateString() : ""}
                                 </Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* ── CRM: Guest Posters Management ─────────────────── */}
+                  {crmSub === "guest-posters" && (
+                    <View style={{ gap: 16 }}>
+                      {/* Upload new poster */}
+                      <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }]}>
+                        <Text style={[styles.sectionTitle, darkMode && { color: "#f0f0f0" }]}>📸 Upload Guest Poster</Text>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Poster Title (Optional)</Text>
+                        <TextInput
+                          style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", color: "#fff", borderColor: "#444" }]}
+                          placeholder="e.g. UPSC Batch Starting Soon"
+                          placeholderTextColor={darkMode ? "#666" : "#999"}
+                          value={guestPosterTitle}
+                          onChangeText={setGuestPosterTitle}
+                        />
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Poster Image *</Text>
+                        {Platform.OS === "web" ? (
+                          <View style={{ marginBottom: 12 }}>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={async (e: any) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                try {
+                                  const compressed = await compressFileImage(file);
+                                  setGuestPosterBase64(compressed);
+                                  setGuestPosterFileName(file.name);
+                                } catch {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev: any) => {
+                                    setGuestPosterBase64(ev.target.result);
+                                    setGuestPosterFileName(file.name);
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                              style={{ display: "block", width: "100%", padding: "8px 12px", borderRadius: "8px", border: "1px solid #e0e0e0", backgroundColor: "#fafafa", color: "#212121", cursor: "pointer", fontSize: "13px" }}
+                            />
+                            {guestPosterFileName && (
+                              <Text style={{ fontSize: 11, color: "#2e7d32", marginTop: 4, fontWeight: "600" }}>Selected: {guestPosterFileName}</Text>
+                            )}
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                const result = await DocumentPicker.getDocumentAsync({ type: "image/*", copyToCacheDirectory: true });
+                                if (!result.canceled && result.assets?.length > 0) {
+                                  const asset = result.assets[0];
+                                  const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: "base64" });
+                                  setGuestPosterBase64(`data:image/jpeg;base64,${base64}`);
+                                  setGuestPosterFileName(asset.name);
+                                }
+                              } catch (err: any) {
+                                Alert.alert("Error", err.message);
+                              }
+                            }}
+                            style={[styles.input, { justifyContent: "center", minHeight: 40, backgroundColor: "#fafafa", marginBottom: 12 }]}
+                          >
+                            <Text style={{ color: guestPosterFileName ? "#2e7d32" : "#999", fontSize: 13, fontWeight: guestPosterFileName ? "600" : "normal" }}>
+                              {guestPosterFileName ? `Selected: ${guestPosterFileName}` : "Tap to pick Poster Image"}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                        {guestPosterBase64 && (
+                          <Image source={{ uri: guestPosterBase64 }} style={{ width: "100%", height: 160, borderRadius: 10, resizeMode: "cover", marginBottom: 12 }} />
+                        )}
+                        <TouchableOpacity
+                          disabled={guestPosterUploading}
+                          onPress={handleUploadGuestPoster}
+                          style={[styles.primaryBtn, { backgroundColor: guestPosterUploading ? "#888" : "#c62828" }]}
+                        >
+                          {guestPosterUploading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="cloud-upload-outline" size={16} color="#fff" />}
+                          <Text style={styles.primaryBtnTxt}>{guestPosterUploading ? "Uploading..." : "Upload Poster"}</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Existing Posters List */}
+                      <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }]}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                          <Text style={[styles.sectionTitle, darkMode && { color: "#f0f0f0" }, { marginBottom: 0 }]}>🖼️ Published Posters ({guestPosterList.length})</Text>
+                          <TouchableOpacity onPress={loadAdminGuestPosters} style={{ padding: 6 }}>
+                            <Ionicons name="refresh-outline" size={18} color="#c62828" />
+                          </TouchableOpacity>
+                        </View>
+                        {guestPosterList.length === 0 ? (
+                          <View style={{ alignItems: "center", paddingVertical: 24 }}>
+                            <Ionicons name="images-outline" size={40} color={darkMode ? "#555" : "#bdbdbd"} />
+                            <Text style={{ color: darkMode ? "#666" : "#9e9e9e", marginTop: 8, fontSize: 13 }}>No guest posters yet.</Text>
+                          </View>
+                        ) : (
+                          guestPosterList.map((poster: any) => (
+                            <View key={poster.id} style={{ borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#eee", marginBottom: 12 }}>
+                              <Image source={{ uri: getDirectImageUrl(poster.posterUrl) }} style={{ width: "100%", height: 140, resizeMode: "cover" }} />
+                              <View style={{ padding: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: darkMode ? "#252525" : "#fafafa" }}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontSize: 13, fontWeight: "700", color: darkMode ? "#f0f0f0" : "#212121" }}>{poster.title || "Untitled Poster"}</Text>
+                                  <Text style={{ fontSize: 10, color: "#9e9e9e", marginTop: 2 }}>{poster.createdAt ? new Date(poster.createdAt).toLocaleDateString() : ""}</Text>
+                                </View>
+                                <TouchableOpacity
+                                  onPress={() => handleDeleteGuestPoster(poster.id)}
+                                  style={{ backgroundColor: "#ffebee", borderRadius: 8, padding: 8, marginLeft: 10 }}
+                                >
+                                  <Ionicons name="trash-outline" size={16} color="#c62828" />
+                                </TouchableOpacity>
                               </View>
                             </View>
                           ))
