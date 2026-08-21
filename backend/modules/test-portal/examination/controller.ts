@@ -1321,10 +1321,27 @@ export class ExaminationController {
             const reportDoc = await db.collection("question_reports").doc(testId).get();
             const reportsData = reportDoc.exists ? (reportDoc.data()?.reports || {}) : {};
 
+            let myReportedIndexes: number[] = [];
+            try {
+                const studentId = ExaminationController.getStudentId(req);
+                if (studentId) {
+                    const myReportsSnap = await db.collection("question_report_logs")
+                        .where("testId", "==", testId)
+                        .where("studentId", "==", studentId)
+                        .get();
+                    myReportedIndexes = myReportsSnap.docs.map(doc => doc.data().qIndex);
+                }
+            } catch (err) {
+                // Ignore auth error for public/guest cases
+            }
+
             return res.status(200).json({
                 success: true,
                 message: "Question reports retrieved successfully",
-                data: reportsData
+                data: {
+                    reports: reportsData,
+                    myReportedIndexes
+                }
             });
         } catch (error: any) {
             return res.status(500).json({

@@ -2873,10 +2873,23 @@ function MainApp() {
     try {
       const data = await api.get(`/test-portal/examination/reports/${testId}`);
       if (data) {
+        const reports = data.reports || data || {};
+        const myReported = data.myReportedIndexes || [];
+        
         setQuestionReports(prev => ({
           ...prev,
-          [testId]: data
+          [testId]: reports
         }));
+
+        if (Array.isArray(myReported)) {
+          setUserReportedSet(prev => {
+            const next = new Set(prev);
+            myReported.forEach(qIdx => {
+              next.add(`${testId}_${qIdx}`);
+            });
+            return next;
+          });
+        }
       }
     } catch (e) {
       console.log("Failed to fetch question reports:", e);
@@ -2938,6 +2951,15 @@ function MainApp() {
     const interval = setInterval(pollMyRequests, 10000);
     return () => clearInterval(interval);
   }, [user, isAdmin, students]);
+
+
+
+  // Redirect students away from admin-only ERP sub-tabs to their profile
+  useEffect(() => {
+    if (user && user.role === "student" && activeTab === "erp" && (erpSub === "students" || erpSub === "batch" || erpSub === "staff" || erpSub === "profile-requests")) {
+      changeErpSub("my-profile");
+    }
+  }, [user, activeTab, erpSub]);
 
 
 
@@ -13763,12 +13785,14 @@ function MainApp() {
                       }
                       return null;
                     })()}
-                    <View style={styles.card}>
-                      <Text style={styles.sectionTitle}>Welcome to Nermai IAS Academy</Text>
-                      <Text style={{ color: "#212121", fontSize: 13, lineHeight: 20 }}>
-                        Welcome back, {user.name}! Use the navigation options below to check your individual analytics, view your mock test marks, keep track of your fee payments, and take your exams and daily quizzes.
-                      </Text>
-                    </View>
+                    {user.role !== "student" && (
+                      <View style={styles.card}>
+                        <Text style={styles.sectionTitle}>Welcome to Nermai IAS Academy</Text>
+                        <Text style={{ color: "#212121", fontSize: 13, lineHeight: 20 }}>
+                          Welcome back, {user.name}! Use the navigation options below to check your individual analytics, view your mock test marks, keep track of your fee payments, and take your exams and daily quizzes.
+                        </Text>
+                      </View>
+                    )}
 
                     {/* INCOMPLETE PROFILE WARNING BANNER FOR STUDENT */}
                     {(() => {
