@@ -2308,6 +2308,7 @@ function MainApp() {
   const [password, setPassword] = useState("");
   const [studentOldPassword, setStudentOldPassword] = useState("");
   const [studentNewPassword, setStudentNewPassword] = useState("");
+  const [studentConfirmPassword, setStudentConfirmPassword] = useState("");
   const [profileFormStep, setProfileFormStep] = useState(1);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [resultsSubjectFilter, setResultsSubjectFilter] = useState("");
@@ -6774,30 +6775,30 @@ function MainApp() {
 
 
   const validatePage1 = () => {
-    if (!studentOldPassword || !studentNewPassword) {
-      Alert.alert("Validation Error", "Please fill in both old and new passwords.");
+    if (!studentOldPassword || !studentNewPassword || !studentConfirmPassword) {
+      Alert.alert("Validation Error", "Please fill in old, new, and confirm passwords.");
+      return false;
+    }
+    if (studentNewPassword !== studentConfirmPassword) {
+      Alert.alert("Validation Error", "New password and Confirm password do not match.");
       return false;
     }
     if (studentOldPassword === studentNewPassword) {
       Alert.alert("Validation Error", "New password cannot be the same as old password.");
       return false;
     }
-    if (!profileForm.name || !profileForm.initial || !profileForm.dob || !profileForm.address ||
-        !profileForm.gender || !profileForm.community || !profileForm.studentOccupation ||
-        !profileForm.altPhone || !profileForm.email || !profileForm.qualification ||
-        !profileForm.college || !profileForm.referralSource ||
-        !(profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency)) {
-      setShowValidationErrors(true);
-      Alert.alert("Validation Error", "Please fill all required personal details marked with *.");
-      return false;
-    }
     return true;
   };
 
   const validatePage2 = () => {
-    if (!profileForm.fatherName || !profileForm.occupation) {
+    if (!profileForm.name || !profileForm.initial || !profileForm.dob || !profileForm.address ||
+        !profileForm.gender || !profileForm.community || !profileForm.studentOccupation ||
+        !profileForm.altPhone || !profileForm.email || !profileForm.qualification ||
+        !profileForm.college || !profileForm.referralSource ||
+        !profileForm.fatherName || !profileForm.occupation ||
+        !(profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency)) {
       setShowValidationErrors(true);
-      Alert.alert("Validation Error", "Please fill in Father's Name and Father's Occupation.");
+      Alert.alert("Validation Error", "Please fill all required personal and family details marked with *.");
       return false;
     }
     return true;
@@ -6862,6 +6863,7 @@ function MainApp() {
       setProfileFormStep(1);
       setStudentOldPassword("");
       setStudentNewPassword("");
+      setStudentConfirmPassword("");
       setShowValidationErrors(false);
       setShowProfileModal(false);
       setShowProfileSuccessModal(true);
@@ -14350,46 +14352,83 @@ function MainApp() {
                     return (
                       <View style={{ gap: 12 }}>
                         {/* Search & Filter Options Bar */}
-                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 12, marginBottom: 5 }]}>
-                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#fff" : "#2e7d32", marginBottom: 8 }}>🔍 Search & Filter Tests</Text>
-                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                            <TextInput
-                              style={[styles.input, { flex: 2, minWidth: 150, marginBottom: 0 }]}
-                              placeholder="Search by test title..."
-                              placeholderTextColor="#999"
-                              value={testFilterQuery}
-                              onChangeText={setTestFilterQuery}
-                            />
-                            
-                            <select
-                              value={testFilterCategory}
-                              onChange={e => setTestFilterCategory(e.target.value)}
-                              style={{
-                                flex: 1, minWidth: 120, height: 38, borderRadius: 8, padding: 8,
-                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                                border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"), outline: "none", fontSize: 13
-                              }}
-                            >
-                              <option value="all">All Categories</option>
-                              <option value="daily">📅 Daily Tests</option>
-                              <option value="weekly">📆 Weekly Tests</option>
-                              <option value="mock">🏆 Mock Tests</option>
-                            </select>
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 16, marginBottom: 8, gap: 14 }]}>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text style={{ fontWeight: "bold", fontSize: 14, color: darkMode ? "#fff" : "#2e7d32" }}>🔍 Search & Filter Tests</Text>
+                          </View>
 
-                            <select
-                              value={testFilterStatus}
-                              onChange={e => setTestFilterStatus(e.target.value)}
-                              style={{
-                                flex: 1, minWidth: 120, height: 38, borderRadius: 8, padding: 8,
-                                backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                                border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"), outline: "none", fontSize: 13
-                              }}
-                            >
-                              <option value="all">All Statuses</option>
-                              <option value="live">🟢 Live Tests</option>
-                              <option value="scheduled">⏰ Upcoming Tests</option>
-                              {!isAdmin && <option value="past">📚 Past / Study Mode</option>}
-                            </select>
+                          <TextInput
+                            style={[styles.input, { marginBottom: 4 }]}
+                            placeholder="Search by test title..."
+                            placeholderTextColor="#999"
+                            value={testFilterQuery}
+                            onChangeText={setTestFilterQuery}
+                          />
+
+                          {/* Category Filter Chips */}
+                          <View style={{ gap: 6 }}>
+                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#555" }}>CATEGORY</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                              {[
+                                { id: "all", label: "All Categories" },
+                                { id: "daily", label: "📅 Daily" },
+                                { id: "weekly", label: "📆 Weekly" },
+                                { id: "mock", label: "🏆 Mock" }
+                              ].map(item => {
+                                const isSelected = testFilterCategory === item.id;
+                                return (
+                                  <TouchableOpacity
+                                    key={item.id}
+                                    onPress={() => setTestFilterCategory(item.id)}
+                                    style={{
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 6,
+                                      borderRadius: 20,
+                                      borderWidth: 2,
+                                      borderColor: isSelected ? "#2e7d32" : (darkMode ? "#444" : "#e0e0e0"),
+                                      backgroundColor: isSelected ? (darkMode ? "#e8f5e9" : "#e8f5e9") : (darkMode ? "#2a2a2a" : "#f5f5f5")
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 12, fontWeight: isSelected ? "bold" : "500", color: isSelected ? "#2e7d32" : (darkMode ? "#ccc" : "#666") }}>
+                                      {item.label}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          </View>
+
+                          {/* Status Filter Chips */}
+                          <View style={{ gap: 6 }}>
+                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#555" }}>STATUS</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                              {[
+                                { id: "all", label: "All Statuses" },
+                                { id: "live", label: "🟢 Live" },
+                                { id: "scheduled", label: "⏰ Upcoming" },
+                                ...(!isAdmin ? [{ id: "past", label: "📚 Past / Study" }] : [])
+                              ].map(item => {
+                                const isSelected = testFilterStatus === item.id;
+                                return (
+                                  <TouchableOpacity
+                                    key={item.id}
+                                    onPress={() => setTestFilterStatus(item.id)}
+                                    style={{
+                                      paddingHorizontal: 12,
+                                      paddingVertical: 6,
+                                      borderRadius: 20,
+                                      borderWidth: 2,
+                                      borderColor: isSelected ? "#2e7d32" : (darkMode ? "#444" : "#e0e0e0"),
+                                      backgroundColor: isSelected ? (darkMode ? "#e8f5e9" : "#e8f5e9") : (darkMode ? "#2a2a2a" : "#f5f5f5")
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 12, fontWeight: isSelected ? "bold" : "500", color: isSelected ? "#2e7d32" : (darkMode ? "#ccc" : "#666") }}>
+                                      {item.label}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
                           </View>
                         </View>
 
@@ -18628,8 +18667,8 @@ PASTED QUESTION PAPER TEXT:
                               {/* Step Progress Indicator */}
                               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20, backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", borderRadius: 10, padding: 8 }}>
                                 {[
-                                  { step: 1, label: "Personal" },
-                                  { step: 2, label: "Family" },
+                                  { step: 1, label: "Password" },
+                                  { step: 2, label: "Details" },
                                   { step: 3, label: "Documents" }
                                 ].map((s, idx) => {
                                   const isActive = profileFormStep === s.step;
@@ -18666,15 +18705,21 @@ PASTED QUESTION PAPER TEXT:
                                 })}
                               </View>
 
-                              {/* Page 1: Personal Details */}
+                              {/* Page 1: Change Account Password */}
                               {profileFormStep === 1 && (
                                 <View style={{ gap: 10 }}>
+                                  <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4, fontWeight: "bold" }}>🔑 Change Account Password *</Text>
+                                  <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentOldPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Old Password (created by admin) *" secureTextEntry placeholderTextColor="#999" value={studentOldPassword} onChangeText={setStudentOldPassword} />
+                                  <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentNewPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="New Password (modified by student) *" secureTextEntry placeholderTextColor="#999" value={studentNewPassword} onChangeText={setStudentNewPassword} />
+                                  <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentConfirmPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Confirm New Password *" secureTextEntry placeholderTextColor="#999" value={studentConfirmPassword} onChangeText={setStudentConfirmPassword} />
+                                </View>
+                              )}
 
-                              <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4, fontWeight: "bold" }}>🔑 Change Account Password *</Text>
-                              <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentOldPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Old Password (created by admin) *" secureTextEntry placeholderTextColor="#999" value={studentOldPassword} onChangeText={setStudentOldPassword} />
-                              <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !studentNewPassword && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="New Password (modified by student) *" secureTextEntry placeholderTextColor="#999" value={studentNewPassword} onChangeText={setStudentNewPassword} />
-
-                              <TextInput style={styles.input} placeholder="Full Name *" placeholderTextColor="#999" value={profileForm.name} onChangeText={v => setProfileForm({ ...profileForm, name: v })} />
+                              {/* Page 2: Personal & Family Details */}
+                              {profileFormStep === 2 && (
+                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 450 }} contentContainerStyle={{ gap: 10 }}>
+                                  <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4, fontWeight: "bold" }}>👤 Personal Details</Text>
+                                  <TextInput style={styles.input} placeholder="Full Name *" placeholderTextColor="#999" value={profileForm.name} onChangeText={v => setProfileForm({ ...profileForm, name: v })} />
                               <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.initial && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Initial *" placeholderTextColor="#999" maxLength={3} value={profileForm.initial} onChangeText={v => setProfileForm({ ...profileForm, initial: v })} />
 
                               {/* DOB with age calc */}
@@ -18825,12 +18870,8 @@ PASTED QUESTION PAPER TEXT:
                               )}
 
                                   <TextInput style={[styles.input, { marginBottom: 12 }, showValidationErrors && !profileForm.studentOccupation && { borderColor: "#c62828", borderWidth: 2 }]} placeholder="Student's Occupation *" placeholderTextColor="#999" value={profileForm.studentOccupation} onChangeText={v => setProfileForm({ ...profileForm, studentOccupation: v })} />
-                                </View>
-                              )}
 
-                              {/* Page 2: Family Details */}
-                              {profileFormStep === 2 && (
-                                <View style={{ gap: 10 }}>
+                                  <Text style={{ color: "#757575", fontSize: 12, marginBottom: 4, marginTop: 10, fontWeight: "bold" }}>👨‍👩‍👧 Family & Other Details</Text>
                                   <TextInput style={styles.input} placeholder="Father's Name *" placeholderTextColor="#999" value={profileForm.fatherName} onChangeText={v => setProfileForm({ ...profileForm, fatherName: v })} />
                                   <TextInput style={styles.input} placeholder="Father's Occupation *" placeholderTextColor="#999" value={profileForm.occupation} onChangeText={v => setProfileForm({ ...profileForm, occupation: v })} />
 
@@ -18852,7 +18893,7 @@ PASTED QUESTION PAPER TEXT:
                                 ))}
                               </View>
 
-                                </View>
+                                </ScrollView>
                               )}
 
                               {/* Page 3: Document Uploads */}
@@ -19203,7 +19244,7 @@ PASTED QUESTION PAPER TEXT:
                                   onPress={() => { if (validatePage1()) setProfileFormStep(2); }}
                                   style={[styles.primaryBtn, { marginTop: 15, flexDirection: "row", justifyContent: "center", gap: 6 }]}
                                 >
-                                  <Text style={styles.primaryBtnTxt}>Next: Family Details</Text>
+                                  <Text style={styles.primaryBtnTxt}>Next: Profile Details</Text>
                                   <Ionicons name="arrow-forward-outline" size={16} color="#fff" />
                                 </TouchableOpacity>
                               )}
