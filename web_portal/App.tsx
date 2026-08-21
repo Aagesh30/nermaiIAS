@@ -3629,9 +3629,9 @@ function MainApp() {
 
           <View style={[styles.idCardAvatar, { backgroundColor: cardTheme + "15", overflow: "hidden", justifyContent: "center", alignItems: "center" }]}>
             {student.photoBase64 && student.photoBase64 !== "test" ? (
-              <Image source={{ uri: student.photoBase64 }} style={{ width: 70, height: 70, borderRadius: 35 }} />
+              <Image source={{ uri: getDirectImageUrl(student.photoBase64) }} style={{ width: 70, height: 70, borderRadius: 35 }} />
             ) : student.photoUrl ? (
-              <Image source={{ uri: student.photoUrl }} style={{ width: 70, height: 70, borderRadius: 35 }} />
+              <Image source={{ uri: getDirectImageUrl(student.photoUrl) }} style={{ width: 70, height: 70, borderRadius: 35 }} />
             ) : (
               <Ionicons name="person" size={40} color={cardTheme} />
             )}
@@ -3750,9 +3750,9 @@ function MainApp() {
                   </View>
                   <View style={{ width: 65, height: 75, borderWidth: 1.5, borderColor: "#bdbdbd", borderRadius: 4, backgroundColor: "#eeeeee", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     {student.photoBase64 && student.photoBase64 !== "test" ? (
-                      <Image source={{ uri: student.photoBase64 }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                      <Image source={{ uri: getDirectImageUrl(student.photoBase64) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                     ) : student.photoUrl ? (
-                      <Image source={{ uri: student.photoUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                      <Image source={{ uri: getDirectImageUrl(student.photoUrl) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                     ) : (
                       <>
                         <Ionicons name="person" size={30} color="#9e9e9e" />
@@ -18404,12 +18404,12 @@ PASTED QUESTION PAPER TEXT:
                                   <View style={{ flexDirection: "row", gap: 10, marginBottom: 8 }}>
                                     <View style={{ alignItems: "center" }}>
                                       <Text style={{ fontSize: 10, color: "#999", marginBottom: 4 }}>Passport Photo</Text>
-                                      <Image source={{ uri: viewing.passportPhotoBase64 }} style={{ width: 80, height: 80, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0" }} />
+                                      <Image source={{ uri: getDirectImageUrl(viewing.passportPhotoBase64) }} style={{ width: 80, height: 80, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0" }} />
                                     </View>
                                     {viewing.photoIdBase64 && (
                                       <View style={{ alignItems: "center" }}>
                                         <Text style={{ fontSize: 10, color: "#999", marginBottom: 4 }}>{viewing.photoIdType || "Photo ID"}</Text>
-                                        <Image source={{ uri: viewing.photoIdBase64 }} style={{ width: 120, height: 80, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0" }} />
+                                        <Image source={{ uri: getDirectImageUrl(viewing.photoIdBase64) }} style={{ width: 120, height: 80, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0" }} />
                                       </View>
                                     )}
                                   </View>
@@ -21073,7 +21073,7 @@ PASTED QUESTION PAPER TEXT:
                                   {/* Download as PDF */}
                                   <TouchableOpacity
                                     onPress={() => {
-                                      const rawPhoto = myRecord.photoBase64 || myRecord.passportPhotoBase64 || myRecord.photoUrl || "";
+                                      const rawPhoto = getDirectImageUrl(myRecord.photoBase64 || myRecord.passportPhotoBase64 || myRecord.photoUrl || "");
                                       const photoSrc = (rawPhoto && rawPhoto !== "test") ? (rawPhoto.startsWith("data:") || rawPhoto.startsWith("http") ? rawPhoto : `data:image/jpeg;base64,${rawPhoto}`) : "";
 
                                       const ticketHtml = `<!DOCTYPE html>
