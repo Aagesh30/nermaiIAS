@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
+import { uploadFileToGoogleDrive } from "../../../services/google_drive";
 
 const db = admin.firestore();
 const CAMPAIGNS_COLLECTION = "campaigns";
@@ -19,6 +20,7 @@ export class CampaignsController {
                 title,
                 description,
                 posterUrl,
+                posterBase64,  // Base64 image payload from client
                 targetUsers,   // "free" | "paid" | "both" | "all"
                 posterDisplay, // "free_home" | "paid_dashboard" | "both" | null
                 isActive = true,
@@ -35,6 +37,27 @@ export class CampaignsController {
                 return res.status(400).json({ success: false, message: "Title is required" });
             }
 
+            // Handle Poster Image Upload to Google Drive if base64 is provided
+            let finalPosterUrl = posterUrl || "";
+            if (posterBase64) {
+                let cleanBase64 = posterBase64;
+                if (posterBase64.includes("base64,")) {
+                    cleanBase64 = posterBase64.split("base64,")[1];
+                }
+                
+                const buffer = Buffer.from(cleanBase64, "base64");
+                const driveResult = await uploadFileToGoogleDrive({
+                    buffer,
+                    fileName: `CampaignPoster_${Date.now()}_${title.replace(/[^a-zA-Z0-9]/g, '_')}.jpg`,
+                    mimeType: "image/jpeg",
+                    subPath: "campaigns/posters"
+                });
+                
+                if (driveResult && driveResult.previewUrl) {
+                    finalPosterUrl = driveResult.previewUrl;
+                }
+            }
+
             const now = admin.firestore.FieldValue.serverTimestamp();
             let campaignId = id;
 
@@ -47,7 +70,7 @@ export class CampaignsController {
                 await docRef.update({
                     title,
                     description: description || "",
-                    posterUrl: posterUrl || "",
+                    posterUrl: finalPosterUrl,
                     targetUsers: targetUsers || "all",
                     posterDisplay: posterDisplay || null,
                     isActive,
@@ -68,7 +91,7 @@ export class CampaignsController {
                 id: campaignId,
                 title,
                 description: description || "",
-                posterUrl: posterUrl || "",
+                posterUrl: finalPosterUrl,
                 targetUsers: targetUsers || "all",
                 posterDisplay: posterDisplay || null,
                 isActive,

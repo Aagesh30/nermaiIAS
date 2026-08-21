@@ -772,6 +772,7 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 targetBatch: targetBatch || "",
                 requireFeedback: !!requireFeedback,
                 allowOfflineDirectly: !!req.body.allowOfflineDirectly,
+                allowOfflineDirectlyBatches: Array.isArray(req.body.allowOfflineDirectlyBatches) ? req.body.allowOfflineDirectlyBatches : [],
                 isDeleted: false,
                 deletedAt: null,
                 deletedBy: null

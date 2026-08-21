@@ -3,7 +3,8 @@ import {
   getAuth,
   initializeAuth,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect
 } from "firebase/auth";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -66,15 +67,26 @@ export const handleFirebaseGoogleSignIn = async (fallbackName?: string, fallback
     provider.addScope("profile");
     provider.setCustomParameters({ prompt: 'select_account' });
     
+    const isMobileBrowser = typeof navigator !== "undefined" && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    
     try {
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      return {
-        email: user.email,
-        name: user.displayName || user.email?.split("@")[0] || "Guest Learner",
-        photoURL: user.photoURL,
-        uid: user.uid
-      };
+      if (isMobileBrowser) {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("nermai_pending_guest_name", fallbackName || "");
+          localStorage.setItem("nermai_pending_guest_phone", fallbackPhone || "");
+        }
+        await signInWithRedirect(auth, provider);
+        return new Promise(() => {});
+      } else {
+        const result = await signInWithPopup(auth, provider);
+        const user = result.user;
+        return {
+          email: user.email,
+          name: user.displayName || user.email?.split("@")[0] || "Guest Learner",
+          photoURL: user.photoURL,
+          uid: user.uid
+        };
+      }
     } catch (error: any) {
       console.error("Firebase Google Sign-In error:", error);
       throw error;

@@ -28,7 +28,15 @@ router.post("/guest-login", LeadsController.guestLogin);
 router.get("/", requireAuth, requireRole(adminRoles), LeadsController.getAll);
 router.patch("/:id", requireAuth, requireRole(adminRoles), LeadsController.updateStatus);
 router.post("/:leadId/interest", requireAuth, requireRole(adminRoles), LeadsController.addCourseInterest);
-router.get("/:leadId/notifications", requireAuth, requireRole(adminRoles), LeadsController.getLeadNotifications);
+router.get("/:leadId/notifications", requireAuth, (req, res, next) => {
+    if (!req.user) return res.status(403).json({ success: false, message: "Forbidden: Not authenticated" });
+    const isAdmin = ['super_admin', 'admin', 'staff'].includes(req.user.role);
+    const isOwner = req.user.role === 'guest' && req.user.userId === req.params.leadId;
+    if (isAdmin || isOwner) {
+        return next();
+    }
+    return res.status(403).json({ success: false, message: "Forbidden: Access denied" });
+}, LeadsController.getLeadNotifications);
 
 // Admin: send notification to leads
 router.post("/notify", requireAuth, requireRole(adminRoles), LeadsController.sendNotification);

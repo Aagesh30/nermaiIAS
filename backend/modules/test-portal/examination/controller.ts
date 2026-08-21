@@ -1199,6 +1199,49 @@ export class ExaminationController {
                 });
             }
 
+            const studentId = ExaminationController.getStudentId(req);
+            const logId = `${testId}_${qIndex}_${studentId}`;
+            const logRef = db.collection("question_report_logs").doc(logId);
+
+            // 1. Check if this student already reported this question
+            const logDoc = await logRef.get();
+            if (logDoc.exists) {
+                return res.status(400).json({
+                    success: false,
+                    message: "You have already reported this question."
+                });
+            }
+
+            // 2. Fetch student name & roll number from student collection or req.user
+            let studentName = "Student";
+            let rollNumber = "";
+            
+            const studentDoc = await db.collection("students").doc(studentId).get();
+            if (studentDoc.exists) {
+                const sData = studentDoc.data()!;
+                studentName = `${sData.firstName || ""} ${sData.lastName || ""}`.trim() || sData.name || "Student";
+                rollNumber = sData.rollNumber || sData.rollNo || sData.loginUsername || "";
+            } else {
+                const userDoc = await db.collection("users").doc(studentId).get();
+                if (userDoc.exists) {
+                    const uData = userDoc.data()!;
+                    studentName = uData.name || "Student";
+                    rollNumber = uData.rollNumber || uData.username || "";
+                }
+            }
+
+            // 3. Write report log doc
+            await logRef.set({
+                id: logId,
+                testId,
+                qIndex: Number(qIndex),
+                studentId,
+                studentName,
+                rollNumber,
+                reportedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            // 4. Increment aggregated report map for UI compatibility
             const qKey = `Q.N ${Number(qIndex) + 1}`;
             const reportRef = db.collection("question_reports").doc(testId);
 
@@ -1220,6 +1263,49 @@ export class ExaminationController {
             return res.status(500).json({
                 success: false,
                 message: error.message || "An error occurred while reporting question"
+            });
+        }
+    }
+
+    /**
+     * GET DETAILED QUESTION REPORTS (Admin only)
+     * GET /reports/detail/:testId
+     */
+    static async getDetailedQuestionReports(req: Request, res: Response) {
+        try {
+            const { testId } = req.params;
+            const snapshot = await db.collection("question_report_logs")
+                .where("testId", "==", testId)
+                .get();
+
+            const logs = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    testId: data.testId,
+                    qIndex: data.qIndex,
+                    studentId: data.studentId,
+                    studentName: data.studentName || "Student",
+                    rollNumber: data.rollNumber || "",
+                    reportedAt: data.reportedAt ? (data.reportedAt.toDate ? data.reportedAt.toDate().toISOString() : data.reportedAt) : null
+                };
+            });
+
+            // Sort in-memory to prevent missing Firestore index requirements
+            logs.sort((a, b) => {
+                const timeA = a.reportedAt ? new Date(a.reportedAt).getTime() : 0;
+                const timeB = b.reportedAt ? new Date(b.reportedAt).getTime() : 0;
+                return timeB - timeA;
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: logs
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while retrieving detailed reports"
             });
         }
     }

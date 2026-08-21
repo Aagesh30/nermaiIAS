@@ -81,4 +81,9 @@ router.post("/report-question/:testId", ExaminationController.reportQuestion);
  */
 router.get("/reports/:testId", ExaminationController.getQuestionReports);
 
+/**
+ * GET DETAILED REPORTS LOGS FOR TEST
+ */
+router.get("/reports/detail/:testId", ExaminationController.getDetailedQuestionReports);
+
 export default router;

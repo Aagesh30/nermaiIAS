@@ -50,6 +50,17 @@ const StudentPayFeesPage = React.lazy(() => import('./lms/student/StudentPayFees
 const TeacherDashboard = React.lazy(() => import('./lms/staff/TeacherDashboard').then(m => ({ default: m.TeacherDashboard })));
 import { RNSkeleton, RNDashboardSkeleton, RNTableSkeleton, RNCardGridSkeleton, RNProfileSkeleton, RNFormSkeleton, RNContainerSkeleton, RNNoticeCardSkeleton, RNNoticeSectionSkeleton, RNSystemAlertCardSkeleton, RNClosedTestCardSkeleton, RNClosedTestsSectionSkeleton } from './lms/components/ui/RNSkeleton';
 
+const getDirectImageUrl = (url: string): string => {
+  if (!url) return "";
+  if (url.includes("drive.google.com/file/d/")) {
+    const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return `https://lh3.googleusercontent.com/d/${match[1]}`;
+    }
+  }
+  return url;
+};
+
 // Custom Alert wrapper — routes to in-app modal on Web, native RNAlert on mobile
 const Alert = {
   alert: (title: string, message?: string, buttons?: any[], options?: any) => {
@@ -2316,6 +2327,90 @@ function MainApp() {
   const [guestContentTab, setGuestContentTab] = useState<"resources" | "tests">("resources");
   const [showNoticesPanel, setShowNoticesPanel] = useState(false);
   const [showContactPanel, setShowContactPanel] = useState(false);
+
+  // Expiry calendar picker states
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState("new");
+  const [dpYear, setDpYear] = useState(new Date().getFullYear());
+  const [dpMonth, setDpMonth] = useState(new Date().getMonth());
+  const [dpDay, setDpDay] = useState(new Date().getDate());
+  const [dpHour, setDpHour] = useState(12);
+  const [dpMinute, setDpMinute] = useState(0);
+
+  const initializeDatePicker = (val) => {
+    let date = new Date();
+    if (val) {
+      const cleaned = val.replace("T", " ");
+      const parsed = new Date(cleaned);
+      if (!isNaN(parsed.getTime())) {
+        date = parsed;
+      }
+    }
+    setDpYear(date.getFullYear());
+    setDpMonth(date.getMonth());
+    setDpDay(date.getDate());
+    setDpHour(date.getHours());
+    setDpMinute(date.getMinutes());
+  };
+
+  const confirmDatePicker = () => {
+    const yyyy = dpYear;
+    const mm = String(dpMonth + 1).padStart(2, "0");
+    const dd = String(dpDay).padStart(2, "0");
+    const hh = String(dpHour).padStart(2, "0");
+    const min = String(dpMinute).padStart(2, "0");
+    const formatted = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+    
+    if (datePickerTarget === "edit") {
+      setEditingNotice({ ...editingNotice, expiresAt: formatted });
+    } else {
+      setNewNotice({ ...newNotice, expiresAt: formatted });
+    }
+    setShowDatePickerModal(false);
+  };
+
+  const getDaysInGrid = (month, year) => {
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const prevMonthTotalDays = new Date(year, month, 0).getDate();
+    
+    const grid = [];
+    
+    // Add prev month trailing days
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+      grid.push({
+        day: prevMonthTotalDays - i,
+        monthType: "prev",
+        dateObj: new Date(year, month - 1, prevMonthTotalDays - i)
+      });
+    }
+    
+    // Add current month days
+    for (let i = 1; i <= totalDays; i++) {
+      grid.push({
+        day: i,
+        monthType: "current",
+        dateObj: new Date(year, month, i)
+      });
+    }
+    
+    // Add next month leading days to complete 42 cells
+    const remaining = 42 - grid.length;
+    for (let i = 1; i <= remaining; i++) {
+      grid.push({
+        day: i,
+        monthType: "next",
+        dateObj: new Date(year, month + 1, i)
+      });
+    }
+    
+    return grid;
+  };
+
+  const monthsList = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
+  ];
   const [contactFormType, setContactFormType] = useState<"admission" | "inquiry" | null>(null);
   const [showAuthFlip, setShowAuthFlip] = useState(false);
 
@@ -2330,7 +2425,7 @@ function MainApp() {
     }
 
     try {
-      const googleUser = await handleFirebaseGoogleSignIn();
+      const googleUser = await handleFirebaseGoogleSignIn(guestNameInput, guestPhoneInput);
       const email = googleUser.email;
       if (!email) {
         Alert.alert("Google Auth Error", "No email returned from Google account.");
@@ -2367,7 +2462,7 @@ function MainApp() {
         setGuestTab("home");
       }
       loadAnnouncements();
-      loadGuestNotifications(data.leadId);
+      loadGuestNotifications(data.leadId, data.token);
       loadCampaigns();
 
       await guestStorage.save(email.toLowerCase());
@@ -2694,6 +2789,22 @@ function MainApp() {
   const [userReportedSet, setUserReportedSet] = useState<Set<string>>(new Set());
   const [showTopReportsModal, setShowTopReportsModal] = useState(false);
   const [reportsModalTestId, setReportsModalTestId] = useState<string | null>(null);
+  const [detailedReports, setDetailedReports] = useState<any[]>([]);
+  const [loadingDetailedReports, setLoadingDetailedReports] = useState(false);
+
+  const fetchDetailedQuestionReports = async (testId: string) => {
+    if (!testId) return;
+    setLoadingDetailedReports(true);
+    try {
+      const res = await api.get(`/test-portal/examination/reports/detail/${testId}`);
+      setDetailedReports(res?.data || res || []);
+    } catch (e) {
+      console.log("Failed to fetch detailed reports:", e);
+      setDetailedReports([]);
+    } finally {
+      setLoadingDetailedReports(false);
+    }
+  };
   const [reportsModalTestTitle, setReportsModalTestTitle] = useState<string>("");
 
   useEffect(() => {
@@ -2712,43 +2823,47 @@ function MainApp() {
     const reportKey = `${testId}_${qIndex}`;
     const qKey = `Q.N ${qIndex + 1}`;
 
-    setQuestionReports(prev => {
-      const currentTestMap = prev[testId] || {};
-      const currentCount = currentTestMap[qKey] || 0;
-      const updatedTestMap = {
-        ...currentTestMap,
-        [qKey]: currentCount + 1
-      };
-      const updatedAll = {
-        ...prev,
-        [testId]: updatedTestMap
-      };
-      try {
-        if (typeof window !== "undefined" && window.localStorage) {
-          window.localStorage.setItem("nermai_question_reports", JSON.stringify(updatedAll));
-        }
-      } catch (e) { }
-      return updatedAll;
-    });
-
-    setUserReportedSet(prev => {
-      const next = new Set(prev);
-      next.add(reportKey);
-      return next;
-    });
-
-    Alert.alert("Report Submitted", `Question ${qIndex + 1} has been reported for wrong answer / content review.`);
+    if (userReportedSet.has(reportKey)) {
+      Alert.alert("Already Reported", "You have already reported this question.");
+      return;
+    }
 
     try {
-      const updatedReports = await api.post(`/test-portal/examination/report-question/${testId}`, { qIndex });
+      const res = await api.post(`/test-portal/examination/report-question/${testId}`, { qIndex });
+      
+      setUserReportedSet(prev => {
+        const next = new Set(prev);
+        next.add(reportKey);
+        return next;
+      });
+
+      const updatedReports = res?.data || res;
       if (updatedReports) {
-        setQuestionReports(prev => ({
-          ...prev,
-          [testId]: updatedReports
-        }));
+        setQuestionReports(prev => {
+          const updatedAll = {
+            ...prev,
+            [testId]: updatedReports
+          };
+          try {
+            if (typeof window !== "undefined" && window.localStorage) {
+              window.localStorage.setItem("nermai_question_reports", JSON.stringify(updatedAll));
+            }
+          } catch (e) { }
+          return updatedAll;
+        });
       }
-    } catch (e) {
-      console.log("Failed to submit question report to backend:", e);
+
+      Alert.alert("Report Submitted", `Question ${qIndex + 1} has been reported for wrong answer / content review.`);
+    } catch (e: any) {
+      const msg = e.response?.data?.message || e.message || "Failed to submit report.";
+      Alert.alert("Already Reported", msg);
+      if (msg.toLowerCase().includes("already reported")) {
+        setUserReportedSet(prev => {
+          const next = new Set(prev);
+          next.add(reportKey);
+          return next;
+        });
+      }
     }
   };
 
@@ -3415,6 +3530,7 @@ function MainApp() {
     title: "",
     description: "",
     posterUrl: "",
+    posterBase64: "",
     targetUsers: "all", //"all"|"free"|"paid"
     posterDisplay: "none", //"none"|"free_home"|"paid_dashboard"|"both"
     isActive: true,
@@ -3830,6 +3946,58 @@ function MainApp() {
   // Load persisted user or guest session on mount
   useEffect(() => {
     const checkPersistedSession = async () => {
+      // Check Firebase redirect result (for mobile web redirect sign-in fallback)
+      if (Platform.OS === "web" && typeof localStorage !== "undefined") {
+        try {
+          const { getRedirectResult } = require("firebase/auth");
+          const { auth } = require("./firebaseConfig");
+          const redirectResult = await getRedirectResult(auth);
+          if (redirectResult && redirectResult.user) {
+            const googleUser = redirectResult.user;
+            const email = googleUser.email;
+            if (email) {
+              const savedGuestName = localStorage.getItem("nermai_pending_guest_name") || googleUser.displayName || "";
+              const savedGuestPhone = localStorage.getItem("nermai_pending_guest_phone") || "";
+
+              const res = await api.current.post("/crm/leads/guest-login", {
+                email: email.toLowerCase(),
+                name: savedGuestName.trim() || googleUser.displayName,
+                phone: savedGuestPhone.trim()
+              });
+              const data = res.data || res;
+              const guestUser = {
+                role: "guest",
+                name: savedGuestName.trim() || googleUser.displayName || data.name || email.split("@")[0],
+                phone: savedGuestPhone.trim() || data.phone || "",
+                email: email.toLowerCase(),
+                leadId: data.leadId,
+                hasApplied: data.hasApplied || false,
+                userId: data.leadId,
+                token: data.token,
+                authProvider: "google",
+                photoURL: googleUser.photoURL || ""
+              };
+              setUser(guestUser);
+              setGuestEmailUnlocked(true);
+              setAdmissionSubmitted(data.hasApplied || false);
+              
+              await guestStorage.save(email.toLowerCase());
+              await userStorage.save(guestUser);
+
+              localStorage.removeItem("nermai_pending_guest_name");
+              localStorage.removeItem("nermai_pending_guest_phone");
+              
+              loadAnnouncements();
+              loadGuestNotifications(data.leadId, data.token);
+              loadCampaigns();
+              return;
+            }
+          }
+        } catch (redirectErr) {
+          console.error("Error handling Google Sign-In redirect result:", redirectErr);
+        }
+      }
+
       // Clear old client-side cache and guest data once
       if (Platform.OS === "web" && typeof localStorage !== "undefined") {
         const isReset = localStorage.getItem("nermai_reset_v1") === "true";
@@ -3906,7 +4074,9 @@ function MainApp() {
 
               // Trigger initial guest data fetch
               try {
-                const notifRes = await fetch(`${baseUrl}/crm/leads/${data.leadId}/notifications`);
+                const notifRes = await fetch(`${baseUrl}/crm/leads/${data.leadId}/notifications`, {
+                  headers: { "Authorization": `Bearer ${data.token}` }
+                });
                 const notifJson = await notifRes.json();
                 setGuestNotifications(notifJson.data || notifJson || []);
 
@@ -4730,8 +4900,8 @@ function MainApp() {
       });
       setCampaigns(filtered);
 
-      // Now set the popup advertisement queue
-      if (!hasShownCampaignsRef.current) {
+      // Now set the popup advertisement queue (Admins and teachers do not get popups)
+      if (!hasShownCampaignsRef.current && !isAdmin) {
         const activeCamps = filtered
           .filter((c: any) => c.showInDashboard)
           .sort((a: any, b: any) => {
@@ -5654,9 +5824,10 @@ function MainApp() {
 
 
 
-  const loadGuestNotifications = async (leadId: string) => {
+  const loadGuestNotifications = async (leadId: string, overrideToken?: string) => {
     try {
-      const res = await api.get(`/crm/leads/${leadId}/notifications`);
+      const headers = overrideToken ? { Authorization: `Bearer ${overrideToken}` } : undefined;
+      const res = await api.get(`/crm/leads/${leadId}/notifications`, headers);
       setGuestNotifications(res || []);
     } catch (e) {
       console.log("Failed loading guest notifications:", e);
@@ -5702,7 +5873,7 @@ function MainApp() {
       setGuestTab("home");
       setShowLoginModal(false);
       loadAnnouncements();
-      loadGuestNotifications(data.leadId);
+      loadGuestNotifications(data.leadId, data.token);
       loadCampaigns();
 
       // Save email and full user session locally for 7-day auto-login
@@ -6229,6 +6400,14 @@ function MainApp() {
       Alert.alert("Validation Error", "Please select a target batch.");
       return;
     }
+    let expiresAt = null;
+    if (newNotice.timerOption && newNotice.timerOption !== "none") {
+      expiresAt = calculateExpiry(newNotice.timerOption, newNotice.expiresAt);
+      if (newNotice.timerOption === "custom" && !expiresAt) {
+        Alert.alert("Validation Error", "Please select a valid custom expiry date & time.");
+        return;
+      }
+    }
     setIsPublishingNotice(true);
     try {
       await api.post("/announcement", {
@@ -6238,10 +6417,12 @@ function MainApp() {
         publishedAt: newNotice.publishedAt ? new Date(newNotice.publishedAt).toISOString() : new Date().toISOString(),
         createdBy: user?.name || user?.username || "admin",
         targetDashboard: newNotice.targetDashboard || "all",
-        targetBatch: newNotice.targetBatch || null
+        targetBatch: newNotice.targetBatch || null,
+        expiresAt,
+        timerOption: newNotice.timerOption || "none"
       });
       Alert.alert("Success", "Notice published successfully.");
-      setNewNotice({ title: "", content: "", priority: "normal", publishedAt: "", targetDashboard: "all", targetBatch: "" });
+      setNewNotice({ title: "", content: "", priority: "normal", publishedAt: "", targetDashboard: "all", targetBatch: "", timerOption: "none", expiresAt: "" });
       loadAnnouncements();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to publish announcement.");
@@ -6290,7 +6471,7 @@ function MainApp() {
     if (editingNotice.timerOption && editingNotice.timerOption !== "none") {
       expiresAt = calculateExpiry(editingNotice.timerOption, editingNotice.expiresAt);
       if (editingNotice.timerOption === "custom" && !expiresAt) {
-        Alert.alert("Validation Error", "Please enter a valid expiry date format (YYYY-MM-DD HH:MM).");
+        Alert.alert("Validation Error", "Please select a valid custom expiry date & time.");
         return;
       }
     }
@@ -7026,6 +7207,7 @@ function MainApp() {
         title: newCampaign.title,
         description: newCampaign.description,
         posterUrl: newCampaign.posterUrl,
+        posterBase64: newCampaign.posterBase64 || undefined,
         targetUsers: newCampaign.targetUsers,
         posterDisplay: newCampaign.posterDisplay === "none" ? null : newCampaign.posterDisplay,
         isActive: newCampaign.isActive,
@@ -7046,6 +7228,7 @@ function MainApp() {
         title: "",
         description: "",
         posterUrl: "",
+        posterBase64: "",
         targetUsers: "all",
         posterDisplay: "none",
         isActive: true,
@@ -7080,6 +7263,7 @@ function MainApp() {
       title: "",
       description: "",
       posterUrl: "",
+      posterBase64: "",
       targetUsers: "all",
       posterDisplay: "none",
       isActive: true,
@@ -11651,7 +11835,7 @@ function MainApp() {
                 {/* Poster Image */}
                 {activeCampaignBanner.posterUrl ? (
                   <View style={{ width: "100%", height: 240, backgroundColor: "#000" }}>
-                    <Image source={{ uri: activeCampaignBanner.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                    <Image source={{ uri: getDirectImageUrl(activeCampaignBanner.posterUrl) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                   </View>
                 ) : null}
 
@@ -11869,7 +12053,7 @@ function MainApp() {
                 <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { maxHeight: "82%" }]}>
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                     {selectedCampaignModal.posterUrl ? (
-                      <Image source={{ uri: selectedCampaignModal.posterUrl }} style={{ width: "100%", height: 160, borderRadius: 12, resizeMode: "cover" }} />
+                      <Image source={{ uri: getDirectImageUrl(selectedCampaignModal.posterUrl) }} style={{ width: "100%", height: 160, borderRadius: 12, resizeMode: "cover" }} />
                     ) : (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                         <Ionicons name="ribbon-outline" size={20} color="#c62828" />
@@ -12993,7 +13177,7 @@ function MainApp() {
             <View style={[styles.card, darkMode && styles.cardDark, { width: "100%", maxWidth: 460, maxHeight: "85%", padding: 0, overflow: "hidden", borderRadius: 16, borderTopWidth: 4, borderTopColor: "#c62828" }]}>
               {selectedCampaignModal.posterUrl ? (
                 <View style={{ width: "100%", height: 180, backgroundColor: "#000", position: "relative" }}>
-                  <Image source={{ uri: selectedCampaignModal.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                  <Image source={{ uri: getDirectImageUrl(selectedCampaignModal.posterUrl) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                   <TouchableOpacity
                     onPress={() => setSelectedCampaignModal(null)}
                     style={{ position: "absolute", top: 10, right: 10, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 16, width: 32, height: 32, alignItems: "center", justifyContent: "center" }}
@@ -13110,6 +13294,166 @@ function MainApp() {
                   </Text>
                 </TouchableOpacity>
               </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Expiry Calendar & Time Picker Modal */}
+      {showDatePickerModal && (
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDatePickerModal(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+            <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 16, width: 340, padding: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 }}>
+              
+              {/* Header */}
+              <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", marginBottom: 15, textAlign: "center" }}>
+                Select Expiry Date & Time
+              </Text>
+
+              {/* Calendar Month & Year Controls */}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <TouchableOpacity onPress={() => {
+                  if (dpMonth === 0) {
+                    setDpMonth(11);
+                    setDpYear(dpYear - 1);
+                  } else {
+                    setDpMonth(dpMonth - 1);
+                  }
+                }} style={{ padding: 8 }}>
+                  <Ionicons name="chevron-back" size={20} color={darkMode ? "#fff" : "#1976d2"} />
+                </TouchableOpacity>
+                
+                <Text style={{ fontSize: 15, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>
+                  {monthsList[dpMonth]} {dpYear}
+                </Text>
+
+                <TouchableOpacity onPress={() => {
+                  if (dpMonth === 11) {
+                    setDpMonth(0);
+                    setDpYear(dpYear + 1);
+                  } else {
+                    setDpMonth(dpMonth + 1);
+                  }
+                }} style={{ padding: 8 }}>
+                  <Ionicons name="chevron-forward" size={20} color={darkMode ? "#fff" : "#1976d2"} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Week Headers */}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day, idx) => (
+                  <Text key={idx} style={{ width: 40, textAlign: "center", fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575" }}>
+                    {day}
+                  </Text>
+                ))}
+              </View>
+
+              {/* Days Grid */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", marginBottom: 15 }}>
+                {getDaysInGrid(dpMonth, dpYear).map((cell, idx) => {
+                  const isSelected = dpDay === cell.day && dpMonth === cell.dateObj.getMonth() && dpYear === cell.dateObj.getFullYear();
+                  const isCurrentMonth = cell.monthType === "current";
+                  
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      onPress={() => {
+                        setDpDay(cell.day);
+                        setDpMonth(cell.dateObj.getMonth());
+                        setDpYear(cell.dateObj.getFullYear());
+                      }}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        justifyContent: "center",
+                        alignItems: "center",
+                        borderRadius: 20,
+                        backgroundColor: isSelected ? "#1976d2" : "transparent"
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 13,
+                        fontWeight: isSelected ? "bold" : "normal",
+                        color: isSelected 
+                          ? "#fff" 
+                          : (isCurrentMonth ? (darkMode ? "#fff" : "#212121") : "#bdbdbd")
+                      }}>
+                        {cell.day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Time Selection */}
+              <View style={{ borderTopWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0", paddingTop: 15, marginBottom: 20 }}>
+                <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#aaa" : "#757575", marginBottom: 10, textAlign: "center" }}>
+                  Set Expiry Time (HH:MM)
+                </Text>
+                
+                <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 15 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <TouchableOpacity 
+                      onPress={() => setDpHour(prev => (prev - 1 + 24) % 24)}
+                      style={{ padding: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5", borderRadius: 6 }}
+                    >
+                      <Ionicons name="remove" size={16} color={darkMode ? "#fff" : "#212121"} />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 15, fontWeight: "bold", minWidth: 24, textAlign: "center", color: darkMode ? "#fff" : "#212121" }}>
+                      {String(dpHour).padStart(2, "0")}
+                    </Text>
+                    <TouchableOpacity 
+                      onPress={() => setDpHour(prev => (prev + 1) % 24)}
+                      style={{ padding: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5", borderRadius: 6 }}
+                    >
+                      <Ionicons name="add" size={16} color={darkMode ? "#fff" : "#212121"} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>:</Text>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <TouchableOpacity 
+                      onPress={() => setDpMinute(prev => (prev - 5 + 60) % 60)}
+                      style={{ padding: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5", borderRadius: 6 }}
+                    >
+                      <Ionicons name="remove" size={16} color={darkMode ? "#fff" : "#212121"} />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 15, fontWeight: "bold", minWidth: 24, textAlign: "center", color: darkMode ? "#fff" : "#212121" }}>
+                      {String(dpMinute).padStart(2, "0")}
+                    </Text>
+                    <TouchableOpacity 
+                      onPress={() => setDpMinute(prev => (prev + 5) % 60)}
+                      style={{ padding: 6, backgroundColor: darkMode ? "#333" : "#f5f5f5", borderRadius: 6 }}
+                    >
+                      <Ionicons name="add" size={16} color={darkMode ? "#fff" : "#212121"} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => setShowDatePickerModal(false)}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "#bdbdbd", alignItems: "center" }}
+                >
+                  <Text style={{ color: "#757575", fontWeight: "bold" }}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={confirmDatePicker}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: "#1976d2", alignItems: "center" }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "bold" }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+
             </View>
           </View>
         </Modal>
@@ -13270,7 +13614,7 @@ function MainApp() {
                           }}
                         >
                           <View style={{ width: "100%", height: 135, position: "relative", backgroundColor: "#000" }}>
-                            <Image source={{ uri: cp.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                            <Image source={{ uri: getDirectImageUrl(cp.posterUrl) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                             <View style={{ position: "absolute", top: 10, left: 10, backgroundColor: "rgba(198,40,40,0.9)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 }}>
                               <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 }}>FEATURED</Text>
                             </View>
@@ -16554,7 +16898,7 @@ PASTED QUESTION PAPER TEXT:
                           <Text style={styles.sectionTitle}>Registered Student Directory ({students.length})</Text>
 
                           {/* Search & Filter Controls */}
-                          <View style={{ gap: 10, marginBottom: 15 }}>
+                          <View style={{ gap: 10, marginBottom: 15, zIndex: 2000, position: "relative" }}>
                             <View style={{ flexDirection: "row", gap: 8 }}>
                               <TextInput
                                 style={[styles.input, { flex: 1, marginBottom: 0 }]}
@@ -16570,11 +16914,11 @@ PASTED QUESTION PAPER TEXT:
                               ) : null}
                             </View>
 
-                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center", zIndex: 2000, position: "relative" }}>
                               {/* Batch Filter Dropdown */}
                               <View style={{ flex: 1, minWidth: 150 }}>
                                 <Text style={{ fontSize: 11, fontWeight: "bold", color: "#555", marginBottom: 4 }}>Filter Batch:</Text>
-                                <View style={{ zIndex: 1100, position: "relative" }}>
+                                <View style={{ zIndex: 2100, position: "relative" }}>
                                   <TouchableOpacity
                                     onPress={() => {
                                       setShowBatchFilterDropdown(!showBatchFilterDropdown);
@@ -16609,14 +16953,14 @@ PASTED QUESTION PAPER TEXT:
                                       marginTop: 4,
                                       overflow: "hidden",
                                       zIndex: 1101,
-                                      maxHeight: 150,
+                                      maxHeight: 130,
                                       shadowColor: "#000",
                                       shadowOffset: { width: 0, height: 2 },
                                       shadowOpacity: 0.1,
                                       shadowRadius: 2,
                                       elevation: 3
                                     }}>
-                                      <ScrollView nestedScrollEnabled={true}>
+                                      <ScrollView nestedScrollEnabled={true} showsVerticalScrollIndicator={true}>
                                         <TouchableOpacity
                                           onPress={() => {
                                             setFilterDirBatch("all");
@@ -16721,7 +17065,21 @@ PASTED QUESTION PAPER TEXT:
                                     if (q && !name.includes(q) && !roll.includes(q)) return false;
 
                                     if (filterDirBatch !== "all" && s.batch !== filterDirBatch) return false;
-                                    if (filterDirType !== "all" && String(s.type || "").toLowerCase() !== filterDirType.toLowerCase()) return false;
+                                    if (filterDirType !== "all") {
+                                      const typeLower = filterDirType.toLowerCase();
+                                      const hasDirectType = String(s.type || "").toLowerCase() === typeLower;
+                                      let hasBatchMode = false;
+                                      if (s.batchModes) {
+                                        for (const key of Object.keys(s.batchModes)) {
+                                          const modes = s.batchModes[key];
+                                          if (Array.isArray(modes) && modes.map(m => String(m).toLowerCase()).includes(typeLower)) {
+                                            hasBatchMode = true;
+                                            break;
+                                          }
+                                        }
+                                      }
+                                      if (!hasDirectType && !hasBatchMode) return false;
+                                    }
 
                                     if (filterDirStatus !== "all") {
                                       const isPending = s.status === "pending";
@@ -16762,7 +17120,17 @@ PASTED QUESTION PAPER TEXT:
                                                 </View>
                                               )}
                                             </View>
-                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"}</Text>
+                                            <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>
+                                              Roll: {s.rollNumber || s.loginUsername || "N/A"} | {(() => {
+                                                const bList = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
+                                                if (bList.length === 0) return "No Batch";
+                                                return bList.map(bName => {
+                                                  const modes = (s.batchModes || {})[bName] || [];
+                                                  const modesStr = modes.length > 0 ? modes.map(m => String(m).toLowerCase()).join("/") : (s.type || "offline").toLowerCase();
+                                                  return `${bName} (${modesStr})`;
+                                                }).join(", ");
+                                              })()}
+                                            </Text>
                                           </View>
                                           <View style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: isPending ? "#f57c00" : "#1976d2", borderRadius: 4 }}>
                                             <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>{isPending ? "Review" : "View Details"}</Text>
@@ -16852,12 +17220,30 @@ PASTED QUESTION PAPER TEXT:
                                             <View style={{ flex: 1 }}>
                                               <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{getStudentName(s)}</Text>
                                               <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
-                                                <View style={{ backgroundColor: darkMode ? "#c6282820" : "#e0f7fa", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-                                                  <Text style={{ color: darkMode ? "#ff8a80" : "#006064", fontSize: 10, fontWeight: "bold" }}>{(s.type || "offline").toUpperCase()}</Text>
-                                                </View>
-                                                <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
-                                                  <Text style={{ color: darkMode ? "#81c784" : "#2e7d32", fontSize: 10, fontWeight: "bold" }}>{s.batch || "No Batch"}</Text>
-                                                </View>
+                                                {(() => {
+                                                  const bList = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
+                                                  if (bList.length === 0) {
+                                                    return (
+                                                      <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                                        <Text style={{ color: darkMode ? "#81c784" : "#2e7d32", fontSize: 10, fontWeight: "bold" }}>No Batch</Text>
+                                                      </View>
+                                                    );
+                                                  }
+                                                  return bList.map((bName) => {
+                                                    const modes = (s.batchModes || {})[bName] || [];
+                                                    const modesStr = modes.length > 0 ? modes.map(m => String(m).toUpperCase()).join(", ") : (s.type || "offline").toUpperCase();
+                                                    return (
+                                                      <View key={bName} style={{ flexDirection: "row", gap: 4, alignItems: "center", marginBottom: 2 }}>
+                                                        <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                                          <Text style={{ color: darkMode ? "#81c784" : "#2e7d32", fontSize: 10, fontWeight: "bold" }}>{bName}</Text>
+                                                        </View>
+                                                        <View style={{ backgroundColor: darkMode ? "#c6282820" : "#e0f7fa", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                                          <Text style={{ color: darkMode ? "#ff8a80" : "#006064", fontSize: 10, fontWeight: "bold" }}>{modesStr}</Text>
+                                                        </View>
+                                                      </View>
+                                                    );
+                                                  });
+                                                })()}
                                               </View>
                                             </View>
                                           </View>
@@ -17264,20 +17650,20 @@ PASTED QUESTION PAPER TEXT:
 
                           {((editingNoticeId ? editingNotice.timerOption : newNotice.timerOption) === "custom") && (
                             <View style={{ marginBottom: 12 }}>
-                              <Text style={styles.label}>Custom Expiry Date & Time (YYYY-MM-DD HH:MM):</Text>
-                              <TextInput
-                                style={styles.input}
-                                placeholder="e.g. 2026-08-25 14:30"
-                                placeholderTextColor="#999"
-                                value={editingNoticeId ? (editingNotice.expiresAt || "") : (newNotice.expiresAt || "")}
-                                onChangeText={val => {
-                                  if (editingNoticeId) {
-                                    setEditingNotice({ ...editingNotice, expiresAt: val });
-                                  } else {
-                                    setNewNotice({ ...newNotice, expiresAt: val });
-                                  }
+                              <Text style={styles.label}>Custom Expiry Date & Time:</Text>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setDatePickerTarget(editingNoticeId ? "edit" : "new");
+                                  const currentVal = editingNoticeId ? (editingNotice.expiresAt || "") : (newNotice.expiresAt || "");
+                                  initializeDatePicker(currentVal);
+                                  setShowDatePickerModal(true);
                                 }}
-                              />
+                                style={[styles.input, { justifyContent: "center", minHeight: 40 }]}
+                              >
+                                <Text style={{ color: (editingNoticeId ? editingNotice.expiresAt : newNotice.expiresAt) ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 14 }}>
+                                  {(editingNoticeId ? editingNotice.expiresAt : newNotice.expiresAt) || "Select Expiry Date & Time"}
+                                </Text>
+                              </TouchableOpacity>
                             </View>
                           )}
 
@@ -21059,15 +21445,23 @@ PASTED QUESTION PAPER TEXT:
                             </View>
                           </View>
 
-                          {/* Attendance */}
-                          <View style={styles.card}>
-                            <Text style={styles.sectionTitle}>My Attendance</Text>
-                            {(() => {
-                              const attended = myStudent?.attendedDays !== undefined ? myStudent.attendedDays : 24;
-                              const total = myStudent?.totalDays !== undefined ? myStudent.totalDays : 28;
-                              const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
-                              const atColor = pct >= 75 ? "#2e7d32" : pct >= 60 ? "#f57f17" : "#c62828";
-                              return (
+                          {/* Attendance - Only show for offline students (Online/Recorded attendance hidden) */}
+                          {(() => {
+                            const targetBatchName = myStudent?.batch;
+                            const targetModes = targetBatchName && myStudent?.batchModes ? (myStudent.batchModes[targetBatchName] || []) : [];
+                            const isOffline = targetModes.length > 0 
+                              ? targetModes.includes("offline")
+                              : (myStudent?.type || "").toLowerCase() === "offline";
+                              
+                            if (!isOffline) return null; // Hide attendance UI for online & recorded students
+
+                            const attended = myStudent?.attendedDays !== undefined ? Number(myStudent.attendedDays) : 24;
+                            const total = myStudent?.totalDays !== undefined ? Number(myStudent.totalDays) : 28;
+                            const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
+                            const atColor = pct >= 75 ? "#2e7d32" : pct >= 60 ? "#f57f17" : "#c62828";
+                            return (
+                              <View style={styles.card}>
+                                <Text style={styles.sectionTitle}>My Attendance</Text>
                                 <View style={{ gap: 8 }}>
                                   <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                                     <Text style={{ color: "#555" }}>Days Present: <Text style={{ fontWeight: "bold" }}>{attended}</Text></Text>
@@ -21079,9 +21473,9 @@ PASTED QUESTION PAPER TEXT:
                                   <Text style={{ color: atColor, fontWeight: "bold", textAlign: "right" }}>{pct}% Attendance</Text>
                                   {pct < 75 && <Text style={{ color: "#c62828", fontSize: 12 }}>Below 75% threshold. Please attend regularly.</Text>}
                                 </View>
-                              );
-                            })()}
-                          </View>
+                              </View>
+                            );
+                          })()}
                         </View>
                       );
                     }
@@ -21173,35 +21567,53 @@ PASTED QUESTION PAPER TEXT:
                         </View>
 
                         <View style={styles.card}>
-                          <Text style={styles.sectionTitle}>Batch Attendance Overview</Text>
+                          <Text style={styles.sectionTitle}>Batch Attendance Overview (Offline Students Only)</Text>
                           <View style={{ gap: 12 }}>
                             {batches.length === 0 ? (
                               <Text style={{ color: "#757575", fontSize: 12, fontStyle: "italic" }}>No batches configured.</Text>
                             ) : (
-                              batches.map(b => {
-                                const batchStudents = students.filter((s: any) => s.batch === b.batchName);
-                                let totalAttended = 0;
-                                let totalPossible = 0;
-                                batchStudents.forEach((s: any) => {
-                                  totalAttended += s.attendedDays !== undefined ? Number(s.attendedDays) : 24;
-                                  totalPossible += s.totalDays !== undefined ? Number(s.totalDays) : 28;
-                                });
-                                const pct = totalPossible > 0 ? Math.round((totalAttended / totalPossible) * 100) : 85;
-                                return (
-                                  <View key={b.id || b.batchName} style={{ gap: 4 }}>
-                                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                                      <Text style={{ color: "#212121", fontSize: 13 }}>{b.batchName}</Text>
-                                      <Text style={{ color: pct >= 75 ? "#2e7d32" : "#c62828", fontSize: 12, fontWeight: "bold" }}>{pct}%</Text>
+                              (() => {
+                                const renderedBatches = batches.map(b => {
+                                  const batchStudents = students.filter((s: any) => s.batch === b.batchName);
+                                  // Filter to only offline candidates for attendance calculation
+                                  const offlineBatchStudents = batchStudents.filter((s: any) => {
+                                    const targetBatchName = b.batchName;
+                                    const targetModes = targetBatchName && s.batchModes ? (s.batchModes[targetBatchName] || []) : [];
+                                    return targetModes.length > 0
+                                      ? targetModes.includes("offline")
+                                      : (s.type || "").toLowerCase() === "offline";
+                                  });
+
+                                  if (offlineBatchStudents.length === 0) return null;
+
+                                  let totalAttended = 0;
+                                  let totalPossible = 0;
+                                  offlineBatchStudents.forEach((s: any) => {
+                                    totalAttended += s.attendedDays !== undefined ? Number(s.attendedDays) : 24;
+                                    totalPossible += s.totalDays !== undefined ? Number(s.totalDays) : 28;
+                                  });
+                                  const pct = totalPossible > 0 ? Math.round((totalAttended / totalPossible) * 100) : 85;
+                                  return (
+                                    <View key={b.id || b.batchName} style={{ gap: 4 }}>
+                                      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                                        <Text style={{ color: "#212121", fontSize: 13 }}>{b.batchName}</Text>
+                                        <Text style={{ color: pct >= 75 ? "#2e7d32" : "#c62828", fontSize: 12, fontWeight: "bold" }}>{pct}%</Text>
+                                      </View>
+                                      <View style={{ height: 6, backgroundColor: "#eeeeee", borderRadius: 3, overflow: "hidden" }}>
+                                        <View style={{ width: `${pct}%`, height: "100%", backgroundColor: pct >= 75 ? "#2e7d32" : "#c62828" }} />
+                                      </View>
+                                      <Text style={{ color: "#757575", fontSize: 10 }}>
+                                        {offlineBatchStudents.length} offline candidate(s) enrolled
+                                      </Text>
                                     </View>
-                                    <View style={{ height: 6, backgroundColor: "#eeeeee", borderRadius: 3, overflow: "hidden" }}>
-                                      <View style={{ width: `${pct}%`, height: "100%", backgroundColor: pct >= 75 ? "#2e7d32" : "#c62828" }} />
-                                    </View>
-                                    <Text style={{ color: "#757575", fontSize: 10 }}>
-                                      {batchStudents.length} candidate(s) enrolled
-                                    </Text>
-                                  </View>
-                                );
-                              })
+                                  );
+                                }).filter(Boolean);
+
+                                if (renderedBatches.length === 0) {
+                                  return <Text style={{ color: "#757575", fontSize: 12, fontStyle: "italic" }}>No offline students enrolled in any batch.</Text>;
+                                }
+                                return renderedBatches;
+                              })()
                             )}
                           </View>
                         </View>
@@ -25406,9 +25818,9 @@ PASTED QUESTION PAPER TEXT:
                       <View style={{ gap: 15 }}>
                         {/* Header */}
                         <View style={styles.card}>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                          <View style={{ flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "center", gap: 8, marginBottom: 12 }}>
                             <Text style={styles.sectionTitle}>Admissions application</Text>
-                            <View style={{ flexDirection: "row", gap: 8 }}>
+                            <View style={{ flexDirection: "row", gap: 8, width: isMobile ? "100%" : "auto" }}>
                               <TextInput style={[styles.input, { flex: 1, minWidth: 100, marginBottom: 0, height: 36, fontSize: 12 }]} placeholder="From date" placeholderTextColor="#999" value={admissionDateFilter} onChangeText={setAdmissionDateFilter} />
                               <TouchableOpacity onPress={() => loadAdmissions(admissionDateFilter)} style={[styles.primaryBtn, { paddingVertical: 0, paddingHorizontal: 12, height: 36, justifyContent: "center" }]}>
                                 <Text style={[styles.primaryBtnTxt, { fontSize: 12 }]}>Filter</Text>
@@ -25728,14 +26140,82 @@ PASTED QUESTION PAPER TEXT:
                           onChangeText={d => setNewCampaign({ ...newCampaign, description: d })}
                         />
 
-                        <Text style={styles.label}>Poster Image URL (Ad Banner)</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="https://example.com/banner.png"
-                          placeholderTextColor="#999"
-                          value={newCampaign.posterUrl}
-                          onChangeText={u => setNewCampaign({ ...newCampaign, posterUrl: u })}
-                        />
+                        <Text style={styles.label}>Poster Image (Upload from Local Device)</Text>
+                        {Platform.OS === 'web' ? (
+                          <View style={{ marginBottom: 12 }}>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={async (e: any) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                try {
+                                  const compressed = await compressFileImage(file);
+                                  setNewCampaign(prev => ({ ...prev, posterBase64: compressed, posterUrl: file.name }));
+                                } catch (err) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev: any) => setNewCampaign(prev => ({ ...prev, posterBase64: ev.target.result, posterUrl: file.name }));
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "8px 12px",
+                                borderRadius: "8px",
+                                border: "1px solid #e0e0e0",
+                                backgroundColor: "#fafafa",
+                                color: "#212121",
+                                cursor: "pointer",
+                                fontSize: "13px"
+                              }}
+                            />
+                            {newCampaign.posterUrl ? (
+                              <Text style={{ fontSize: 11, color: "#2e7d32", marginTop: 4, fontWeight: "600" }}>
+                                Selected Image: {newCampaign.posterUrl}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : (
+                          <View style={{ marginBottom: 12 }}>
+                            <TouchableOpacity
+                              onPress={async () => {
+                                try {
+                                  const result = await DocumentPicker.getDocumentAsync({
+                                    type: "image/*",
+                                    copyToCacheDirectory: true,
+                                  });
+                                  if (!result.canceled && result.assets && result.assets.length > 0) {
+                                    const asset = result.assets[0];
+                                    let photoData = "";
+                                    try {
+                                      const manipulated = await ImageManipulator.manipulateAsync(
+                                        asset.uri,
+                                        [{ resize: { width: 800 } }],
+                                        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                                      );
+                                      photoData = `data:image/jpeg;base64,${manipulated.base64}`;
+                                    } catch {
+                                      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+                                        encoding: "base64",
+                                      });
+                                      photoData = `data:image/jpeg;base64,${base64}`;
+                                    }
+                                    setNewCampaign(prev => ({ ...prev, posterBase64: photoData, posterUrl: asset.name }));
+                                    Alert.alert("Success", `Image "${asset.name}" selected successfully!`);
+                                  }
+                                } catch (err: any) {
+                                  Alert.alert("Error", "Failed to select image: " + err.message);
+                                }
+                              }}
+                              style={[styles.input, { justifyContent: "center", minHeight: 40, backgroundColor: "#fafafa" }]}
+                            >
+                              <Text style={{ color: newCampaign.posterUrl ? "#2e7d32" : "#999", fontSize: 13, fontWeight: newCampaign.posterUrl ? "600" : "normal" }}>
+                                {newCampaign.posterUrl ? `Selected: ${newCampaign.posterUrl}` : "Tap to pick Poster Image"}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
 
                         <Text style={styles.label}>Target User Segment *</Text>
                         <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
@@ -25872,7 +26352,7 @@ PASTED QUESTION PAPER TEXT:
 
                               {cp.posterUrl ? (
                                 <View style={{ marginTop: 8, borderRadius: 6, overflow: "hidden" }}>
-                                  <Image source={{ uri: cp.posterUrl }} style={{ width: "100%", height: 80, resizeMode: "cover" }} />
+                                  <Image source={{ uri: getDirectImageUrl(cp.posterUrl) }} style={{ width: "100%", height: 80, resizeMode: "cover" }} />
                                 </View>
                               ) : null}
 
@@ -26127,6 +26607,7 @@ PASTED QUESTION PAPER TEXT:
                       setReportsModalTestId(selectedMonitorTestId);
                       setReportsModalTestTitle(tObj?.title || "Test Question Reports");
                       fetchQuestionReports(selectedMonitorTestId);
+                      fetchDetailedQuestionReports(selectedMonitorTestId);
                       setShowTopReportsModal(true);
                     }}
                     style={{ backgroundColor: "#d32f2f", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 4 }}
@@ -26255,6 +26736,15 @@ PASTED QUESTION PAPER TEXT:
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 14, fontWeight: "800", color: "#212121" }}>{qnLabel}</Text>
                             <Text style={{ fontSize: 11, color: "#757575", marginTop: 1 }}>Wrong answer / question issue reported</Text>
+                            {(() => {
+                              const logsForQ = detailedReports.filter((log: any) => `Q.N ${log.qIndex + 1}` === qnLabel);
+                              if (logsForQ.length === 0) return null;
+                              return (
+                                <Text style={{ fontSize: 11, fontWeight: "700", color: "#c62828", marginTop: 4 }}>
+                                  By: {logsForQ.map((log: any) => `${log.studentName} (${log.rollNumber || "N/A"})`).join(", ")}
+                                </Text>
+                              );
+                            })()}
                           </View>
                         </View>
                         <View style={{ backgroundColor: "#c62828", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 }}>
@@ -27078,8 +27568,8 @@ PASTED QUESTION PAPER TEXT:
         </Modal>
       )}
 
-      {/* Floating AI Assistant Button (Across Authenticated Pages) */}
-      {user && (
+      {/* Floating AI Assistant Button (Across Authenticated Pages) - Hidden from UI */}
+      {false && user && (
         Platform.OS === 'web' ? (
           <LMSProvider>
             <Suspense fallback={null}>
@@ -27356,7 +27846,7 @@ PASTED QUESTION PAPER TEXT:
               {/* Poster Image */}
               {activeCampaignBanner.posterUrl ? (
                 <View style={{ width: "100%", height: 240, backgroundColor: "#000" }}>
-                  <Image source={{ uri: activeCampaignBanner.posterUrl }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
+                  <Image source={{ uri: getDirectImageUrl(activeCampaignBanner.posterUrl) }} style={{ width: "100%", height: "100%", resizeMode: "cover" }} />
                 </View>
               ) : null}
 

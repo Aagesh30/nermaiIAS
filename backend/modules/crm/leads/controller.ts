@@ -89,7 +89,6 @@ export class LeadsController {
 
             const snapshot = await db.collection(LEADS_COLLECTION)
                 .where("isDeleted", "==", false)
-                .orderBy("createdAt", "desc")
                 .get();
 
             let leads = snapshot.docs.map(doc => {
@@ -101,6 +100,13 @@ export class LeadsController {
                     registeredAt: data.registeredAt ? (data.registeredAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                     lastSeenAt: data.lastSeenAt ? (data.lastSeenAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                 };
+            });
+
+            // Sort in-memory to prevent missing Firestore index requirements
+            leads.sort((a, b) => {
+                const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return timeB - timeA;
             });
 
             // Filter by date
@@ -143,9 +149,11 @@ export class LeadsController {
             if (targetAll) {
                 const snapshot = await db.collection(LEADS_COLLECTION)
                     .where("isDeleted", "==", false)
-                    .where("status", "!=", "converted")
                     .get();
-                targetLeadIds = snapshot.docs.map(d => d.id);
+                targetLeadIds = snapshot.docs
+                    .map(d => ({ id: d.id, ...d.data() }) as any)
+                    .filter(lead => lead.status !== "converted")
+                    .map(lead => lead.id);
             }
 
             if (targetLeadIds.length === 0) {
@@ -318,7 +326,32 @@ export class LeadsController {
                 const doc = existing.docs[0];
                 leadId = doc.id;
                 leadData = doc.data() || {};
-                // Update last seen; optionally update name/phone if provided
+
+                // Block login if name/phone are explicitly passed but differ from inputs (robust comparison)
+                const existingName = (leadData.name || "").trim().toLowerCase();
+                const existingPhone = (leadData.phone || "").trim().replace(/\D/g, "");
+                const inputName = (name || "").trim().toLowerCase();
+                const inputPhone = (phone || "").trim().replace(/\D/g, "");
+
+                const emailPrefix = cleanEmail.split("@")[0].toLowerCase();
+                const isDefaultName = existingName === emailPrefix || existingName === "";
+                const isPhoneEmpty = existingPhone === "";
+
+                const existingPhoneLast10 = existingPhone.slice(-10);
+                const inputPhoneLast10 = inputPhone.slice(-10);
+                const phoneMatches = existingPhoneLast10 === inputPhoneLast10;
+
+                const nameMatches = existingName === inputName || existingName.includes(inputName) || inputName.includes(existingName);
+
+                // ONLY block if both inputName and inputPhone are explicitly provided (not empty)
+                if (inputName && inputPhone && !isDefaultName && !isPhoneEmpty && (!nameMatches || !phoneMatches)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "This Google account is already registered with a different name or contact number."
+                    });
+                }
+
+                // Update last seen; optionally update name/phone if they were empty or matched
                 const updates: any = {
                     lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
