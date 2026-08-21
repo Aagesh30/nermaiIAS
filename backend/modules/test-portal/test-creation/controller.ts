@@ -1406,21 +1406,36 @@ export class OfflineTestRequestController {
     static async getAll(req: Request, res: Response) {
         try {
             const { studentId, username } = req.query;
-            let snapshot: any;
-            if (studentId && typeof studentId === "string") {
-                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+            let requests: any[] = [];
+            
+            if (studentId && username && typeof studentId === "string" && typeof username === "string") {
+                const snap1 = await db.collection(OFFLINE_REQUESTS_COLLECTION)
                     .where("studentId", "==", studentId)
                     .get();
-            } else if (username && typeof username === "string") {
-                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                const snap2 = await db.collection(OFFLINE_REQUESTS_COLLECTION)
                     .where("username", "==", username)
                     .get();
+                
+                const map = new Map();
+                snap1.docs.forEach(doc => map.set(doc.id, doc.data()));
+                snap2.docs.forEach(doc => map.set(doc.id, doc.data()));
+                requests = Array.from(map.values());
+            } else if (studentId && typeof studentId === "string") {
+                const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("studentId", "==", studentId)
+                    .get();
+                requests = snapshot.docs.map((doc: any) => doc.data());
+            } else if (username && typeof username === "string") {
+                const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("username", "==", username)
+                    .get();
+                requests = snapshot.docs.map((doc: any) => doc.data());
             } else {
                 // Admin: fetch all
-                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
                     .get();
+                requests = snapshot.docs.map((doc: any) => doc.data());
             }
-            const requests = snapshot.docs.map((doc: any) => doc.data());
             
             // Sort in-memory desc by requestedAt to avoid requiring a composite index in Firestore
             requests.sort((a: any, b: any) => {

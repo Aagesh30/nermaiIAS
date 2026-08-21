@@ -2914,10 +2914,11 @@ function MainApp() {
 
     const pollMyRequests = async () => {
       try {
-        // Build query params — pass both studentId and username for maximum match
+        const loggedInStudent = getLoggedInStudent(user, students);
+        const sId = loggedInStudent?.id || studentId;
         const params = new URLSearchParams();
-        if (studentId) params.set("studentId", studentId);
-        else if (username) params.set("username", username);
+        if (sId) params.set("studentId", sId);
+        if (username) params.set("username", username);
         const res = await api.get(`/test-portal/test-creation/permission-requests?${params.toString()}`);
         const data = Array.isArray(res) ? res : (res?.data || []);
         
@@ -2936,7 +2937,7 @@ function MainApp() {
     pollMyRequests();
     const interval = setInterval(pollMyRequests, 10000);
     return () => clearInterval(interval);
-  }, [user, isAdmin]);
+  }, [user, isAdmin, students]);
 
 
 
