@@ -13235,10 +13235,10 @@ function MainApp() {
                 ) : null}
               </ScrollView>
 
-              <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: "row", gap: 10 }}>
+              <View style={{ padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#333" : "#eee", flexDirection: isMobile ? "column-reverse" : "row", gap: 10 }}>
                 <TouchableOpacity
                   onPress={() => setSelectedCampaignModal(null)}
-                  style={[styles.outlineBtn, { flex: 1 }]}
+                  style={[styles.outlineBtn, isMobile ? { width: "100%", paddingVertical: 10 } : { flex: 1 }]}
                 >
                   <Text style={styles.outlineBtnTxt}>Close</Text>
                 </TouchableOpacity>
@@ -13251,7 +13251,7 @@ function MainApp() {
                       Alert.alert("Enquiry Recorded", "Thank you for your interest! Our team has logged your response.");
                     }
                   }}
-                  style={[styles.primaryBtn, { flex: 1.5, backgroundColor: "#c62828" }]}
+                  style={[styles.primaryBtn, isMobile ? { width: "100%", paddingVertical: 10 } : { flex: 1.5 }, { backgroundColor: "#c62828" }]}
                 >
                   <Text style={styles.primaryBtnTxt}>Register / Enquire Now</Text>
                 </TouchableOpacity>
