@@ -25377,181 +25377,7 @@ PASTED QUESTION PAPER TEXT:
                   </View>
                 )}
 
-                {/* Preview Modal for Daily Content (PDF & JPEG) */}
-                {selectedDailyContentPreview && (
-                  <Modal
-                    visible={true}
-                    transparent={true}
-                    animationType="fade"
-                    onRequestClose={() => setSelectedDailyContentPreview(null)}
-                  >
-                    <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 16 }}>
-                      <View style={{
-                        width: "100%",
-                        maxWidth: 900,
-                        height: "88%",
-                        backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
-                        borderRadius: 12,
-                        overflow: "hidden",
-                        display: "flex",
-                        flexDirection: "column"
-                      }}>
-                        {/* Modal Header */}
-                        <View style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          padding: 14,
-                          backgroundColor: "#c62828"
-                        }}>
-                          <View style={{ flex: 1, paddingRight: 10 }}>
-                            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "bold" }} numberOfLines={1}>
-                              {selectedDailyContentPreview.title || "Daily Study Material"}
-                            </Text>
-                            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11 }}>
-                              {selectedDailyContentPreview.date} • {selectedDailyContentPreview.type ? selectedDailyContentPreview.type.toUpperCase() : 'PDF'}
-                            </Text>
-                          </View>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                            {isAdmin && (selectedDailyContentPreview.fileBase64 || selectedDailyContentPreview.url) && (
-                              <TouchableOpacity
-                                onPress={() => {
-                                  if (typeof window !== "undefined") {
-                                    const targetSrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
-                                    if (selectedDailyContentPreview.url) {
-                                      window.open(targetSrc, "_blank");
-                                    } else if (selectedDailyContentPreview.fileBase64) {
-                                      const win = window.open();
-                                      if (win) {
-                                        win.document.write(`<iframe src="${targetSrc}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
-                                      }
-                                    }
-                                  }
-                                }}
-                                style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.2)" }}
-                              >
-                                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Open In New Tab ↗</Text>
-                              </TouchableOpacity>
-                            )}
-                            <TouchableOpacity onPress={() => setSelectedDailyContentPreview(null)}>
-                              <Ionicons name="close-circle" size={24} color="#fff" />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-
-                        {/* Modal Body */}
-                        <View style={{ flex: 1, backgroundColor: darkMode ? "#111" : "#f5f5f5", justifyContent: "center", alignItems: "center", padding: 8 }}>
-                          {(() => {
-                            let displaySrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
-
-                            if (!displaySrc) {
-                              return <Text style={{ color: darkMode ? "#ccc" : "#333" }}>Preview is not available for this item.</Text>;
-                            }
-
-                            // Helper to extract Google Drive file ID
-                            const getGoogleDriveId = (urlStr: string) => {
-                              if (!urlStr) return null;
-                              const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-                              if (m1) return m1[1];
-                              const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-                              if (m2) return m2[1];
-                              return null;
-                            };
-
-                            const driveId = getGoogleDriveId(displaySrc);
-                            if (selectedDailyContentPreview.type === "image" && driveId) {
-                              displaySrc = `https://lh3.googleusercontent.com/d/${driveId}`;
-                            }
-
-                             // 1. If running on native mobile phone (Android / iOS), do NOT render HTML iframe or img tags to avoid crashes
-                            if (Platform.OS !== "web") {
-                              if (selectedDailyContentPreview.type === "image") {
-                                return <NativeDailyImageZoomView imgSrc={displaySrc} darkMode={darkMode} />;
-                              }
-                              // For PDFs and other documents — use WebView to render inline inside the modal (no browser redirect)
-                              const { WebView } = require("react-native-webview");
-                              const pdfViewUrl = displaySrc.startsWith("http")
-                                ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(displaySrc)}`
-                                : displaySrc;
-                              return (
-                                <WebView
-                                  source={{ uri: pdfViewUrl }}
-                                  style={{ flex: 1, width: "100%", backgroundColor: darkMode ? "#111" : "#fff" }}
-                                  javaScriptEnabled={true}
-                                  domStorageEnabled={true}
-                                  startInLoadingState={true}
-                                  renderLoading={() => (
-                                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: darkMode ? "#111" : "#f5f5f5" }}>
-                                      <ActivityIndicator size="large" color="#c62828" />
-                                      <Text style={{ color: darkMode ? "#ccc" : "#555", marginTop: 10 }}>Loading document…</Text>
-                                    </View>
-                                  )}
-                                />
-                              );
-                            }
-
-                            // 2. If running on web, verify that relative local files are not being previewed on the live deployed production URL
-                            const isLiveSite = typeof window !== "undefined" && window.location && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
-                            const isRelativeLocalFile = displaySrc.startsWith("/") || (typeof window !== "undefined" && displaySrc.startsWith(window.location.origin) && displaySrc.includes("/uploads/"));
-
-                            if (isLiveSite && isRelativeLocalFile) {
-                              return (
-                                <View style={{ padding: 20, alignItems: "center", justifyContent: "center" }}>
-                                  <Ionicons name="cloud-offline-outline" size={48} color={darkMode ? "#aaa" : "#555"} />
-                                  <Text style={{ color: darkMode ? "#fff" : "#333", fontWeight: "bold", marginTop: 10, textAlign: "center" }}>Local File Preview Offline</Text>
-                                  <Text style={{ color: darkMode ? "#ccc" : "#666", fontSize: 12, marginTop: 6, textAlign: "center" }}>
-                                    This file was saved locally during development. Please configure Google Drive to preview files on the live website.
-                                  </Text>
-                                </View>
-                              );
-                            }
-
-                            // Don't append #toolbar=0 to Drive URLs — it breaks the preview
-                            if (selectedDailyContentPreview.type === "pdf" && !isAdmin && !displaySrc.includes("drive.google.com")) {
-                              displaySrc = `${displaySrc}#toolbar=0`;
-                            }
-                            if (selectedDailyContentPreview.type === "image") {
-                              const imgSrc = driveId 
-                                ? `https://lh3.googleusercontent.com/d/${driveId}` 
-                                : displaySrc;
-                              return <WebDailyImageZoomView imgSrc={imgSrc} alt={selectedDailyContentPreview.title} driveId={driveId} darkMode={darkMode} />;
-                            }
-
-                            // Ensure Google Drive file URLs are converted to /preview embed format
-                            const isDriveUrl = displaySrc.includes("drive.google.com") || displaySrc.includes("docs.google.com");
-                            if (isDriveUrl && !displaySrc.includes("/preview") && !displaySrc.includes("/embeddedfolderview")) {
-                              displaySrc = formatGoogleDriveUrl(displaySrc);
-                            }
-                            return (
-                              <View style={{ flex: 1, width: "100%", position: "relative" }}>
-                                <iframe
-                                  key={displaySrc}
-                                  src={displaySrc}
-                                  title={selectedDailyContentPreview.title}
-                                  style={{ width: "100%", height: "100%", border: "none", borderRadius: 8, backgroundColor: "#fff" }}
-                                  allow="autoplay; encrypted-media; fullscreen"
-                                  allowFullScreen
-                                  referrerPolicy="no-referrer-when-downgrade"
-                                />
-                                {isDriveUrl && (
-                                  <View style={{ position: "absolute", bottom: 12, right: 12 }}>
-                                    <TouchableOpacity
-                                      onPress={() => { if (typeof window !== "undefined") window.open(displaySrc.replace("/preview", "/view"), "_blank"); }}
-                                      style={{ backgroundColor: "#1a73e8", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
-                                    >
-                                      <Ionicons name="open-outline" size={14} color="#fff" />
-                                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Open in Google Drive</Text>
-                                    </TouchableOpacity>
-                                  </View>
-                                )}
-                              </View>
-                            );
-                          })()}
-                        </View>
-                      </View>
-                    </View>
-                  </Modal>
-                )}
+                
 
                 {/* ─── WEB ONLY: Admin LMS Management Pages ─────────────── */}
                 {Platform.OS === 'web' && (
@@ -27539,6 +27365,182 @@ PASTED QUESTION PAPER TEXT:
           </View>
         </Modal>
       )}
+
+      {/* Preview Modal for Daily Content (PDF & JPEG) */}
+                {selectedDailyContentPreview && (
+                  <Modal
+                    visible={true}
+                    transparent={true}
+                    animationType="fade"
+                    onRequestClose={() => setSelectedDailyContentPreview(null)}
+                  >
+                    <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+                      <View style={{
+                        width: "100%",
+                        maxWidth: 900,
+                        height: "88%",
+                        backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+                        borderRadius: 12,
+                        overflow: "hidden",
+                        display: "flex",
+                        flexDirection: "column"
+                      }}>
+                        {/* Modal Header */}
+                        <View style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: 14,
+                          backgroundColor: "#c62828"
+                        }}>
+                          <View style={{ flex: 1, paddingRight: 10 }}>
+                            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "bold" }} numberOfLines={1}>
+                              {selectedDailyContentPreview.title || "Daily Study Material"}
+                            </Text>
+                            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11 }}>
+                              {selectedDailyContentPreview.date} • {selectedDailyContentPreview.type ? selectedDailyContentPreview.type.toUpperCase() : 'PDF'}
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                            {isAdmin && (selectedDailyContentPreview.fileBase64 || selectedDailyContentPreview.url) && (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  if (typeof window !== "undefined") {
+                                    const targetSrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
+                                    if (selectedDailyContentPreview.url) {
+                                      window.open(targetSrc, "_blank");
+                                    } else if (selectedDailyContentPreview.fileBase64) {
+                                      const win = window.open();
+                                      if (win) {
+                                        win.document.write(`<iframe src="${targetSrc}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                                      }
+                                    }
+                                  }
+                                }}
+                                style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.2)" }}
+                              >
+                                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Open In New Tab ↗</Text>
+                              </TouchableOpacity>
+                            )}
+                            <TouchableOpacity onPress={() => setSelectedDailyContentPreview(null)}>
+                              <Ionicons name="close-circle" size={24} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Modal Body */}
+                        <View style={{ flex: 1, backgroundColor: darkMode ? "#111" : "#f5f5f5", justifyContent: "center", alignItems: "center", padding: 8 }}>
+                          {(() => {
+                            let displaySrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
+
+                            if (!displaySrc) {
+                              return <Text style={{ color: darkMode ? "#ccc" : "#333" }}>Preview is not available for this item.</Text>;
+                            }
+
+                            // Helper to extract Google Drive file ID
+                            const getGoogleDriveId = (urlStr: string) => {
+                              if (!urlStr) return null;
+                              const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                              if (m1) return m1[1];
+                              const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                              if (m2) return m2[1];
+                              return null;
+                            };
+
+                            const driveId = getGoogleDriveId(displaySrc);
+                            if (selectedDailyContentPreview.type === "image" && driveId) {
+                              displaySrc = `https://lh3.googleusercontent.com/d/${driveId}`;
+                            }
+
+                             // 1. If running on native mobile phone (Android / iOS), do NOT render HTML iframe or img tags to avoid crashes
+                            if (Platform.OS !== "web") {
+                              if (selectedDailyContentPreview.type === "image") {
+                                return <NativeDailyImageZoomView imgSrc={displaySrc} darkMode={darkMode} />;
+                              }
+                              // For PDFs and other documents — use WebView to render inline inside the modal (no browser redirect)
+                              const { WebView } = require("react-native-webview");
+                              const pdfViewUrl = displaySrc.startsWith("http")
+                                ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(displaySrc)}`
+                                : displaySrc;
+                              return (
+                                <WebView
+                                  source={{ uri: pdfViewUrl }}
+                                  style={{ flex: 1, width: "100%", backgroundColor: darkMode ? "#111" : "#fff" }}
+                                  javaScriptEnabled={true}
+                                  domStorageEnabled={true}
+                                  startInLoadingState={true}
+                                  renderLoading={() => (
+                                    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: darkMode ? "#111" : "#f5f5f5" }}>
+                                      <ActivityIndicator size="large" color="#c62828" />
+                                      <Text style={{ color: darkMode ? "#ccc" : "#555", marginTop: 10 }}>Loading document…</Text>
+                                    </View>
+                                  )}
+                                />
+                              );
+                            }
+
+                            // 2. If running on web, verify that relative local files are not being previewed on the live deployed production URL
+                            const isLiveSite = typeof window !== "undefined" && window.location && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
+                            const isRelativeLocalFile = displaySrc.startsWith("/") || (typeof window !== "undefined" && displaySrc.startsWith(window.location.origin) && displaySrc.includes("/uploads/"));
+
+                            if (isLiveSite && isRelativeLocalFile) {
+                              return (
+                                <View style={{ padding: 20, alignItems: "center", justifyContent: "center" }}>
+                                  <Ionicons name="cloud-offline-outline" size={48} color={darkMode ? "#aaa" : "#555"} />
+                                  <Text style={{ color: darkMode ? "#fff" : "#333", fontWeight: "bold", marginTop: 10, textAlign: "center" }}>Local File Preview Offline</Text>
+                                  <Text style={{ color: darkMode ? "#ccc" : "#666", fontSize: 12, marginTop: 6, textAlign: "center" }}>
+                                    This file was saved locally during development. Please configure Google Drive to preview files on the live website.
+                                  </Text>
+                                </View>
+                              );
+                            }
+
+                            // Don't append #toolbar=0 to Drive URLs — it breaks the preview
+                            if (selectedDailyContentPreview.type === "pdf" && !isAdmin && !displaySrc.includes("drive.google.com")) {
+                              displaySrc = `${displaySrc}#toolbar=0`;
+                            }
+                            if (selectedDailyContentPreview.type === "image") {
+                              const imgSrc = driveId 
+                                ? `https://lh3.googleusercontent.com/d/${driveId}` 
+                                : displaySrc;
+                              return <WebDailyImageZoomView imgSrc={imgSrc} alt={selectedDailyContentPreview.title} driveId={driveId} darkMode={darkMode} />;
+                            }
+
+                            // Ensure Google Drive file URLs are converted to /preview embed format
+                            const isDriveUrl = displaySrc.includes("drive.google.com") || displaySrc.includes("docs.google.com");
+                            if (isDriveUrl && !displaySrc.includes("/preview") && !displaySrc.includes("/embeddedfolderview")) {
+                              displaySrc = formatGoogleDriveUrl(displaySrc);
+                            }
+                            return (
+                              <View style={{ flex: 1, width: "100%", position: "relative" }}>
+                                <iframe
+                                  key={displaySrc}
+                                  src={displaySrc}
+                                  title={selectedDailyContentPreview.title}
+                                  style={{ width: "100%", height: "100%", border: "none", borderRadius: 8, backgroundColor: "#fff" }}
+                                  allow="autoplay; encrypted-media; fullscreen"
+                                  allowFullScreen
+                                  referrerPolicy="no-referrer-when-downgrade"
+                                />
+                                {isDriveUrl && (
+                                  <View style={{ position: "absolute", bottom: 12, right: 12 }}>
+                                    <TouchableOpacity
+                                      onPress={() => { if (typeof window !== "undefined") window.open(displaySrc.replace("/preview", "/view"), "_blank"); }}
+                                      style={{ backgroundColor: "#1a73e8", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                                    >
+                                      <Ionicons name="open-outline" size={14} color="#fff" />
+                                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Open in Google Drive</Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })()}
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
 
       {/* Universal Image Preview Modal */}
       {previewImageUri !== null && (
