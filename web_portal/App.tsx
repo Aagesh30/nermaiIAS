@@ -10186,10 +10186,14 @@ function MainApp() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: "#7b0000" }]}>
         <StatusBar style="light" />
-        <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center", padding: 20 }}
-          style={Platform.OS === "web" ? { backgroundImage: "radial-gradient(ellipse at 30% 20%, #b71c1c 0%, #7b0000 55%, #3e0000 100%)" } as any : { backgroundColor: "#7b0000" }}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1, width: "100%" }}
         >
+          <ScrollView
+            contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center", padding: 20 }}
+            style={Platform.OS === "web" ? { backgroundImage: "radial-gradient(ellipse at 30% 20%, #b71c1c 0%, #7b0000 55%, #3e0000 100%)" } as any : { backgroundColor: "#7b0000" }}
+          >
           {/* Header/Logo */}
           <View style={{ alignItems: "center", marginBottom: 24 }}>
             <Image source={require("./assets/logo.png")} style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderColor: "#FFD700" }} />
@@ -10303,6 +10307,7 @@ function MainApp() {
             )}
           </View>
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
