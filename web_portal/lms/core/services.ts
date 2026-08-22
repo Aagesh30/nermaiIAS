@@ -99,12 +99,27 @@ export const LiveSessionApi = {
 export const LiveClassesApi = {
   getStudentLiveSessions: () => api.get('/live-sessions'),
   leaveSession: (sessionId: string) => api.post(`/live-sessions/${sessionId}/participants/leave`),
-  // NEW: Student requests access to a live class they are not enrolled in
-  requestLiveClassAccess: (classId: string, reason: string) =>
-    api.post('/access-requests', { requestType: 'CLASS', contentId: classId, contentName: '', reason }),
-  // NEW: Student checks their own access request status for a class
+  // Student requests access to a live class they are not enrolled in
+  requestLiveClassAccess: (classId: string, className: string, reason: string) =>
+    api.post('/access-requests', { requestType: 'CLASS', contentId: classId, contentName: className, reason }),
+  // Student checks their own access request status for a class
   getMyAccessRequests: () => api.get('/access-requests/my-requests'),
+  // Student requests temporary access (live or recorded) for N days — no permanent option
+  requestTemporaryAccess: (data: {
+    requestType: 'LIVE_SESSION' | 'CLASS';
+    contentId: string;       // 'general' for non-class-specific requests
+    contentName: string;
+    reason: string;
+    requestedDays: number;   // 1, 2, 7, 14, 30 or custom
+  }) => api.post('/access-requests', {
+    requestType: data.requestType,
+    contentId: data.contentId,
+    contentName: data.contentName,
+    reason: `[TEMPORARY ACCESS REQUEST - ${data.requestedDays} day(s)] ${data.reason}`,
+    accessType: 'TEMPORARY',
+  }),
 };
+
 
 // ─── Provider Accounts ───────────────────────────────────────────────────────
 
@@ -304,3 +319,33 @@ export const AccessRequestApi = {
   extendGrant: (grantId: string, data: any) => api.post(`/access-requests/admin/grants/${grantId}/extend`, data),
   revokeGrant: (grantId: string, data: any) => api.post(`/access-requests/admin/grants/${grantId}/revoke`, data),
 };
+
+// ─── LMS Attendance ──────────────────────────────────────────────────────────
+
+export const LmsAttendanceApi = {
+  // Student
+  recordJoin: (classId: string, className: string, courseId: string, courseName: string, batchName: string) =>
+    api.post('/lms-attendance/join', { classId, className, courseId, courseName, batchName }),
+  submitAttendance: (classId: string) =>
+    api.post('/lms-attendance/submit', { classId }),
+  getMyAttendance: () =>
+    api.get('/lms-attendance/my'),
+  getClassAttendance: (classId: string) =>
+    api.get(`/lms-attendance/class/${classId}`),
+  requestCorrection: (attendanceId: string, reason: string) =>
+    api.post(`/lms-attendance/${attendanceId}/request-correction`, { reason }),
+  // Admin
+  adminGetRecords: (filters?: any) =>
+    api.get('/lms-attendance/admin/records', { params: filters }),
+  adminMarkManual: (id: string, status: 'PRESENT' | 'ABSENT', note: string) =>
+    api.patch(`/lms-attendance/admin/${id}/mark`, { status, note }),
+  adminGetCorrections: (filters?: any) =>
+    api.get('/lms-attendance/admin/corrections', { params: filters }),
+  adminReviewCorrection: (id: string, approve: boolean, note: string) =>
+    api.patch(`/lms-attendance/admin/corrections/${id}`, { approve, note }),
+  adminCloseClassAttendance: (classId: string) =>
+    api.post(`/lms-attendance/admin/class/${classId}/close`),
+  adminGetClassSummary: (classId: string) =>
+    api.get(`/lms-attendance/admin/class/${classId}/summary`),
+};
+

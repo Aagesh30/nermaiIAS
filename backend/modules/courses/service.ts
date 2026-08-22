@@ -617,6 +617,21 @@ export class CourseService {
     }
 
     if (classDoc.classType === 'recorded' || (classDoc.classType as string) === 'youtube_recorded') {
+      // Backward-compat: classes converted before the fix only have raw recordingUrl
+      if (!classDoc.encryptedVideoId && (classDoc as any).recordingUrl) {
+        const rawUrl: string = (classDoc as any).recordingUrl;
+        const extractedId = rawUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\\w-]{11})/)?.[1]
+          || rawUrl.match(/^([\w-]{11})$/)?.[1];
+        if (extractedId) {
+          // Persist the fix to Firestore so next call is instant
+          await db.collection('classes').doc(classId).update({
+            encryptedVideoId: encrypt(extractedId),
+            classType: 'youtube_recorded',
+            updatedAt: new Date().toISOString()
+          }).catch(() => {});
+          classDoc.encryptedVideoId = encrypt(extractedId);
+        }
+      }
       if (!classDoc.encryptedVideoId) throw new AppError('Video ID not configured for this class', 500);
       const videoId = decrypt(classDoc.encryptedVideoId);
 

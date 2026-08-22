@@ -13,6 +13,8 @@ export interface ResolvedLiveSession {
   joinAllowed: boolean;
   waitingRoomEnabled: boolean;
   actualStartTime?: string | null;
+  scheduledStartTime?: string | null;
+  expectedDurationMinutes?: number | null;
 }
 
 export class LiveSessionResolver {
@@ -46,14 +48,16 @@ export class LiveSessionResolver {
       if (classDoc?.classType === 'youtube_live') fallbackProvider = 'youtube';
       else if (classDoc?.classType === 'zoom_live') fallbackProvider = 'zoom';
 
-      return {
+    return {
         sessionId: null,
         provider: fallbackProvider,
         status: 'SCHEDULED',
         attendance: { status: 'NOT_STARTED', startedAt: null, endedAt: null },
         moderators: [],
         joinAllowed: false,
-        waitingRoomEnabled: false
+        waitingRoomEnabled: false,
+        scheduledStartTime: classDoc?.scheduledStartTime || null,
+        expectedDurationMinutes: classDoc?.expectedDurationMinutes || null,
       };
     }
 
@@ -72,7 +76,7 @@ export class LiveSessionResolver {
     return {
       sessionId: activeSession.id,
       provider: resolvedProvider,
-      status: activeSession.status, // Preserve raw statuses: JOINING, HOST_CONNECTED, LIVE
+      status: activeSession.status,
       attendance: {
         status: activeSession.attendance?.status || 'NOT_STARTED',
         startedAt: activeSession.attendance?.startedAt || null,
@@ -81,7 +85,9 @@ export class LiveSessionResolver {
       moderators: activeSession.assignedStaffIds || [],
       joinAllowed: isJoinAllowed,
       waitingRoomEnabled: activeSession.waitingRoomEnabled !== false,
-      actualStartTime: activeSession.actualStartTime || null
+      actualStartTime: activeSession.actualStartTime || null,
+      scheduledStartTime: activeSession.scheduledStartTime || classDoc?.scheduledStartTime || null,
+      expectedDurationMinutes: activeSession.expectedDurationMinutes || classDoc?.expectedDurationMinutes || null,
     };
   }
 }

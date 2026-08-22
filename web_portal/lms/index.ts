@@ -22,11 +22,13 @@ export { default as ProviderAccountsPage } from './admin/ProviderAccountsPage';
 export { AccessControlPage } from './admin/AccessControlPage';
 export { KnowledgeStudio } from './admin/KnowledgeStudio';
 export { LiveSessionsPage } from './admin/LiveSessionsPage';
+export { AdminAttendancePage } from './admin/AdminAttendancePage';
 
 // Student LMS pages
 export { StudentCoursesPage } from './student/StudentCoursesPage';
 export { CoursePlayer } from './student/CoursePlayer';
 export { StudentLiveClassesPage } from './student/StudentLiveClassesPage';
+export { StudentAttendancePage } from './student/StudentAttendancePage';
 
 // Staff LMS pages
 export { StaffCoursesPage } from './staff/StaffCoursesPage';

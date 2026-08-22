@@ -4,10 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { DataTable } from '../components/ui/DataTable';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { LiveSessionApi, LiveAttendanceApi } from '../core/services';
+import { LiveSessionApi, LiveAttendanceApi, LmsAttendanceApi } from '../core/services';
 import {
-  Video, Plus, ChevronDown, Square, Youtube, Trash2,
-  CheckSquare, Clock, Calendar, History, CheckCircle2
+  Video, Plus, ChevronDown, ChevronUp, Square, Youtube, Trash2,
+  CheckSquare, Clock, Calendar, History, CheckCircle2, Users
 } from 'lucide-react';
 import { ScheduleSessionDialog } from './ScheduleSessionDialog';
 
@@ -208,6 +208,31 @@ export const LiveSessionsPage: React.FC = () => {
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
   const [deletingHistory, setDeletingHistory] = useState(false);
   const [convertModal, setConvertModal] = useState<any | null>(null);
+
+  // Attendance panels — keyed by classId (history item's classId)
+  const [attendancePanels, setAttendancePanels] = useState<Record<string, any>>({}); // classId -> summary
+  const [attendancePanelLoading, setAttendancePanelLoading] = useState<Record<string, boolean>>({});
+  const [openAttendancePanels, setOpenAttendancePanels] = useState<Set<string>>(new Set());
+
+  const toggleAttendancePanel = async (h: any) => {
+    const classId = h.classId || h.id;
+    const isOpen = openAttendancePanels.has(classId);
+    if (isOpen) {
+      setOpenAttendancePanels(prev => { const s = new Set(prev); s.delete(classId); return s; });
+      return;
+    }
+    setOpenAttendancePanels(prev => new Set(prev).add(classId));
+    if (attendancePanels[classId]) return; // already loaded
+    setAttendancePanelLoading(prev => ({ ...prev, [classId]: true }));
+    try {
+      const res = await LmsAttendanceApi.adminGetClassSummary(classId) as any;
+      setAttendancePanels(prev => ({ ...prev, [classId]: res?.data?.data || res?.data || {} }));
+    } catch {
+      setAttendancePanels(prev => ({ ...prev, [classId]: { error: true } }));
+    } finally {
+      setAttendancePanelLoading(prev => ({ ...prev, [classId]: false }));
+    }
+  };
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -638,73 +663,158 @@ export const LiveSessionsPage: React.FC = () => {
                 </span>
               </div>
 
-              {history.map(h => (
-                <div
-                  key={h.id}
-                  className={`flex items-center gap-4 px-4 py-4 border-b border-white/5 last:border-0 hover:bg-white/3 transition-colors ${selectedHistoryIds.has(h.id) ? 'bg-primary/5' : ''}`}
-                >
-                  {/* Checkbox */}
-                  <button onClick={() => toggleHistorySelect(h.id)} className="text-gray-500 hover:text-primary transition-colors shrink-0">
-                    {selectedHistoryIds.has(h.id)
-                      ? <CheckSquare size={16} className="text-primary" />
-                      : <CheckSquare size={16} className="opacity-30" />}
-                  </button>
-
-                  {/* Icon */}
-                  <div className="p-2 rounded-lg bg-red-500/10 text-red-400 shrink-0">
-                    <Video size={16} />
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{h.classTitle || 'Unnamed Session'}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Calendar size={10} />
-                        {h.scheduledStartTime ? new Date(h.scheduledStartTime).toLocaleDateString() : '—'}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock size={10} />
-                        Ended: {h.actualEndTime ? new Date(h.actualEndTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
-                      </span>
-                      <span className="uppercase">{h.provider}</span>
-                    </div>
-                  </div>
-
-                  {/* Status / Converted */}
-                  <div className="shrink-0">
-                    {h.convertedToRecorded ? (
-                      <span className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 border border-green-500/20 rounded-full px-2 py-1">
-                        <CheckCircle2 size={11} />
-                        Converted
-                      </span>
-                    ) : (
-                      <Badge variant="secondary">{h.status}</Badge>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {!h.convertedToRecorded && (
-                      <button
-                        onClick={() => setConvertModal(h)}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-400 hover:text-white bg-red-500/10 hover:bg-red-500 border border-red-500/20 rounded-lg transition-colors"
-                        title="Convert to YouTube recorded class"
-                      >
-                        <Youtube size={12} />
-                        Convert
+              {history.map(h => {
+                const classId = h.classId || h.id;
+                const isOpen = openAttendancePanels.has(classId);
+                const attSummary = attendancePanels[classId];
+                const attLoading = attendancePanelLoading[classId];
+                return (
+                  <div key={h.id} className={`border-b border-white/5 last:border-0 transition-colors ${selectedHistoryIds.has(h.id) ? 'bg-primary/5' : ''}`}>
+                    {/* Row */}
+                    <div className="flex items-center gap-4 px-4 py-4 hover:bg-white/3 transition-colors">
+                      {/* Checkbox */}
+                      <button onClick={() => toggleHistorySelect(h.id)} className="text-gray-500 hover:text-primary transition-colors shrink-0">
+                        {selectedHistoryIds.has(h.id)
+                          ? <CheckSquare size={16} className="text-primary" />
+                          : <CheckSquare size={16} className="opacity-30" />}
                       </button>
+
+                      {/* Icon */}
+                      <div className="p-2 rounded-lg bg-red-500/10 text-red-400 shrink-0">
+                        <Video size={16} />
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{h.classTitle || 'Unnamed Session'}</p>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                          <span className="flex items-center gap-1">
+                            <Calendar size={10} />
+                            {h.scheduledStartTime ? new Date(h.scheduledStartTime).toLocaleDateString() : '—'}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock size={10} />
+                            Ended: {h.actualEndTime ? new Date(h.actualEndTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </span>
+                          <span className="uppercase">{h.provider}</span>
+                        </div>
+                      </div>
+
+                      {/* Status / Converted */}
+                      <div className="shrink-0">
+                        {h.convertedToRecorded ? (
+                          <span className="flex items-center gap-1.5 text-xs text-green-400 bg-green-500/10 border border-green-500/20 rounded-full px-2 py-1">
+                            <CheckCircle2 size={11} />
+                            Converted
+                          </span>
+                        ) : (
+                          <Badge variant="secondary">{h.status}</Badge>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Attendance toggle button */}
+                        <button
+                          onClick={() => toggleAttendancePanel(h)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
+                            isOpen
+                              ? 'text-indigo-300 bg-indigo-500/20 border-indigo-500/40'
+                              : 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20'
+                          }`}
+                          title="View attendance"
+                        >
+                          <Users size={12} />
+                          {attLoading ? 'Loading…' : isOpen ? <><ChevronUp size={11} /> Hide</> : 'Attendance'}
+                        </button>
+
+                        {!h.convertedToRecorded && (
+                          <button
+                            onClick={() => setConvertModal(h)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-red-400 hover:text-white bg-red-500/10 hover:bg-red-500 border border-red-500/20 rounded-lg transition-colors"
+                            title="Convert to YouTube recorded class"
+                          >
+                            <Youtube size={12} />
+                            Convert
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteHistoryItem(h.id)}
+                          className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Delete from history"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Attendance Panel */}
+                    {isOpen && (
+                      <div className="px-4 pb-4 border-t border-white/5">
+                        {attLoading ? (
+                          <div className="py-4 text-center text-xs text-gray-400">Loading attendance…</div>
+                        ) : attSummary?.error ? (
+                          <div className="py-4 text-center text-xs text-red-400">Failed to load attendance.</div>
+                        ) : (
+                          <>
+                            {/* Summary counts */}
+                            <div className="flex gap-4 py-3 text-xs text-gray-400">
+                              <span className="font-semibold text-white">{attSummary?.totalJoined ?? 0}</span> Joined &nbsp;·&nbsp;
+                              <span className="text-green-400 font-semibold">{attSummary?.present ?? 0}</span> Present &nbsp;·&nbsp;
+                              <span className="text-red-400 font-semibold">{attSummary?.absent ?? 0}</span> Absent &nbsp;·&nbsp;
+                              <span className="text-yellow-400 font-semibold">{attSummary?.pending ?? 0}</span> Pending
+                            </div>
+
+                            {/* Records table */}
+                            {(attSummary?.records?.length ?? 0) === 0 ? (
+                              <div className="py-3 text-center text-xs text-gray-500 italic">No students joined this session.</div>
+                            ) : (
+                              <div className="overflow-x-auto rounded-lg border border-white/10">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="bg-white/5 text-gray-400 text-left">
+                                      <th className="px-3 py-2 font-semibold">Student</th>
+                                      <th className="px-3 py-2 font-semibold">Roll No.</th>
+                                      <th className="px-3 py-2 font-semibold">Batch</th>
+                                      <th className="px-3 py-2 font-semibold">Duration</th>
+                                      <th className="px-3 py-2 font-semibold">Status</th>
+                                      <th className="px-3 py-2 font-semibold">Joined At</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {attSummary.records.map((rec: any, idx: number) => (
+                                      <tr key={rec.id || idx} className="border-t border-white/5 hover:bg-white/3">
+                                        <td className="px-3 py-2 text-white font-medium">{rec.studentName || '—'}</td>
+                                        <td className="px-3 py-2 text-gray-400">{rec.regNo || '—'}</td>
+                                        <td className="px-3 py-2 text-gray-400">{rec.batchName || rec.studentBatchName || '—'}</td>
+                                        <td className="px-3 py-2 text-gray-300">
+                                          {rec.durationMinutes != null ? `${rec.durationMinutes} min` : rec.joinedAt ? '(in progress)' : '—'}
+                                        </td>
+                                        <td className="px-3 py-2">
+                                          {!rec.attendanceSubmittedAt ? (
+                                            <span className="text-yellow-400">Pending</span>
+                                          ) : rec.status === 'PRESENT' ? (
+                                            <span className="text-green-400 font-semibold">✓ Present</span>
+                                          ) : (
+                                            <span className="text-red-400 font-semibold">✗ Absent</span>
+                                          )}
+                                        </td>
+                                        <td className="px-3 py-2 text-gray-500">
+                                          {rec.joinedAt ? new Date(rec.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     )}
-                    <button
-                      onClick={() => deleteHistoryItem(h.id)}
-                      className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                      title="Delete from history"
-                    >
-                      <Trash2 size={14} />
-                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

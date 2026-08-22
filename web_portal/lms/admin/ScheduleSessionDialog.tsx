@@ -46,6 +46,7 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
     startTime: '',
     expectedDurationMinutes: 60,
     minimumAttendancePercentage: 50,
+    attendanceThresholdMinutes: 15,
     
     // New Fields
     meetingMode: 'create_new', // 'create_new' | 'use_existing'
@@ -138,6 +139,7 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
             startTime: formatTimeLocal(d),
             expectedDurationMinutes: editingClass.liveSession?.expectedDurationMinutes || editingClass.expectedDurationMinutes || 60,
             minimumAttendancePercentage: editingClass.minimumAttendancePercentage ?? 50,
+            attendanceThresholdMinutes: editingClass.attendanceThresholdMinutes ?? 15,
             
             meetingMode: editingClass.liveSession?.hostId === 'manual' ? 'use_existing' : 'create_new',
             providerAccountId: editingClass.liveSession?.providerAccountId || 'auto',
@@ -181,6 +183,8 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
             startDate: formatDateLocal(now),
             startTime: formatTimeLocal(now),
             expectedDurationMinutes: 60,
+            minimumAttendancePercentage: 50,
+            attendanceThresholdMinutes: 15,
             provider: defaultProvider 
           }));
           setYoutubeUrl('');
@@ -226,7 +230,8 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
           topicId: formData.topicId,
           subtopicId: formData.subtopicId || undefined,
           accessLevel: formData.accessLevel,
-          minimumAttendancePercentage: formData.minimumAttendancePercentage
+          minimumAttendancePercentage: formData.minimumAttendancePercentage,
+          attendanceThresholdMinutes: formData.attendanceThresholdMinutes ?? 15
         });
         
         // Update Session details ONLY if it's a live session
@@ -277,7 +282,8 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
           subtopicId: formData.subtopicId || undefined,
           classType,
           accessLevel: formData.accessLevel,
-          minimumAttendancePercentage: formData.minimumAttendancePercentage
+          minimumAttendancePercentage: formData.minimumAttendancePercentage,
+          attendanceThresholdMinutes: formData.attendanceThresholdMinutes ?? 15
         });
         
         const newClassId = res.data?.data?.id || res.data?.id;
@@ -495,15 +501,35 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
                 onChange={(e: any) => setFormData({ ...formData, startTime: e.target.value })} 
                 required 
               />
-              <AdminInput 
-                label="Expected Duration (Mins)"
-                type="number" 
-                min={15} 
-                value={formData.expectedDurationMinutes} 
-                onChange={(e: any) => setFormData({ ...formData, expectedDurationMinutes: Number(e.target.value) })} 
-                required 
-              />
             </div>
+
+            {/* Duration + Attendance Threshold — side by side */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <AdminInput 
+                  label="Duration (Mins)"
+                  type="number" 
+                  min={15} 
+                  value={formData.expectedDurationMinutes} 
+                  onChange={(e: any) => setFormData({ ...formData, expectedDurationMinutes: Number(e.target.value) })} 
+                  required 
+                />
+              </div>
+              <div>
+                <AdminInput
+                  label="Attendance Threshold (Mins)"
+                  type="number"
+                  min={1}
+                  max={formData.expectedDurationMinutes || 120}
+                  value={formData.attendanceThresholdMinutes}
+                  onChange={(e: any) => setFormData({ ...formData, attendanceThresholdMinutes: Number(e.target.value) })}
+                  required
+                />
+                <p className="text-[10px] text-textSecondary mt-1">Min. minutes to be Present (default: 15)</p>
+              </div>
+            </div>
+            {/* dummy closing tag needed — the outer div below continues */}
+            <div style={{display:'none'}}></div>
 
             <div className="bg-surface p-4 rounded-xl border border-border flex items-center justify-between">
               <div>
@@ -540,6 +566,9 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
               />
               <p className="text-xs text-textSecondary mt-1">Determines the percentage of time a student must be present to be marked as attended.</p>
             </div>
+
+
+
 
             <div className="bg-background p-4 rounded-xl border border-border space-y-4">
               <div className="border-b border-border pb-3">

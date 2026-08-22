@@ -22,7 +22,9 @@ export class AccessRequestService {
     requestType: EntityType,
     contentId: string,
     contentName: string,
-    reason: string
+    reason: string,
+    studentName?: string,
+    studentRegNo?: string
   ): Promise<IAccessRequest> {
 
     // 1. Duplicate prevention
@@ -48,10 +50,17 @@ export class AccessRequestService {
       throw new AppError('You have 5 pending requests. Please wait for an administrator to process them.', 429);
     }
 
-    // 3. Create the request document
+    // 3. Build display label: "<rollNo> <name>" or just "<name>"
+    const label = studentRegNo && studentName
+      ? `${studentRegNo} ${studentName}`
+      : studentName || studentRegNo || '';
+
+    // 4. Create the request document — store name at creation so admin view
+    //    never needs a cross-collection lookup.
     const newRequest: IAccessRequest = {
       id: uuidv4(),
       studentId,
+      studentName: label,
       batchId,
       requestType,
       contentId,
@@ -98,12 +107,50 @@ export class AccessRequestService {
     // Enrich with student + batch info
     const enriched = await Promise.all(
       requests.map(async (req: any) => {
-        let studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
-        let student = studentDoc.exists ? studentDoc.data() : null;
-        
-        if (!student) {
-          const userDoc = await db.collection('users').doc(req.studentId).get();
-          if (userDoc.exists) student = userDoc.data();
+        // If name was stored at creation time, use it directly (fast path)
+        let finalName: string = req.studentName || '';
+        // Hoist student to outer scope so studentEmail is accessible in return
+        let student: FirebaseFirestore.DocumentData | null | undefined = null;
+
+        if (!finalName) {
+          // Fallback for old requests: look up across all student collections
+          // 1. New student_profiles (self-registered via app)
+          const profileDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
+          student = profileDoc.exists ? profileDoc.data() : null;
+
+          // 2. Legacy 'students' collection (admin-imported)
+          if (!student) {
+            const legacyDoc = await db.collection('students').doc(req.studentId).get();
+            if (legacyDoc.exists) student = legacyDoc.data();
+          }
+
+          // 3. Final fallback: 'users' collection
+          if (!student) {
+            const userDoc = await db.collection('users').doc(req.studentId).get();
+            if (userDoc.exists) student = userDoc.data();
+          }
+
+          if (student) {
+            // Name: displayName > firstName+lastName > name
+            const name =
+              student.displayName ||
+              (`${student.firstName || ''} ${student.lastName || ''}`.trim()) ||
+              student.name ||
+              '';
+
+            // Roll number: loginUsername > rollNumber > rollNo > username
+            const regNo =
+              student.loginUsername ||
+              student.rollNumber ||
+              student.rollNo ||
+              student.username ||
+              '';
+
+            // Format: "<rollNo> <name>"
+            finalName = regNo && name ? `${regNo} ${name}` : name || regNo || req.studentId;
+          } else {
+            finalName = req.studentId;
+          }
         }
 
         let batchData = null;
@@ -117,10 +164,6 @@ export class AccessRequestService {
         try {
           cost = await this.hierarchyService.calculateScopeCost(req.requestType, req.contentId);
         } catch (_) {}
-
-        const name = student?.displayName || student?.name || 'Unknown';
-        const regNo = student?.username || '';
-        const finalName = regNo ? `${name} (${regNo})` : name;
 
         return {
           ...req,
@@ -506,15 +549,55 @@ export class AccessRequestService {
   // ─── Admin: Revoke Grant ─────────────────────────────────────────────────────
 
   async revokeGrant(grantId: string, adminId: string, reason: string) {
-    const grantDoc = await db.collection('content_access').doc(grantId).get();
-    if (!grantDoc.exists) throw new AppError('Grant not found', 404);
+    // The History tab passes the access_request ID; the Permanent tab passes the content_access grant ID.
+    // Try content_access first, then fall back to finding the grant via the request.
+    let grantRef: FirebaseFirestore.DocumentReference | null = null;
+    let sourceRequestId: string | null = null;
 
-    await grantDoc.ref.update({
+    const grantDoc = await db.collection('content_access').doc(grantId).get();
+    if (grantDoc.exists) {
+      grantRef = grantDoc.ref;
+      sourceRequestId = (grantDoc.data() as any)?.sourceRequestId || null;
+    } else {
+      // Maybe grantId is actually an access_request ID — find the linked grant
+      const linkedGrantSnap = await db.collection('content_access')
+        .where('sourceRequestId', '==', grantId)
+        .where('status', '==', 'ACTIVE')
+        .limit(1)
+        .get();
+      if (!linkedGrantSnap.empty) {
+        grantRef = linkedGrantSnap.docs[0].ref;
+        sourceRequestId = grantId; // the passed ID is the request ID
+      } else {
+        // Last resort: check if the access_request itself exists and mark it REVOKED
+        const reqDoc = await db.collection('access_requests').doc(grantId).get();
+        if (reqDoc.exists) {
+          await reqDoc.ref.update({
+            status: 'REVOKED',
+            revocationReason: reason,
+            updatedAt: new Date().toISOString(),
+            updatedBy: adminId
+          });
+          return { success: true };
+        }
+        throw new AppError('Grant not found', 404);
+      }
+    }
+
+    const revokePayload = {
       status: 'REVOKED',
       revocationReason: reason,
       updatedAt: new Date().toISOString(),
       updatedBy: adminId
-    });
+    };
+
+    // Revoke the content_access grant
+    await grantRef.update(revokePayload);
+
+    // Also update the source access_request so History tab doesn't re-show it on refresh
+    if (sourceRequestId) {
+      await db.collection('access_requests').doc(sourceRequestId).update(revokePayload).catch(() => {});
+    }
 
     return { success: true };
   }
@@ -616,9 +699,10 @@ export class AccessRequestService {
         ? Math.max(0, Math.round((new Date((grant as any).expiresAt).getTime() - Date.now()) / 3600000))
         : null;
 
-      const name = student?.displayName || student?.name || 'Unknown';
-      const regNo = student?.username || '';
-      const finalName = regNo ? `${name} (${regNo})` : name;
+      const name = student?.displayName || student?.name || student?.fullName
+        || student?.studentName || student?.username || req.studentName || 'Unknown';
+      const regNo = student?.username || student?.regNo || '';
+      const finalName = (regNo && regNo !== name) ? `${name} (${regNo})` : name;
 
       return {
         ...req,

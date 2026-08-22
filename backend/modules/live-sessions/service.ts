@@ -7,6 +7,21 @@ import { ClassRepository } from '../courses/repository';
 import { interactionEventBus } from '../interaction-engine/eventBus';
 import { NotificationService } from '../notifications/service';
 import { LiveSessionResolver } from './LiveSessionResolver';
+import { encrypt } from '../../core/utils/encryption';
+
+// Extract YouTube video ID from any YouTube URL format
+function extractYoutubeId(url: string): string | null {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([\w-]{11})/,
+    /^([\w-]{11})$/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
 
 const notificationService = new NotificationService();
 
@@ -267,12 +282,35 @@ export class LiveSessionService {
     console.log('DEBUG: Fetched classesDocs, count:', classesDocs.length);
 
     const result = [];
+
+    // ── Fetch approved content_access grants for this student (once, before loop) ──
+    const grantsSnap = await db.collection('content_access')
+      .where('studentId', '==', userId)
+      .where('status', '==', 'ACTIVE')
+      .get();
+    // Also check by the resolved studentId (legacy students collection)
+    const grantsSnap2 = studentId !== userId
+      ? await db.collection('content_access')
+          .where('studentId', '==', studentId)
+          .where('status', '==', 'ACTIVE')
+          .get()
+      : null;
+
+    const activeGrantEntityIds = new Set<string>();
+    const processGrant = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
+      const g = d.data();
+      const expired = g.expiresAt && new Date(g.expiresAt).getTime() < now;
+      if (!expired) activeGrantEntityIds.add(g.entityId);
+    };
+    grantsSnap.docs.forEach(processGrant);
+    if (grantsSnap2) grantsSnap2.docs.forEach(processGrant);
+
     for (const doc of classesDocs) {
       const cls = { id: doc.id, ...doc.data() } as any;
       const targetBatches: string[] = cls.targetBatchIds || cls.targetBatches || [];
       const accessLevel = cls.accessLevel || '';
 
-      // Check access: free, all, batch, course matching
+      // Check access: free, all, batch, course matching, or an approved content_access grant
       let hasAccess = false;
       const isEnrolled = userBatchIds.length > 0 || uniqueUserCourseIds.length > 0;
       const isOffline = studentType?.toLowerCase() === 'offline';
@@ -282,7 +320,12 @@ export class LiveSessionService {
       const matchBatch = targetBatches.length > 0 ? targetBatches.some((bId: string) => userBatchIds.includes(bId)) : false;
       const matchCourse = targetCourses.length > 0 ? targetCourses.some((cId: string) => uniqueUserCourseIds.includes(cId)) : false;
 
-      if (
+      // ── Grant-based override: admin approved a CLASS or higher-level grant ──
+      const hasGrant = activeGrantEntityIds.has(cls.id);
+
+      if (hasGrant) {
+        hasAccess = true;
+      } else if (
         accessLevel === 'free' || 
         accessLevel === 'all' || 
         targetBatches.includes('all') || 
@@ -308,6 +351,24 @@ export class LiveSessionService {
         let isJoinAllowed = resolvedSession.joinAllowed;
         
         let derivedStatus: string = liveStatus;
+
+        // ── Time-based override ───────────────────────────────────────────────
+        // scheduledStartTime is stored on the live_session doc, not the class doc.
+        if (derivedStatus === 'SCHEDULED' && !resolvedSession.actualStartTime) {
+          const scheduledMs = resolvedSession.scheduledStartTime
+            ? new Date(resolvedSession.scheduledStartTime).getTime()
+            : cls.scheduledStartTime
+              ? new Date(cls.scheduledStartTime).getTime()
+              : 0;
+          const durMins = resolvedSession.expectedDurationMinutes || cls.expectedDurationMinutes || 60;
+          const durationMs = durMins * 60 * 1000;
+          const graceMs = 10 * 60 * 1000; // 10-min grace period
+          if (scheduledMs > 0 && now > scheduledMs + durationMs + graceMs) {
+            derivedStatus = 'ENDED';
+            isJoinAllowed = false;
+          }
+        }
+
         if (derivedStatus === 'SCHEDULED' && resolvedSession.actualStartTime) {
           derivedStatus = 'LIVE'; // Fallback if webhook failed
           isJoinAllowed = true;
@@ -358,6 +419,22 @@ export class LiveSessionService {
         const sessionStatus = resolvedSession.status;
         
         let derivedStatus: string = sessionStatus;
+
+        // Time-based override for denied-access classes too
+        if (derivedStatus === 'SCHEDULED' && !resolvedSession.actualStartTime) {
+          const scheduledMs = resolvedSession.scheduledStartTime
+            ? new Date(resolvedSession.scheduledStartTime).getTime()
+            : cls.scheduledStartTime
+              ? new Date(cls.scheduledStartTime).getTime()
+              : 0;
+          const durMins = resolvedSession.expectedDurationMinutes || cls.expectedDurationMinutes || 60;
+          const durationMs = durMins * 60 * 1000;
+          const graceMs = 10 * 60 * 1000;
+          if (scheduledMs > 0 && now > scheduledMs + durationMs + graceMs) {
+            derivedStatus = 'ENDED';
+          }
+        }
+
         if (derivedStatus === 'ENDED' && !cls.encryptedRecordingId) {
             derivedStatus = 'NOT_UPLOADED';
         } else if (derivedStatus === 'ENDED' && cls.encryptedRecordingId) {
@@ -1391,7 +1468,7 @@ Reason:     ${verifyResult.state}
     convertToYoutube: boolean = false,
     youtubeUrl?: string
   ) {
-    // 1. End the session using the existing method (no changes to existing logic)
+    // 1. End the session using the existing method
     await this.endSession(sessionId, user);
 
     if (!convertToYoutube || !youtubeUrl) {
@@ -1404,23 +1481,30 @@ Reason:     ${verifyResult.state}
       return { success: true, converted: false, warning: 'classId not found; could not convert.' };
     }
 
-    // 3. Update the class record to become a recorded class
+    // 3. Extract and encrypt the YouTube video ID (same as createClass)
+    const videoId = extractYoutubeId(youtubeUrl);
+    if (!videoId) {
+      return { success: true, converted: false, warning: 'Invalid YouTube URL; could not extract video ID.' };
+    }
+    const encryptedVideoId = encrypt(videoId);
+
+    // 4. Update the class record to become a YouTube recorded class
     try {
       await db.collection('classes').doc(session.classId).update({
-        classType: 'recorded',
-        recordingUrl: youtubeUrl,
-        playbackUrl: youtubeUrl,
+        classType: 'youtube_recorded',
+        encryptedVideoId,              // ← what CoursePlayer uses to play
+        encryptedRecordingId: encryptedVideoId,
         convertedFromLive: true,
         convertedAt: new Date().toISOString(),
         convertedBy: user?.userId || user?.id || 'system',
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
 
       // Also mark the live session as converted
       await db.collection(this.collection).doc(sessionId).update({
         convertedToRecorded: true,
         recordingUrl: youtubeUrl,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       });
 
       return { success: true, converted: true, classId: session.classId };

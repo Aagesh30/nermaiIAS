@@ -2329,6 +2329,7 @@ function MainApp() {
   const [authTab, setAuthTab] = useState<"login" | "register" | "guest">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [studentOldPassword, setStudentOldPassword] = useState("");
   const [studentNewPassword, setStudentNewPassword] = useState("");
   const [studentConfirmPassword, setStudentConfirmPassword] = useState("");
@@ -10432,7 +10433,12 @@ function MainApp() {
                 </View>
                 <View style={{ gap: 4 }}>
                   <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Password</Text>
-                  <TextInput style={styles.input} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry />
+                  <View style={{ position: "relative", justifyContent: "center", marginBottom: 12 }}>
+                    <TextInput style={[styles.input, { marginBottom: 0 }]} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry={!showPassword} />
+                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ position: "absolute", right: 15 }}>
+                      <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#757575" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 {loginError && (
                   <View style={{ backgroundColor: "#ffebee", borderWidth: 1, borderColor: "#ef9a9a", borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -11589,7 +11595,12 @@ function MainApp() {
                     </View>
                     <View style={{ gap: 4 }}>
                       <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Password</Text>
-                      <TextInput style={styles.input} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry />
+                      <View style={{ position: "relative", justifyContent: "center", marginBottom: 12 }}>
+                        <TextInput style={[styles.input, { marginBottom: 0 }]} placeholder="Enter Password" placeholderTextColor="#999" value={password} onChangeText={val => { setPassword(val); setLoginError(null); }} secureTextEntry={!showPassword} />
+                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ position: "absolute", right: 15 }}>
+                          <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#757575" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     {loginError && (
                       <View style={{ backgroundColor: "#ffebee", borderWidth: 1, borderColor: "#ef9a9a", borderRadius: 8, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>

@@ -56,14 +56,50 @@ export class AccessPolicyEngine {
       return { allowed: true, reason: 'Admin Quick Grant Override', source: 'ADMIN' };
     }
 
-    // 2. Load student
+    // 2. EARLY GRANT CHECK — check content_access BEFORE profile lookup.
+    //    This handles legacy students (from 'students' collection) who are not in
+    //    'student_profiles', so they would otherwise get NOT_ENROLLED even with a
+    //    valid admin-approved grant.
+    const earlyTree = [
+      { type: entityType, id: entityId },
+      ...(await this.hierarchyService.getParents(entityType, entityId))
+    ];
+
+    for (const node of earlyTree) {
+      const grantSnap = await db.collection('content_access')
+        .where('studentId', '==', studentId)
+        .where('entityType', '==', node.type)
+        .where('entityId', '==', node.id)
+        .where('status', '==', 'ACTIVE')
+        .get();
+
+      for (const doc of grantSnap.docs) {
+        const grant = doc.data() as IContentAccess;
+        if (grant.accessType === 'PERMANENT') {
+          return { allowed: true, reason: `PERMANENT ${node.type} grant`, source: 'PERMANENT' };
+        }
+        if (grant.accessType === 'TEMPORARY') {
+          if (!grant.expiresAt || new Date(grant.expiresAt) > new Date()) {
+            return { allowed: true, reason: `TEMPORARY ${node.type} grant`, source: 'TEMPORARY' };
+          }
+        }
+      }
+    }
+
+    // 3. Load student profile
     const studentDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(studentId).get();
     if (!studentDoc.exists) {
+      // Also check legacy 'students' collection for basic enrollment info
+      const legacyDoc = await db.collection('students').doc(studentId).get();
+      if (!legacyDoc.exists) {
+        return { allowed: false, reason: 'NOT_ENROLLED' };
+      }
+      // Legacy student with no grant — deny but give a useful reason
       return { allowed: false, reason: 'NOT_ENROLLED' };
     }
     const student = studentDoc.data() as IStudentProfile;
 
-    // 3. Gather all active batch memberships + capabilities
+    // 4. Gather all active batch memberships + capabilities
     const activeMemberships = student.programMemberships?.filter(m => m.status === 'active') || [];
 
     if (activeMemberships.length === 0) {
@@ -100,7 +136,8 @@ export class AccessPolicyEngine {
       ?? null;
     const primaryBatchName = batchDocs[0]?.name;
 
-    // 4. Check explicitly granted permissions (traverses the full content tree upwards)
+    // 5. Check explicitly granted permissions again (for profile-enrolled students — redundant
+    //    for legacy students who were handled by the early check above, but kept for safety)
     const tree = [
       { type: entityType, id: entityId },
       ...(await this.hierarchyService.getParents(entityType, entityId))

@@ -44,21 +44,30 @@ export interface IClass extends BaseAuditFields {
   tenantId?: string;
   courseId?: string;
   subjectId?: string;
+  subjectName?: string;
   topicId: string;
   subtopicId?: string;
   title: string;
+  description?: string;
   teacherId?: string;
+  teacherName?: string;
+  topicName?: string;
   order: number;
-  classType: 'recorded' | 'live';
+  classType: 'recorded' | 'live' | 'zoom_live' | 'youtube_live' | 'youtube_recorded';
   accessLevel: 'free' | 'premium' | 'batch';
-  encryptedVideoId?: string; // Uploaded recording ID
+  targetBatchIds?: string[];
+  targetCourses?: string[];
+  encryptedVideoId?: string;
+  encryptedRecordingId?: string;
   scheduledStartTime?: string;
   expectedDurationMinutes?: number;
-  liveSession?: any; // Appended by service for frontend consumption
-  attendance: {
+  minimumAttendancePercentage?: number;
+  attendanceThresholdMinutes?: number;
+  liveSession?: any;
+  attendance?: {
     mode: 'percentage' | 'fixed_minutes' | 'full' | 'manual' | 'first_join_only' | 'teacher_marked' | 'hybrid';
     value: number;
-    version: number; // Increments on any admin modification
+    version: number;
     lockAfterStart: boolean;
     allowEditBeforeStart: boolean;
   };
