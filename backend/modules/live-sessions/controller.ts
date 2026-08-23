@@ -408,9 +408,12 @@ export class LiveSessionController {
   static async generateJoinToken(req: Request, res: Response) {
     try {
       const sessionId = req.params.id as string;
+      console.log(`[DEBUG] generateJoinToken called with sessionId: ${sessionId}`);
       const token = await LiveSessionService.generateJoinToken(sessionId, req.user);
+      console.log(`[DEBUG] generateJoinToken token generated successfully.`);
       res.status(200).json({ success: true, token });
     } catch (error: any) {
+      console.error(`[DEBUG] Error generating join token for sessionId ${req.params.id}:`, error);
       logger.error('Error generating join token:', error);
       res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Server error' });
     }

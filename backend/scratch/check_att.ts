@@ -1,0 +1,1 @@
+﻿import { db } from '../infrastructure/firebase/index'; async function run() { const doc = await db.collection('live_sessions').doc('wXaCcwcFMGmMSL2BP1fA').get(); if (doc.exists) { console.log('attendance details:', doc.data()?.joinedParticipantsDetails); } else { console.log('doc not found'); } process.exit(0); } run().catch(e => { console.error(e); process.exit(1); });

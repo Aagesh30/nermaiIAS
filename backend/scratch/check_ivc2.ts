@@ -1,0 +1,1 @@
+﻿import { db } from '../infrastructure/firebase/index'; async function run() { const snap = await db.collection('classes').where('title', '==', 'IVC-2').get(); snap.forEach(doc => console.log('IVC-2 classId:', doc.id)); process.exit(0); } run().catch(e => { console.error(e); process.exit(1); });

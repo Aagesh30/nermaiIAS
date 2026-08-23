@@ -745,10 +745,13 @@ export const StudentLiveClassesPage = () => {
 
 
   const handleJoinClass = async (courseId: string | null, classId: string, cls?: any) => {
+    console.log(`[DEBUG LMS] handleJoinClass called with courseId: ${courseId}, classId: ${classId}`);
     try {
       let launched = false;
       try {
+        console.log(`[DEBUG LMS] Requesting generateJoinToken for classId: ${classId}`);
         const tokenRes = await LiveSessionApi.generateJoinToken(classId);
+        console.log(`[DEBUG LMS] generateJoinToken response:`, tokenRes);
         const token = tokenRes.data?.token || tokenRes.token;
         if (token) {
           const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";

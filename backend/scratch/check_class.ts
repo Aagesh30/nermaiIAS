@@ -1,0 +1,1 @@
+﻿import { db } from '../infrastructure/firebase/index'; async function run() { const doc = await db.collection('classes').doc('s2A7CyRuWMKrJZFOJbvE').get(); if (doc.exists) { console.log('classes doc exists. title:', doc.data().title); } else { console.log('No such doc in classes'); } process.exit(0); } run().catch(e => { console.error(e); process.exit(1); });

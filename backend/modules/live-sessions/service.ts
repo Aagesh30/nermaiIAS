@@ -1295,6 +1295,7 @@ Launch Payload Exists: ${!!session.launchPayload}
     if (user) {
       try {
         const userId = user.id || user.userId;
+        console.log(`[DEBUG] getJoinPayload: attempting to log attendance for userId = ${userId}`);
         if (userId) {
           const joinedUser = {
             id: userId,
@@ -1303,15 +1304,17 @@ Launch Payload Exists: ${!!session.launchPayload}
             regNo: user.regNo || user.employeeId || '-',
             joinedAt: new Date().toISOString()
           };
+          console.log(`[DEBUG] getJoinPayload: updating joinedParticipantsDetails with`, joinedUser);
           const db = require('firebase-admin').firestore();
           await db.collection(this.collection).doc(sessionId).set({
             joinedParticipantsDetails: {
               [userId]: joinedUser
             }
           }, { merge: true });
+          console.log(`[DEBUG] getJoinPayload: successfully updated Firestore joinedParticipantsDetails!`);
         }
       } catch (err) {
-        console.error("Failed to append joined participant to live session:", err);
+        console.error("[DEBUG] Failed to append joined participant to live session:", err);
       }
     }
 
