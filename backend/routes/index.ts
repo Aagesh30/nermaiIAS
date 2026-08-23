@@ -48,6 +48,7 @@ import { assistantRoutes } from "../modules/assistant";
 import { interactionRoutes } from "../modules/interaction-engine";
 import { liveSessionsRoutes } from "../modules/live-sessions";
 import providerAccountRoutes from "../modules/provider-accounts/routes";
+import zoomAccountsRouter from "../modules/zoom-accounts";
 
 const router = Router();
 
@@ -148,5 +149,6 @@ router.use("/live-sessions", liveSessionsRoutes);
 router.use("/v1/live-sessions", liveSessionsRoutes);
 router.use("/providers/accounts", providerAccountRoutes);
 router.use("/v1/providers/accounts", providerAccountRoutes);
+router.use("/zoom-accounts", zoomAccountsRouter);
 
 export default router;

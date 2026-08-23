@@ -28,8 +28,8 @@ export class LiveSessionPolicy {
     const userId = user.userId || user.id;
     if (!userId) return false;
     
-    // Platform Super Admin retains global override permissions
-    if (user.role === 'super_admin') {
+    // Platform Super Admin and Developer retain global override permissions
+    if (user.role === 'super_admin' || user.role === 'developer') {
       return true; 
     }
 

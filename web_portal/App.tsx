@@ -37,6 +37,7 @@ const ClassesPage = React.lazy(() => import('./lms/admin/ClassesPage').then(m =>
 const ResourcesPage = React.lazy(() => import('./lms/admin/ResourcesPage').then(m => ({ default: m.ResourcesPage })));
 const VideosPage = React.lazy(() => import('./lms/admin/VideosPage').then(m => ({ default: m.VideosPage })));
 const ProviderAccountsPage = React.lazy(() => import('./lms/admin/ProviderAccountsPage'));
+const ZoomAccountsPage = React.lazy(() => import('./lms/developer/ZoomAccountsPage'));
 const AccessControlPage = React.lazy(() => import('./lms/admin/AccessControlPage').then(m => ({ default: m.AccessControlPage })));
 const KnowledgeStudio = React.lazy(() => import('./lms/admin/KnowledgeStudio').then(m => ({ default: m.KnowledgeStudio })));
 const LiveSessionsPage = React.lazy(() => import('./lms/admin/LiveSessionsPage').then(m => ({ default: m.LiveSessionsPage })));
@@ -2263,6 +2264,23 @@ function MainApp() {
   const [attendanceLoading, setAttendanceLoading] = useState(false);
 
   const [showLiveClassModal, setShowLiveClassModal] = useState(false);
+  const [providerAccounts, setProviderAccounts] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (showLiveClassModal && isAdmin) {
+      api.get('/zoom-accounts')
+        .then((res: any) => {
+          const accountsArray = Array.isArray(res) ? res : (res.data || []);
+          const mapped = accountsArray.map((za: any) => ({
+            id: za.id,
+            name: za.name,
+            provider: 'zoom'
+          }));
+          setProviderAccounts(mapped);
+        })
+        .catch(err => console.error("Error fetching provider accounts", err));
+    }
+  }, [showLiveClassModal, isAdmin]);
   const [editingLiveClass, setEditingLiveClass] = useState<any | null>(null);
   const [liveClassForm, setLiveClassForm] = useState<any>({
     title: "",
@@ -8133,6 +8151,14 @@ function MainApp() {
               <Ionicons name="chatbubbles-outline" size={20} color={devTab === "test-feedback" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
               <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "test-feedback" && styles.sidebarTabTxtActive]}>Test Feedback</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => { setDevTab("zoom-accounts"); }}
+              style={[styles.sidebarTab, devTab === "zoom-accounts" && (darkMode ? styles.sidebarTabActiveDark : styles.sidebarTabActive)]}
+            >
+              <Ionicons name="videocam-outline" size={20} color={devTab === "zoom-accounts" ? "#c62828" : (darkMode ? "#9e9e9e" : "#757575")} />
+              <Text style={[styles.sidebarTabTxt, darkMode && styles.sidebarTabTxtDark, devTab === "zoom-accounts" && styles.sidebarTabTxtActive]}>Zoom Accounts</Text>
+            </TouchableOpacity>
           </View>
 
           {/* MAIN WORKING AREA replicating Admin Panel layout */}
@@ -9575,6 +9601,14 @@ function MainApp() {
               </ScrollView>
             )}
 
+            {devTab === "zoom-accounts" && ZoomAccountsPage && (
+              <View style={{ flex: 1, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9', padding: 16 }}>
+                <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
+                  <ZoomAccountsPage />
+                </Suspense>
+              </View>
+            )}
+
           </View>
         </View>
       </SafeAreaView>
@@ -9901,7 +9935,11 @@ function MainApp() {
                     <select
                       value={liveClassForm.courseId}
                       onChange={e => setLiveClassForm({ ...liveClassForm, courseId: e.target.value, subjectId: "", topicId: "" })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Course --</option>
                       {lmsCourses.map(c => <option key={c.id} value={c.id}>{c.title || c.name}</option>)}
@@ -9912,7 +9950,11 @@ function MainApp() {
                       disabled={!liveClassForm.courseId}
                       value={liveClassForm.subjectId}
                       onChange={e => setLiveClassForm({ ...liveClassForm, subjectId: e.target.value, topicId: "" })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Subject --</option>
                       {lmsSubjects.filter(s => s.courseId === liveClassForm.courseId).map(s => (
@@ -9925,7 +9967,11 @@ function MainApp() {
                       disabled={!liveClassForm.subjectId}
                       value={liveClassForm.topicId}
                       onChange={e => setLiveClassForm({ ...liveClassForm, topicId: e.target.value })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Topic --</option>
                       {lmsTopics.filter(t => t.subjectId === liveClassForm.subjectId).map(t => (
@@ -10119,7 +10165,11 @@ function MainApp() {
                       <select
                         value={liveClassForm.provider}
                         onChange={e => setLiveClassForm({ ...liveClassForm, provider: e.target.value })}
-                        style={{ width: "100%", height: 38, borderRadius: 8, padding: 8 }}
+                        style={{
+                          width: "100%", height: 38, borderRadius: 8, padding: 8,
+                          backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                          border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                        }}
                       >
                         <option value="zoom">Zoom</option>
                         <option value="google_meet">Google Meet</option>
@@ -10127,6 +10177,58 @@ function MainApp() {
                       </select>
                     </View>
                   </View>
+
+                  {/* Provider Account Selector */}
+                  {liveClassForm.provider === "zoom" && (() => {
+                    const conflictingAccounts = new Set<string>();
+                    const formStart = new Date(`${liveClassForm.startDate}T${liveClassForm.startTime}`).getTime();
+                    const formEnd = formStart + ((liveClassForm.expectedDurationMinutes || 60) * 60 * 1000);
+                    
+                    (lmsLiveSessions || []).forEach((s: any) => {
+                      if (s.provider !== 'zoom' || s.id === editingLiveClass?.id) return;
+                      const sessionStatus = s.status || 'scheduled';
+                      if (sessionStatus === 'CANCELLED' || sessionStatus === 'EXPIRED' || sessionStatus === 'ENDED' || sessionStatus === 'ended' || sessionStatus === 'archived') return;
+                      
+                      const sTime = s.scheduledStartTime?._seconds ? s.scheduledStartTime._seconds * 1000 : new Date(s.scheduledStartTime).getTime();
+                      const sDur = s.expectedDurationMinutes || s.liveSession?.expectedDurationMinutes || 60;
+                      const eTime = sTime + (sDur * 60 * 1000);
+                      
+                      if (formStart < eTime && formEnd > sTime) {
+                         if (s.providerAccountId && s.providerAccountId !== 'auto') {
+                            conflictingAccounts.add(s.providerAccountId);
+                         }
+                      }
+                    });
+
+                    return (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Provider Account</Text>
+                        <select
+                          value={liveClassForm.providerAccountId}
+                          onChange={e => setLiveClassForm({ ...liveClassForm, providerAccountId: e.target.value })}
+                          style={{
+                            width: "100%", height: 38, borderRadius: 8, padding: 8,
+                            backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                            border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                          }}
+                        >
+                          <option value="auto">Auto Assign (Any available)</option>
+                          {(providerAccounts || []).filter(pa => pa.provider === 'zoom').map(pa => {
+                            const isConflicting = conflictingAccounts.has(pa.id);
+                            return (
+                              <option key={pa.id} value={pa.id} disabled={isConflicting}>
+                                {pa.title || pa.name || pa.email || pa.id} {isConflicting ? ' (Booked)' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <Text style={{ fontSize: 11, color: darkMode ? '#888' : '#666', marginTop: 4 }}>
+                          Select a specific Zoom account to use for this class. Accounts already booked for this timeslot are disabled.
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
 
                   {/* Meeting Mode or YouTube URL */}
                   {liveClassForm.provider === "youtube" ? (
@@ -10331,7 +10433,11 @@ function MainApp() {
                     <select
                       value={recordedClassForm.courseId}
                       onChange={e => setRecordedClassForm({ ...recordedClassForm, courseId: e.target.value, subjectId: "", topicId: "" })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Course --</option>
                       {lmsCourses.map(c => <option key={c.id} value={c.id}>{c.title || c.name}</option>)}
@@ -10342,7 +10448,11 @@ function MainApp() {
                       disabled={!recordedClassForm.courseId}
                       value={recordedClassForm.subjectId}
                       onChange={e => setRecordedClassForm({ ...recordedClassForm, subjectId: e.target.value, topicId: "" })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Subject --</option>
                       {lmsSubjects.filter(s => s.courseId === recordedClassForm.courseId).map(s => (
@@ -10355,7 +10465,11 @@ function MainApp() {
                       disabled={!recordedClassForm.subjectId}
                       value={recordedClassForm.topicId}
                       onChange={e => setRecordedClassForm({ ...recordedClassForm, topicId: e.target.value })}
-                      style={{ width: "100%", height: 32, borderRadius: 6, padding: 4 }}
+                      style={{
+                        width: "100%", height: 38, borderRadius: 8, padding: 8,
+                        backgroundColor: darkMode ? "#2a2a2a" : "#fff", color: darkMode ? "#fff" : "#212121",
+                        border: "1px solid " + (darkMode ? "#444" : "#ccc")
+                      }}
                     >
                       <option value="">-- Select Topic --</option>
                       {lmsTopics.filter(t => t.subjectId === recordedClassForm.subjectId).map(t => (
@@ -23983,6 +24097,7 @@ PASTED QUESTION PAPER TEXT:
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile)}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile)}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile)}
                     {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile)}
 
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>ACCESS & AI</Text>}
@@ -26077,6 +26192,14 @@ PASTED QUESTION PAPER TEXT:
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
                             <ProviderAccountsPage />
+                          </Suspense>
+                        </View>
+                      )}
+                      {/* Admin — Zoom SDK Accounts */}
+                      {isAdmin && lmsSub === 'lms-zoom-accounts' && ZoomAccountsPage && (
+                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
+                          <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
+                            <ZoomAccountsPage />
                           </Suspense>
                         </View>
                       )}

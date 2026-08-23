@@ -7,9 +7,10 @@ import { AppError } from '../../../core/errors/AppError';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { logger } from '../../../core/logger';
-
+import { decrypt } from '../../../core/utils/encryption';
+import * as admin from 'firebase-admin';
 export class ZoomProvider implements LiveProvider {
-  
+
   private async getAccessToken(credentials: { accountId?: string, clientId?: string, clientSecret?: string }): Promise<string> {
     const accountId = credentials.accountId || env.ZOOM_ACCOUNT_ID;
     const clientId = credentials.clientId || env.ZOOM_OAUTH_CLIENT_ID;
@@ -20,7 +21,7 @@ export class ZoomProvider implements LiveProvider {
     }
 
     const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-    
+
     try {
       const response = await axios.post(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`, null, {
         headers: {
@@ -35,7 +36,7 @@ export class ZoomProvider implements LiveProvider {
   }
 
   async createSession(config: { title: string; startTime?: string; durationMinutes?: number; teacherId?: string; customProviderId?: string; providerPasscode?: string; meetingMode?: string; providerAccountId?: string; hostUrl?: string; participantUrl?: string; hostKey?: string }) {
-    
+
     // 1. Existing Meeting Mode
     if (config.meetingMode === 'use_existing' || config.customProviderId) {
       const meetingId = config.customProviderId || Math.floor(1000000000 + Math.random() * 9000000000).toString();
@@ -83,7 +84,7 @@ export class ZoomProvider implements LiveProvider {
     try {
       // 3. Authenticate
       const token = await this.getAccessToken(credentials);
-      
+
       // 4. Create Meeting
       const response = await axios.post(
         `https://api.zoom.us/v2/users/${zoomUserId}/meetings`,
@@ -110,7 +111,7 @@ export class ZoomProvider implements LiveProvider {
       );
 
       const meetingData = response.data;
-      
+
       return {
         providerSessionId: meetingData.id.toString(),
         hostId: legacyHost?.id || 'auto', // 'auto' = created by env OAuth (not 'manual')
@@ -194,10 +195,27 @@ export class ZoomProvider implements LiveProvider {
     let oauthAccountEmail: string | undefined;
     let authStrategy = '';
     let currentClientId = '';
-    
+
     try {
       if (liveSession.providerAccountId && liveSession.providerAccountId !== 'auto') {
-        const account = await ProviderAccountService.getAccountById(liveSession.providerAccountId, true);
+        let account: any = null;
+        if (liveSession.isIntegrationTest) {
+          const doc = await admin.firestore().collection('zoom_accounts').doc(liveSession.providerAccountId).get();
+          if (doc.exists) {
+            const acc = doc.data() as any;
+            account = {
+              credentials: {
+                accountId: acc.s2sAccountId ? decrypt(acc.s2sAccountId) : undefined,
+                clientId: acc.s2sClientId ? decrypt(acc.s2sClientId) : undefined,
+                clientSecret: acc.s2sClientSecret ? decrypt(acc.s2sClientSecret) : undefined
+              },
+              email: 'Developer Test Account'
+            };
+          }
+        } else {
+          account = await ProviderAccountService.getAccountById(liveSession.providerAccountId, true);
+        }
+        
         if (account) {
           token = await this.getAccessToken(account.credentials || {});
           oauthAccountEmail = (account as any).email;
@@ -223,7 +241,7 @@ export class ZoomProvider implements LiveProvider {
       const response = await axios.get(`https://api.zoom.us/v2/meetings/${meetingId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       const data = response.data;
       if (data.status === 'ended') {
         return { valid: false, state: 'ENDED', meetingId, uuid: data.uuid };
@@ -234,7 +252,7 @@ export class ZoomProvider implements LiveProvider {
       const status = e.response?.status;
       const zoomCode = e.response?.data?.code;
       const zoomMessage = e.response?.data?.message || e.message;
-      
+
       let detectedState: any = 'UNKNOWN_ERROR';
       if (status === 404 || zoomCode === 3001) {
         detectedState = 'NOT_FOUND';
@@ -289,8 +307,8 @@ ${detectedState}
     if (!meetingId) throw new AppError('This live session does not have a valid Zoom meeting ID.', 500);
 
     logger.info(`[ZoomProvider Evidence] Meeting context: ID=${meetingId}, hostId=${liveSession.hostId}, accountId=${liveSession.providerAccountId}`);
-    
-    let isInstructor = studentInfo && ['super_admin', 'admin', 'teacher', 'staff'].includes(studentInfo.role);
+
+    let isInstructor = studentInfo && ['super_admin', 'admin', 'teacher', 'staff', 'developer'].includes(studentInfo.role);
 
     // Zoom strictly rejects role=1 (Host) signatures if the signing SDK Key does not own the
     // meeting being joined. We must never sign role=1 unless we've positively confirmed the SDK
@@ -306,7 +324,22 @@ ${detectedState}
       // Force role=0 (Participant). They can use the Host Key to claim host inside the meeting.
       logger.info(`[ZoomProvider] Session ${liveSession.id || liveSession.providerSessionId} is a manual meeting; forcing participant role.`);
     } else if (liveSession.providerAccountId) {
-      const account = await ProviderAccountService.getAccountById(liveSession.providerAccountId, true);
+      let account: any = null;
+      if (liveSession.isIntegrationTest) {
+        const doc = await admin.firestore().collection('zoom_accounts').doc(liveSession.providerAccountId).get();
+        if (doc.exists) {
+          const acc = doc.data() as any;
+          account = {
+            credentials: {
+              sdkKey: acc.meetingSdkKey ? decrypt(acc.meetingSdkKey) : undefined,
+              sdkSecret: acc.meetingSdkSecret ? decrypt(acc.meetingSdkSecret) : undefined
+            }
+          };
+        }
+      } else {
+        account = await ProviderAccountService.getAccountById(liveSession.providerAccountId, true);
+      }
+
       if (account?.credentials?.sdkKey && account?.credentials?.sdkSecret) {
         sdkKey = account.credentials.sdkKey;
         sdkSecret = account.credentials.sdkSecret;
@@ -334,7 +367,7 @@ ${detectedState}
     if (!sdkKey || !sdkSecret) {
       throw new AppError('Zoom SDK credentials are not configured. The live session cannot be joined.', 503);
     }
-    
+
     const iat = Math.round(new Date().getTime() / 1000) - 30;
     const exp = iat + 60 * 60 * 2; // 2 hours validity
     const payload = {
@@ -345,7 +378,7 @@ ${detectedState}
       exp: exp,
       tokenExp: exp
     };
-    
+
     // ---- ZAK FETCHING (Moved Up) ----
     let zak: string | undefined;
     if (isInstructor && credentialsConfirmed) {
@@ -355,17 +388,30 @@ ${detectedState}
           const urlObj = new URL(startUrl);
           const zakFromUrl = urlObj.searchParams.get('zak');
           if (zakFromUrl) zak = zakFromUrl;
-        } catch (e: any) {}
+        } catch (e: any) { }
       }
 
       if (!zak) {
         try {
-          const zoomUserId = liveSession.hostId && liveSession.hostId !== 'auto' && liveSession.hostId !== 'manual' 
-             ? liveSession.hostId 
-             : 'me'; 
-          const credentials = liveSession.providerAccountId
-            ? (await ProviderAccountService.getAccountById(liveSession.providerAccountId, true))?.credentials
-            : undefined;
+          const zoomUserId = liveSession.hostId && liveSession.hostId !== 'auto' && liveSession.hostId !== 'manual'
+            ? liveSession.hostId
+            : 'me';
+          let credentials: any = undefined;
+          if (liveSession.providerAccountId) {
+            if (liveSession.isIntegrationTest) {
+              const doc = await admin.firestore().collection('zoom_accounts').doc(liveSession.providerAccountId).get();
+              if (doc.exists) {
+                const acc = doc.data() as any;
+                credentials = {
+                  accountId: acc.s2sAccountId ? decrypt(acc.s2sAccountId) : undefined,
+                  clientId: acc.s2sClientId ? decrypt(acc.s2sClientId) : undefined,
+                  clientSecret: acc.s2sClientSecret ? decrypt(acc.s2sClientSecret) : undefined
+                };
+              }
+            } else {
+              credentials = (await ProviderAccountService.getAccountById(liveSession.providerAccountId, true))?.credentials;
+            }
+          }
           let accessToken = await this.getAccessToken({
             accountId: credentials?.accountId,
             clientId: credentials?.clientId,
@@ -397,16 +443,16 @@ ${detectedState}
     // ---- FORENSIC AUDIT LOGGING ----
     try {
       let diagnosticToken = await this.getAccessToken(
-        liveSession.providerAccountId 
+        liveSession.providerAccountId
           ? (await ProviderAccountService.getAccountById(liveSession.providerAccountId, true))?.credentials || {}
           : {}
       );
-      
+
       const diagRes = await axios.get(`https://api.zoom.us/v2/meetings/${meetingId}`, {
         headers: { Authorization: `Bearer ${diagnosticToken}` }
       });
       const m = diagRes.data;
-      
+
       const oauthMatchesOwner = m.host_email ? true : 'unknown';
       const sdkMatchesOwner = credentialsConfirmed;
       const zakUidMatchesHost = zakDecoded ? (zakDecoded.uid === m.host_id) : false;
@@ -484,7 +530,7 @@ Host start permitted         ${hostStartPermitted ? '✓' : '✗'}
         zak
       }
     };
-    
+
     return finalJoinPayload;
   }
 
@@ -541,19 +587,19 @@ Host start permitted         ${hostStartPermitted ? '✓' : '✗'}
         const urlObj = new URL(startUrl);
         const zakFromUrl = urlObj.searchParams.get('zak');
         if (zakFromUrl) zak = zakFromUrl;
-      } catch (e: any) {}
+      } catch (e: any) { }
     }
 
     if (!zak && meetingExists) {
       try {
-        const zoomUserId = liveSession.hostId && liveSession.hostId !== 'auto' && liveSession.hostId !== 'manual' 
-            ? liveSession.hostId 
-            : 'me'; 
+        const zoomUserId = liveSession.hostId && liveSession.hostId !== 'auto' && liveSession.hostId !== 'manual'
+          ? liveSession.hostId
+          : 'me';
         const zakRes = await axios.get(`https://api.zoom.us/v2/users/${zoomUserId}/token?type=zak`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         zak = zakRes.data.token;
-      } catch (e: any) {}
+      } catch (e: any) { }
     }
 
     let zakDecoded: any = null;
@@ -563,7 +609,7 @@ Host start permitted         ${hostStartPermitted ? '✓' : '✗'}
         if (parts.length === 3) {
           zakDecoded = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     let credentialsConfirmed = false;

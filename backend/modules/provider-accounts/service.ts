@@ -2,6 +2,7 @@ import { ProviderAccountRepository } from './repository';
 import { IProviderAccount } from './types';
 import { AppError } from '../../core/errors/AppError';
 import { encrypt, decrypt } from '../../core/utils/encryption';
+import { db } from '../../infrastructure/firebase';
 
 export class ProviderAccountService {
   private static repo = new ProviderAccountRepository();
@@ -12,8 +13,38 @@ export class ProviderAccountService {
   }
 
   static async getAccountById(id: string, includeSecrets = false): Promise<IProviderAccount | null> {
-    const account = await this.repo.findById(id);
+    let account = await this.repo.findById(id);
+    
+    // Fallback to zoom_accounts if not found in provider_accounts
+    if (!account) {
+      const zoomDoc = await db.collection('zoom_accounts').doc(id).get();
+      if (zoomDoc.exists) {
+        const data = zoomDoc.data();
+        account = {
+          id: zoomDoc.id,
+          provider: 'zoom',
+          displayName: data?.name || 'Zoom Account',
+          status: data?.status === 'invalid' ? 'disconnected' : 'healthy',
+          priority: 0,
+          healthStatus: data?.status || 'unknown',
+          isActive: data?.status !== 'invalid',
+          maxConcurrentMeetings: 1,
+          currentRunningMeetings: 0,
+          credentials: {
+            accountId: (data?.s2sAccountId?.includes(':') ? decrypt(data.s2sAccountId) : (data?.s2sAccountId || '')).trim(),
+            clientId: (data?.s2sClientId?.includes(':') ? decrypt(data.s2sClientId) : (data?.s2sClientId || '')).trim(),
+            clientSecret: (data?.s2sClientSecret?.includes(':') ? decrypt(data.s2sClientSecret) : (data?.s2sClientSecret || '')).trim(),
+            sdkKey: (data?.meetingSdkKey?.includes(':') ? decrypt(data.meetingSdkKey) : (data?.meetingSdkKey || '')).trim(),
+            sdkSecret: (data?.meetingSdkSecret?.includes(':') ? decrypt(data.meetingSdkSecret) : (data?.meetingSdkSecret || '')).trim(),
+          }
+        } as unknown as IProviderAccount;
+        // The above mapping decrypts the fields immediately because provider_accounts only expects secrets to be encrypted,
+        // but zoom_accounts encrypts EVERYTHING (including accountId and clientId).
+      }
+    }
+
     if (!account) return null;
+    
     if (includeSecrets) {
       return this.decryptCredentials(account);
     }

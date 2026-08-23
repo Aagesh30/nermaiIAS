@@ -1358,7 +1358,7 @@ Launch Payload Exists: ${!!session.launchPayload}
     }
 
     // 1. Identity Display Formatting
-    const isInstructor = user && ['super_admin', 'admin', 'teacher', 'staff', 'contributor', 'management'].includes(user.role);
+    const isInstructor = user && ['super_admin', 'admin', 'teacher', 'staff', 'contributor', 'management', 'developer'].includes(user.role);
     const name = user.name || user.displayName || user.email?.split('@')[0] || '';
     let roleStr = user.role || 'student';
     
@@ -1370,6 +1370,8 @@ Launch Payload Exists: ${!!session.launchPayload}
       roleStr = 'admin';
     } else if (roleStr === 'contributor') {
       roleStr = 'contributor';
+    } else if (roleStr === 'developer') {
+      roleStr = 'developer';
     } else {
       roleStr = 'student';
     }
@@ -1430,7 +1432,7 @@ Reason:     ${verifyResult.state}
             providerSessionId: newProviderData.providerSessionId,
             launchPayload: newProviderData.launchPayload || null,
             hostId: newProviderData.hostId || session.hostId, // Preserve old hostId if new doesn't specify
-            providerAccountId: newProviderData.providerAccountId || null,
+            providerAccountId: newProviderData.providerAccountId || session.providerAccountId || null,
             updatedAt: new Date().toISOString()
           });
 
@@ -1481,6 +1483,7 @@ Reason:     ${verifyResult.state}
       nativeReactions: usesNativeMeetingUI
     };
 
+
     if (isInstructor) {
       capabilities.startSession = await LiveSessionPolicy.can(sessionId, user, 'START_SESSION', session);
       capabilities.startAttendance = await LiveSessionPolicy.can(sessionId, user, 'START_ATTENDANCE', session);
@@ -1511,8 +1514,7 @@ Reason:     ${verifyResult.state}
     if (!session) throw new AppError('Live session not found', 404);
 
     const { LiveSessionPolicy } = require('./policy');
-    
-    const isInstructor = user && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'teacher' || user.role === 'staff');
+    const isInstructor = user && (user.role === 'admin' || user.role === 'super_admin' || user.role === 'teacher' || user.role === 'staff' || user.role === 'developer');
     
     const capabilities = {
       startSession: false,
