@@ -515,5 +515,19 @@ export class LiveSessionController {
       res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Server error' });
     }
   }
+
+  static async getAttendance(req: Request, res: Response) {
+    try {
+      const session = await LiveSessionService.getSession(req.params.id);
+      if (!session) {
+        return res.status(404).json({ success: false, message: 'Live session not found' });
+      }
+      const details = (session as any).joinedParticipantsDetails || {};
+      res.status(200).json({ success: true, data: Object.values(details) });
+    } catch (error: any) {
+      logger.error('Error fetching attendance:', error);
+      res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Internal server error' });
+    }
+  }
 }
 

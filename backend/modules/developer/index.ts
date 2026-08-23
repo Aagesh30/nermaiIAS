@@ -1,8 +1,19 @@
 import { Router } from "express";
 import { DeveloperController } from "./controller";
 import { requireAuth, requireRole } from "../../core/middleware/auth.middleware";
+import { AppError } from "../../core/errors/AppError";
 
 const router = Router();
+
+const requireDeveloperOnly = (req: any, res: any, next: any) => {
+  if (!req.user) {
+    return next(new AppError('Forbidden: User not authenticated', 403));
+  }
+  if (req.user.role !== 'developer') {
+    return next(new AppError('Forbidden: Developer access only', 403));
+  }
+  next();
+};
 
 /**
  * ==========================================
@@ -22,16 +33,16 @@ router.get("/page-locks", DeveloperController.getPageLocks);
 router.use(requireAuth);
 
 // Role permissions reading is allowed for all admin/staff roles so their frontend can configure views
-router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff']), DeveloperController.getRolePermissions);
+router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff', 'developer']), DeveloperController.getRolePermissions);
 
 // Allow admin/staff roles to submit approval request notifications
-router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff']), (req, res, next) => {
+router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff', 'developer']), (req, res, next) => {
   req.params.name = "notifications";
   next();
 }, DeveloperController.createDocument);
 
-// All other developer routes require super_admin role
-router.use(requireRole(['super_admin']));
+// All other developer routes require developer role only (super_admin and admin are forbidden)
+router.use(requireDeveloperOnly);
 
 // Collection overview
 router.get("/collections", DeveloperController.listCollections);

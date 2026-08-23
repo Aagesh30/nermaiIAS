@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Video, Calendar, Clock, Play, Users, ArrowRight, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../core/auth/AuthProvider';
-import api from '../../core/api';
+import { useAuth } from '../core/auth/AuthProvider';
+import api from '../core/api';
 
 interface LiveSession {
   id: string;
@@ -122,7 +122,7 @@ export const StaffClassesPage = () => {
                 <div className="flex justify-between items-start mb-4">
                   <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase border ${
                     session.status === 'LIVE' ? 'bg-red-500/20 text-red-400 border-red-500/30 animate-pulse' :
-                    session.status === 'COMPLETED' || session.status === 'ENDED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
+                    session.status === 'ENDED' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
                     'bg-white/5 text-white/60 border-white/10'
                   }`}>
                     {session.status}

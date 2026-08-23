@@ -28,8 +28,8 @@ export class LiveSessionPolicy {
     const userId = user.userId || user.id;
     if (!userId) return false;
     
-    // Platform Admins retain override permissions regardless of staff assignments
-    if (['super_admin', 'admin'].includes(user.role)) {
+    // Platform Super Admin retains global override permissions
+    if (user.role === 'super_admin') {
       return true; 
     }
 
@@ -43,18 +43,33 @@ export class LiveSessionPolicy {
       return false;
     }
 
-    // Unassigned Staff or Management - must check assignments
+    // Fetch session and class documents
     let session = sessionData;
     if (!session) {
       const sessionSnap = await db.collection('live_sessions').doc(sessionId).get();
       if (!sessionSnap.exists) return false;
-      session = sessionSnap.data() as ILiveSession;
+      session = { id: sessionSnap.id, ...sessionSnap.data() } as ILiveSession;
     }
 
-    // Check if the user is in the assignedStaffIds array
-    const isAssigned = session.assignedStaffIds?.includes(userId) || false;
+    const classSnap = await db.collection('classes').doc(session.classId).get();
+    const cls = classSnap.exists ? classSnap.data()! : {};
 
-    if (isAssigned) {
+    // 1. Host or Creator Check
+    const hostUserId = session.host?.userId || session.hostId || cls.teacherId || cls.hostId;
+    const isHost = hostUserId === userId;
+    const isCreator = cls.createdBy === userId;
+
+    // 2. Participant checks
+    const participantAdminIds = session.participantAdminIds || cls.participantAdminIds || [];
+    const participantTeacherIds = session.participantTeacherIds || cls.participantTeacherIds || [];
+    const assignedStaffIds = session.assignedStaffIds || [];
+
+    const isAssignedAdmin = participantAdminIds.includes(userId);
+    const isAssignedTeacher = participantTeacherIds.includes(userId) || assignedStaffIds.includes(userId);
+
+    const hasAccess = isHost || isCreator || isAssignedAdmin || isAssignedTeacher;
+
+    if (hasAccess) {
       switch (capability) {
         case 'JOIN_SESSION':
         case 'START_SESSION':
@@ -62,15 +77,14 @@ export class LiveSessionPolicy {
         case 'END_ATTENDANCE':
         case 'END_SESSION':
         case 'KICK_PARTICIPANT':
-          return true; // Assigned staff can moderate
+          return true; // Authorized staff/hosts can moderate/join
         case 'ASSIGN_STAFF':
-          return false; // Only admins can re-assign staff
+          return isHost || ['admin'].includes(user.role); // Only host or admins can assign staff
         default:
           return false;
       }
     }
 
-    // Unassigned staff
     return false;
   }
 

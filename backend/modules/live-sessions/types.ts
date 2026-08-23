@@ -20,6 +20,10 @@ export interface ILiveSession extends BaseAuditFields {
   // Session Ownership & Audit
   sessionStartedBy?: string;
   sessionEndedBy?: string;
+  host?: { userId: string; role: 'TEACHER' | 'ADMIN' | 'MANAGEMENT' };
+  coHosts?: Array<{ userId: string; role: 'TEACHER' | 'ADMIN' | 'MANAGEMENT' }>;
+  participantAdminIds?: string[];
+  participantTeacherIds?: string[];
   assignedStaffIds?: string[]; // Array of user IDs assigned as moderators
   staffAssignmentsHistory?: Array<{
     action: 'ASSIGNED' | 'REMOVED';
@@ -35,6 +39,16 @@ export interface ILiveSession extends BaseAuditFields {
     endedAt?: string;
     startedBy?: string;
     endedBy?: string;
+  };
+  
+  joinedParticipantsDetails?: {
+    [userId: string]: {
+      id: string;
+      name: string;
+      role: string;
+      regNo: string;
+      joinedAt: string;
+    }
   };
   
   // Recording Metadata Placeholders

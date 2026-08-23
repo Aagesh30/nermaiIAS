@@ -23,6 +23,23 @@ export async function seedSuperAdmin() {
       console.log('ℹ️ Super admin already exists in Firestore. Seeding skipped.');
     }
 
+    const devSnapshot = await adminRef.where('role', '==', 'developer').limit(1).get();
+    if (devSnapshot.empty) {
+      console.log('⏳ No developer found in Firestore. Seeding default developer...');
+      const devPasswordHash = await bcrypt.hash('Unistrix@24252630', 12);
+      await adminRef.doc('developer_root').set({
+        username: 'developer@unistrix',
+        email: 'developer@unistrix',
+        name: 'Unistrix Developer',
+        role: 'developer',
+        passwordHash: devPasswordHash,
+        tenantId: 'default_tenant',
+        isDeleted: false,
+        createdAt: new Date().toISOString()
+      });
+      console.log('✅ Default developer seeded successfully in Firestore.');
+    }
+
     const staffRef = db.collection('staff');
     const staffDoc = await staffRef.doc('super_admin_root').get();
     if (!staffDoc.exists) {

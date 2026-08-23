@@ -34,7 +34,7 @@ export class LiveSessionService {
     return { id: doc.id, ...doc.data() } as ILiveSession;
   }
   
-  static async listSessions(filters?: { teacherId?: string }): Promise<ILiveSession[]> {
+  static async listSessions(filters?: { teacherId?: string }, user?: { userId: string; role: string }): Promise<ILiveSession[]> {
     const now = Date.now();
 
     // Cache courses and batches for fast lookup
@@ -84,6 +84,11 @@ export class LiveSessionService {
        if (filters?.teacherId) {
          const hostId = liveSession?.hostId || cls.teacherId || cls.hostId;
          if (hostId !== filters.teacherId) continue;
+       }
+
+       // Apply visibility check!
+       if (user && !this.canSeeLiveClass(user, cls, liveSession)) {
+         continue;
        }
 
        const scheduledStartTime = liveSession?.scheduledStartTime || cls.scheduledStartTime;
@@ -584,10 +589,103 @@ export class LiveSessionService {
     }
   }
 
-  static async createSession(data: { classId: string, provider: string, teacherId?: string, customProviderId?: string, providerPasscode?: string, providerAccountId?: string, meetingMode?: string, hostUrl?: string, participantUrl?: string, hostKey?: string, meetingCode?: string }): Promise<ILiveSession> {
+  static async validateParticipants(
+    hostUserId: string | undefined,
+    adminIds: string[] | undefined,
+    teacherIds: string[] | undefined
+  ) {
+    const allIds = new Set<string>();
+    if (hostUserId) allIds.add(hostUserId);
+
+    if (adminIds) {
+      for (const id of adminIds) {
+        if (!id) continue;
+        if (allIds.has(id)) {
+          throw new AppError(`User ${id} cannot be added multiple times`, 400);
+        }
+        allIds.add(id);
+
+        const userDoc = await db.collection('users').doc(id).get();
+        if (!userDoc.exists || userDoc.data()?.isDeleted === true) {
+          throw new AppError(`Admin/User ${id} does not exist or is deleted`, 400);
+        }
+        const role = userDoc.data()?.role;
+        const validAdminRoles = ['admin', 'super_admin', 'management', 'contributor'];
+        if (!validAdminRoles.includes(role)) {
+          throw new AppError(`User ${id} does not have an admin-compatible role (role is ${role})`, 400);
+        }
+      }
+    }
+
+    if (teacherIds) {
+      for (const id of teacherIds) {
+        if (!id) continue;
+        if (allIds.has(id)) {
+          throw new AppError(`User ${id} cannot be added multiple times`, 400);
+        }
+        allIds.add(id);
+
+        const userDoc = await db.collection('users').doc(id).get();
+        if (!userDoc.exists || userDoc.data()?.isDeleted === true) {
+          throw new AppError(`Teacher/User ${id} does not exist or is deleted`, 400);
+        }
+        const role = userDoc.data()?.role;
+        const validTeacherRoles = ['teacher', 'staff', 'admin', 'super_admin', 'management', 'contributor'];
+        if (!validTeacherRoles.includes(role) && role !== 'student') {
+          // If it's some custom staff role, we allow it. Just prevent students.
+        } else if (role === 'student') {
+          throw new AppError(`User ${id} is a student and cannot be assigned as a teacher`, 400);
+        }
+      }
+    }
+  }
+
+  static canSeeLiveClass(user: { userId: string; role: string }, cls: any, liveSession: any): boolean {
+    if (user.role === 'super_admin') return true;
+
+    // 1. Host or Creator check
+    const hostUserId = liveSession?.host?.userId || liveSession?.hostId || cls.teacherId || cls.hostId;
+    if (hostUserId === user.userId) return true;
+    if (cls.createdBy === user.userId) return true;
+
+    // 2. Participant admins check
+    const participantAdminIds = liveSession?.participantAdminIds || cls.participantAdminIds || [];
+    if (participantAdminIds.includes(user.userId)) return true;
+
+    // 3. Participant teachers check
+    const participantTeacherIds = liveSession?.participantTeacherIds || cls.participantTeacherIds || [];
+    if (participantTeacherIds.includes(user.userId)) return true;
+
+    // 4. Assigned staff check
+    const assignedStaffIds = liveSession?.assignedStaffIds || [];
+    if (assignedStaffIds.includes(user.userId)) return true;
+
+    return false;
+  }
+
+  static async createSession(data: { 
+    classId: string, 
+    provider: string, 
+    teacherId?: string, 
+    customProviderId?: string, 
+    providerPasscode?: string, 
+    providerAccountId?: string, 
+    meetingMode?: string, 
+    hostUrl?: string, 
+    participantUrl?: string, 
+    hostKey?: string, 
+    meetingCode?: string,
+    host?: any,
+    coHosts?: any[],
+    participantAdminIds?: string[],
+    participantTeacherIds?: string[]
+  }): Promise<ILiveSession> {
     const classRepo = new ClassRepository();
     const classData = await classRepo.findById(data.classId);
     if (!classData) throw new AppError('Class not found', 404);
+
+    const hostUserId = data.host?.userId || data.teacherId;
+    await this.validateParticipants(hostUserId, data.participantAdminIds, data.participantTeacherIds);
 
     let providerSessionId = null;
     let launchPayload = null;
@@ -614,6 +712,10 @@ export class LiveSessionService {
       expectedDurationMinutes: classData.expectedDurationMinutes,
       attendance: { status: 'NOT_STARTED' },
       assignedStaffIds: data.teacherId ? [data.teacherId] : [],
+      host: data.host || null,
+      coHosts: data.coHosts || [],
+      participantAdminIds: data.participantAdminIds || [],
+      participantTeacherIds: data.participantTeacherIds || [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isDeleted: false
@@ -706,9 +808,9 @@ Launch Payload Exists: ${!!session.launchPayload}
       // 3. Start Session
       const launchData = await providerInstance.startSession(session);
 
-      // 4. Mark JOINING (Will move to HOST_CONNECTED and LIVE when Zoom webhook fires)
+      // 4. Mark LIVE immediately (Bypassing Zoom Webhook requirement for local dev)
       await db.collection(this.collection).doc(sessionId).update({
-        status: 'JOINING',
+        status: 'LIVE',
         actualStartTime: session.actualStartTime || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
@@ -736,7 +838,7 @@ Launch Payload Exists: ${!!session.launchPayload}
       return {
         sessionId: session.id,
         provider: session.provider,
-        status: 'JOINING',
+        status: 'LIVE',
         launch: launchData,
         attendance: { started: false }
       };
@@ -753,6 +855,14 @@ Launch Payload Exists: ${!!session.launchPayload}
   static async editSession(sessionId: string, updates: Partial<ILiveSession>, adminId: string) {
     const session = await this.getSession(sessionId);
     if (!session) throw new AppError('Live session not found', 404);
+    
+    const hostUserId = updates.host?.userId || session.host?.userId || session.hostId;
+    await this.validateParticipants(
+      hostUserId, 
+      updates.participantAdminIds !== undefined ? updates.participantAdminIds : session.participantAdminIds,
+      updates.participantTeacherIds !== undefined ? updates.participantTeacherIds : session.participantTeacherIds
+    );
+
     // Removed strict status check to allow admins to edit Zoom room details anytime
     await db.collection(this.collection).doc(sessionId).update({
       ...updates,
@@ -1182,6 +1292,27 @@ Launch Payload Exists: ${!!session.launchPayload}
 
     this.validateTransition(session.status, 'JOIN');
 
+    if (user) {
+      try {
+        const userId = user.id || user.userId;
+        if (userId) {
+          const joinedUser = {
+            id: userId,
+            name: user.name || user.displayName || user.firstName || 'Unknown',
+            role: user.role || 'student',
+            regNo: user.regNo || user.employeeId || '-',
+            joinedAt: new Date().toISOString()
+          };
+          const db = require('firebase-admin').firestore();
+          await db.collection(this.collection).doc(sessionId).update({
+            [`joinedParticipantsDetails.${userId}`]: joinedUser
+          });
+        }
+      } catch (err) {
+        console.error("Failed to append joined participant to live session:", err);
+      }
+    }
+
     // Enforce participant moderation & waiting room for student roles
     if (user && (user.role === 'student' || !user.role)) {
       if (session.status === 'SCHEDULED' || session.status === 'DRAFT') {
@@ -1227,27 +1358,32 @@ Launch Payload Exists: ${!!session.launchPayload}
     }
 
     // 1. Identity Display Formatting
-    const isInstructor = user && ['super_admin', 'admin', 'teacher', 'staff'].includes(user.role);
-    let finalDisplayName = user.name || user.displayName || user.email?.split('@')[0] || 'User';
-
-    if (isInstructor) {
-      if (user.role === 'admin' || user.role === 'super_admin') {
-        finalDisplayName = `Administrator - ${user.name || user.displayName || 'Staff'}`;
-      } else {
-        finalDisplayName = `Prof. ${user.name || user.displayName || 'Instructor'}`;
-      }
-    } else if (user.role === 'student' || !user.role) {
-      let rollNumber = user.rollNumber;
-      if (!rollNumber) {
-        try {
-          const profileSnap = await db.collection('student_profiles').doc(user.userId || user.id).get();
-          rollNumber = profileSnap.data()?.rollNumber;
-        } catch(e) {}
-      }
-      if (rollNumber) {
-        finalDisplayName = `${rollNumber} - ${user.name || user.displayName || user.email?.split('@')[0]}`;
-      }
+    const isInstructor = user && ['super_admin', 'admin', 'teacher', 'staff', 'contributor', 'management'].includes(user.role);
+    const name = user.name || user.displayName || user.email?.split('@')[0] || '';
+    let roleStr = user.role || 'student';
+    
+    if (roleStr === 'teacher' || roleStr === 'staff') {
+      roleStr = 'faculty';
+    } else if (roleStr === 'super_admin') {
+      roleStr = 'superadmin';
+    } else if (roleStr === 'admin') {
+      roleStr = 'admin';
+    } else if (roleStr === 'contributor') {
+      roleStr = 'contributor';
+    } else {
+      roleStr = 'student';
     }
+
+    let rollNumber = user.rollNumber || '';
+    if (!rollNumber && (!user.role || user.role === 'student')) {
+      try {
+        const profileSnap = await db.collection('student_profiles').doc(user.userId || user.id).get();
+        rollNumber = profileSnap.data()?.rollNumber || '';
+      } catch(e) {}
+    }
+
+    // Format: name - rollNumber - role (leaving blanks if missing)
+    let finalDisplayName = `${name} - ${rollNumber} - ${roleStr}`;
     
     // Pass the formatted name to the provider payload generator
     const userWithIdentity = { ...user, displayName: finalDisplayName };

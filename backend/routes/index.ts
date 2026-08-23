@@ -63,6 +63,7 @@ router.use("/notification", notificationRouter);
 // ERP Routes
 router.use("/erp/student", studentRouter);
 router.use("/erp/staff", staffRouter);
+router.use("/staff", staffRouter);
 router.use("/erp/fees", feesRouter);
 router.use("/erp/marks", marksRouter);
 router.use("/erp/id-card", idCardRouter);

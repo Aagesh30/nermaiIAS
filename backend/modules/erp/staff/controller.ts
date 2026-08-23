@@ -523,4 +523,83 @@ export class StaffController {
             });
         }
     }
+
+    static async getLiveSessionCandidates(req: Request, res: Response) {
+        try {
+            const usersSnap = await db.collection("users").get();
+            const teachers: any[] = [];
+            const management: any[] = [];
+            const admins: any[] = [];
+
+            usersSnap.docs.forEach(doc => {
+                const u = doc.data();
+                const id = doc.id;
+                const name = u.name || u.username || '';
+                const role = u.role;
+                const isDeleted = u.isDeleted === true;
+
+                if (isDeleted) return;
+
+                const candidate = { id, name, role };
+                if (role === 'teacher' || role === 'staff') {
+                    teachers.push(candidate);
+                } else if (role === 'admin' || role === 'super_admin' || role === 'management' || role === 'contributor') {
+                    admins.push(candidate);
+                }
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    teachers,
+                    management,
+                    admins
+                }
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while fetching candidates"
+            });
+        }
+    }
+
+    static async getStaffLiveSessionsMe(req: Request, res: Response) {
+        try {
+            if (!req.user) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+            const { LiveSessionService } = require("../../live-sessions/service");
+            const sessions = await LiveSessionService.listSessions({}, req.user);
+            return res.status(200).json({ success: true, data: sessions });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while fetching live sessions"
+            });
+        }
+    }
+
+    static async getStaffLiveSessionsById(req: Request, res: Response) {
+        try {
+            const staffUserId = req.params.id;
+            const { LiveSessionService } = require("../../live-sessions/service");
+            const userDoc = await db.collection("users").doc(staffUserId).get();
+            if (!userDoc.exists) {
+                return res.status(404).json({ success: false, message: "Staff user not found" });
+            }
+            const userData = userDoc.data()!;
+            const targetUser = {
+                userId: staffUserId,
+                role: userData.role || 'teacher'
+            };
+            const sessions = await LiveSessionService.listSessions({}, targetUser);
+            return res.status(200).json({ success: true, data: sessions });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred while fetching live sessions"
+            });
+        }
+    }
 }

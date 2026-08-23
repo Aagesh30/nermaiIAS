@@ -68,6 +68,21 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
+  const [selectedAdminIds, setSelectedAdminIds] = useState<string[]>([]);
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState<string[]>([]);
+
+  const handleAdminToggle = (id: string) => {
+    setSelectedAdminIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleTeacherToggle = (id: string) => {
+    setSelectedTeacherIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -155,12 +170,16 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
               ? JSON.stringify({ userId: editingClass.liveSession.coHosts[0].userId, role: editingClass.liveSession.coHosts[0].role }) 
               : ''
           });
+          setSelectedAdminIds(editingClass.liveSession?.participantAdminIds || []);
+          setSelectedTeacherIds(editingClass.liveSession?.participantTeacherIds || []);
           
           if (derivedProvider === 'youtube' && editingClass.encryptedVideoId) {
             setYoutubeUrl(editingClass.encryptedVideoId);
           }
 
         } else if (prefilledTopicId) {
+          setSelectedAdminIds([]);
+          setSelectedTeacherIds([]);
           const topic = fetchedTopics.find((t: any) => t.id === prefilledTopicId);
           const subject = fetchedSubjects.find((s: any) => s.id === topic?.subjectId);
           
@@ -241,7 +260,9 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
           
           const updates: any = {
              scheduledStartTime: localDate.toISOString(),
-             expectedDurationMinutes: formData.expectedDurationMinutes
+             expectedDurationMinutes: formData.expectedDurationMinutes,
+             participantAdminIds: selectedAdminIds,
+             participantTeacherIds: selectedTeacherIds
           };
 
           if (formData.host) updates.host = JSON.parse(formData.host);
@@ -306,7 +327,9 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
             hostKey: formData.hostKey,
             meetingCode: formData.meetingCode,
             host: formData.host ? JSON.parse(formData.host) : undefined,
-            coHosts: formData.coHost ? [JSON.parse(formData.coHost)] : []
+            coHosts: formData.coHost ? [JSON.parse(formData.coHost)] : [],
+            participantAdminIds: selectedAdminIds,
+            participantTeacherIds: selectedTeacherIds
           });
         } else if (classType === 'youtube_recorded') {
           const uploadData = new FormData();
@@ -661,7 +684,14 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
                       label="Host *"
                       value={formData.host}
                       onChange={(e: any) => {
-                        if (!e.target.value.startsWith('disabled_')) setFormData({ ...formData, host: e.target.value });
+                        if (!e.target.value.startsWith('disabled_')) {
+                          setFormData({ ...formData, host: e.target.value });
+                          try {
+                            const parsedHost = JSON.parse(e.target.value);
+                            setSelectedAdminIds(prev => prev.filter(id => id !== parsedHost.userId));
+                            setSelectedTeacherIds(prev => prev.filter(id => id !== parsedHost.userId));
+                          } catch (err) {}
+                        }
                       }}
                       required
                       options={hostOptions}
@@ -686,6 +716,70 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
                         .map((c: any) => ({ value: JSON.stringify({ userId: c.id, role: 'ADMIN' }), label: `${c.name} (ADMIN)` }))
                   ]}
                 />
+              </div>
+              
+              {/* Add Class Participants Section */}
+              <div className="mt-4 border-t border-gray-200 dark:border-[#8B0000]/20 pt-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
+                  Add Class Participants (Optional)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Select Admins */}
+                  <div className="flex flex-col gap-1.5 mb-4">
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                      Additional Admins
+                    </label>
+                    <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-[#8B0000]/40 rounded-xl p-3 bg-white dark:bg-[#1a1a2e] space-y-1.5 shadow-sm">
+                      {candidates.admins
+                        .filter((c: any) => !formData.host || formData.host.startsWith('disabled_') || JSON.parse(formData.host).userId !== c.id)
+                        .map((c: any) => {
+                          const isSelected = selectedAdminIds.includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-center space-x-2.5 p-1 hover:bg-gray-100 dark:hover:bg-[#8B0000]/20 rounded-lg cursor-pointer transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleAdminToggle(c.id)}
+                                className="accent-[#8B0000] rounded focus:ring-0 w-4 h-4 cursor-pointer"
+                              />
+                              <span className="text-sm text-gray-900 dark:text-gray-200 font-medium">{c.name}</span>
+                            </label>
+                          );
+                        })}
+                      {candidates.admins.filter((c: any) => !formData.host || formData.host.startsWith('disabled_') || JSON.parse(formData.host).userId !== c.id).length === 0 && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 p-2 italic">No additional admins available</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Select Teachers */}
+                  <div className="flex flex-col gap-1.5 mb-4">
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                      Teachers
+                    </label>
+                    <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-[#8B0000]/40 rounded-xl p-3 bg-white dark:bg-[#1a1a2e] space-y-1.5 shadow-sm">
+                      {candidates.teachers
+                        .filter((c: any) => !formData.host || formData.host.startsWith('disabled_') || JSON.parse(formData.host).userId !== c.id)
+                        .map((c: any) => {
+                          const isSelected = selectedTeacherIds.includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-center space-x-2.5 p-1 hover:bg-gray-100 dark:hover:bg-[#8B0000]/20 rounded-lg cursor-pointer transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleTeacherToggle(c.id)}
+                                className="accent-[#8B0000] rounded focus:ring-0 w-4 h-4 cursor-pointer"
+                              />
+                              <span className="text-sm text-gray-900 dark:text-gray-200 font-medium">{c.name}</span>
+                            </label>
+                          );
+                        })}
+                      {candidates.teachers.filter((c: any) => !formData.host || formData.host.startsWith('disabled_') || JSON.parse(formData.host).userId !== c.id).length === 0 && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 p-2 italic">No teachers available</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

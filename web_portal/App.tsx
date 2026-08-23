@@ -2171,6 +2171,7 @@ function MainApp() {
   // LMS Integrated Module State
   const [lmsResources, setLmsResources] = useState<any[]>([]);
   const [lmsLiveSessions, setLmsLiveSessions] = useState<any[]>([]);
+  const [joinedSessions, setJoinedSessions] = useState<string[]>([]);
   const [lmsRecordedClasses, setLmsRecordedClasses] = useState<any[]>([]);
   const [lmsDailyContent, setLmsDailyContent] = useState<any[]>([]);
   const [lmsLoading, setLmsLoading] = useState(false);
@@ -2183,6 +2184,16 @@ function MainApp() {
   const [lmsResourceError, setLmsResourceError] = useState<string | null>(null);
   const [lmsCourses, setLmsCourses] = useState<any[]>([]);
   const [erpBatches, setErpBatches] = useState<any[]>([]);
+  const [selectedAdminIds, setSelectedAdminIds] = useState<string[]>([]);
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState<string[]>([]);
+  const [liveSessionCandidates, setLiveSessionCandidates] = useState<{ teachers: any[], admins: any[], management: any[] }>({ teachers: [], admins: [], management: [] });
+  
+  const handleAdminToggle = (id: string) => {
+    setSelectedAdminIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+  const handleTeacherToggle = (id: string) => {
+    setSelectedTeacherIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
   const [lmsResourceSearch, setLmsResourceSearch] = useState("");
   const [lmsResourceCategory, setLmsResourceCategory] = useState("All");
   const [selectedLiveSession, setSelectedLiveSession] = useState<any>(null);
@@ -2246,6 +2257,11 @@ function MainApp() {
     distributions: [] // Array of { type: 'course', courseId: '', subjectId: '', topicId: '', classId: '' }
   });
 
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceList, setAttendanceList] = useState<any[]>([]);
+  const [selectedAttendanceTitle, setSelectedAttendanceTitle] = useState("");
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
   const [showLiveClassModal, setShowLiveClassModal] = useState(false);
   const [editingLiveClass, setEditingLiveClass] = useState<any | null>(null);
   const [liveClassForm, setLiveClassForm] = useState<any>({
@@ -2268,7 +2284,8 @@ function MainApp() {
     customProviderId: "",
     providerPasscode: "",
     hostKey: "",
-    meetingCode: ""
+    meetingCode: "",
+    host: ""
   });
 
   const [showRecordedClassModal, setShowRecordedClassModal] = useState(false);
@@ -2349,7 +2366,7 @@ function MainApp() {
   const [showPdfTopicDropdown, setShowPdfTopicDropdown] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState("");
   const [guestPhoneInput, setGuestPhoneInput] = useState("");
-  const [guestContentTab, setGuestContentTab] = useState<"resources" | "tests">("resources");
+  const [guestContentTab, setGuestContentTab] = useState<"resources" | "tests" | "apply">("resources");
   const [showNoticesPanel, setShowNoticesPanel] = useState(false);
   const [showContactPanel, setShowContactPanel] = useState(false);
 
@@ -2362,7 +2379,7 @@ function MainApp() {
   const [dpHour, setDpHour] = useState(12);
   const [dpMinute, setDpMinute] = useState(0);
 
-  const initializeDatePicker = (val) => {
+  const initializeDatePicker = (val: any) => {
     let date = new Date();
     if (val) {
       const cleaned = val.replace("T", " ");
@@ -2394,7 +2411,7 @@ function MainApp() {
     setShowDatePickerModal(false);
   };
 
-  const getDaysInGrid = (month, year) => {
+  const getDaysInGrid = (month: number, year: number) => {
     const firstDayIndex = new Date(year, month, 1).getDay();
     const totalDays = new Date(year, month + 1, 0).getDate();
     const prevMonthTotalDays = new Date(year, month, 0).getDate();
@@ -2450,7 +2467,7 @@ function MainApp() {
     }
 
     try {
-      const googleUser = await handleFirebaseGoogleSignIn(guestNameInput, guestPhoneInput);
+      const googleUser = (await handleFirebaseGoogleSignIn(guestNameInput, guestPhoneInput)) as any;
       const email = googleUser.email;
       if (!email) {
         Alert.alert("Google Auth Error", "No email returned from Google account.");
@@ -2513,7 +2530,7 @@ function MainApp() {
     return () => clearInterval(timer);
   }, []);
 
-  const calculateExpiry = (timerOption, customExpiresAt) => {
+  const calculateExpiry = (timerOption: any, customExpiresAt: any) => {
     if (!timerOption || timerOption === "none") return null;
     const now = new Date();
     if (timerOption === "24h") {
@@ -2546,7 +2563,7 @@ function MainApp() {
     return null;
   };
 
-  const formatCountdown = (expiresAtStr) => {
+  const formatCountdown = (expiresAtStr: any) => {
     if (!expiresAtStr) return null;
     const expiry = new Date(expiresAtStr).getTime();
     const diff = expiry - Date.now();
@@ -4007,7 +4024,7 @@ function MainApp() {
               const savedGuestName = localStorage.getItem("nermai_pending_guest_name") || googleUser.displayName || "";
               const savedGuestPhone = localStorage.getItem("nermai_pending_guest_phone") || "";
 
-              const res = await api.current.post("/crm/leads/guest-login", {
+              const res = await api.post("/crm/leads/guest-login", {
                 email: email.toLowerCase(),
                 name: savedGuestName.trim() || googleUser.displayName,
                 phone: savedGuestPhone.trim()
@@ -5310,6 +5327,7 @@ function MainApp() {
       if (isAdmin) {
         promises.push(api.get("/classes").catch((err) => { console.error("[loadLmsLookups] /classes failed:", err); return []; }));
         promises.push(api.get("/erp/batch").catch((err) => { console.error("[loadLmsLookups] /erp/batch failed:", err); return []; }));
+        promises.push(api.get("/staff/live-session-candidates").catch((err) => { console.error("[loadLmsLookups] candidates failed:", err); return []; }));
       }
 
       const results = await Promise.all(promises);
@@ -5325,8 +5343,10 @@ function MainApp() {
       if (isAdmin) {
         const classRes = results[3];
         const batchRes = results[4];
+        const candRes = results[5];
         setLmsClassesList(classRes?.data || classRes || []);
         setErpBatches(batchRes?.data || batchRes || []);
+        setLiveSessionCandidates(candRes?.data?.data || candRes?.data || candRes || { teachers: [], management: [], admins: [] });
       }
     } catch (e) {
       console.error("[loadLmsLookups] Failed loading LMS lookups:", e);
@@ -5689,7 +5709,9 @@ function MainApp() {
         if (liveSessionId) {
           const updates: any = {
             scheduledStartTime: scheduledStartTimeIso,
-            expectedDurationMinutes: Number(expectedDurationMinutes)
+            expectedDurationMinutes: Number(expectedDurationMinutes),
+            participantAdminIds: selectedAdminIds,
+            participantTeacherIds: selectedTeacherIds
           };
           if (provider === "youtube") {
             updates.providerSessionId = "youtube";
@@ -5725,21 +5747,29 @@ function MainApp() {
 
         // Create Live Session Zoom details
         const localDate = new Date(`${startDate}T${startTime}:00`);
-        await api.post("/live-sessions/create", {
-          classId: newClassId,
-          provider,
-          scheduledStartTime: localDate.toISOString(),
-          expectedDurationMinutes: Number(expectedDurationMinutes),
-          meetingMode: provider === "youtube" ? "use_existing" : meetingMode,
-          providerAccountId,
-          customProviderId,
-          providerPasscode,
-          hostUrl,
-          participantUrl: provider === "youtube" ? youtubeUrl : participantUrl,
-          hostKey,
-          meetingCode
-        });
-        Alert.alert("Success", "Live class session scheduled successfully.");
+        try {
+          await api.post("/live-sessions/create", {
+            classId: newClassId,
+            provider,
+            scheduledStartTime: localDate.toISOString(),
+            expectedDurationMinutes: Number(expectedDurationMinutes),
+            meetingMode: provider === "youtube" ? "use_existing" : meetingMode,
+            providerAccountId,
+            customProviderId,
+            providerPasscode,
+            hostUrl,
+            participantUrl: provider === "youtube" ? youtubeUrl : participantUrl,
+            hostKey,
+            meetingCode,
+            participantAdminIds: selectedAdminIds,
+            participantTeacherIds: selectedTeacherIds
+          });
+          Alert.alert("Success", "Live class session scheduled successfully.");
+        } catch (err: any) {
+          // Rollback the created class since session creation failed
+          await api.delete(`/classes/${newClassId}`).catch(() => {});
+          throw err;
+        }
       }
 
       setShowLiveClassModal(false);
@@ -6417,7 +6447,7 @@ function MainApp() {
       const end = new Date(start.getTime() + 60 * 60 * 1000);
       const startStr = start.getFullYear() + "-" + String(start.getMonth() + 1).padStart(2, "0") + "-" + String(start.getDate()).padStart(2, "0") + "T" + String(start.getHours()).padStart(2, "0") + ":" + String(Math.floor(start.getMinutes() / 5) * 5).padStart(2, "0");
       const endStr = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0") + "T" + String(end.getHours()).padStart(2, "0") + ":" + String(Math.floor(end.getMinutes() / 5) * 5).padStart(2, "0");
-      setNewPdfTest({ title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online" });
+      setNewPdfTest({ title: "", startTime: startStr, endTime: endStr, marksPerQ: "", negMarks: "", unattendedMarks: "", totalMarks: "", targetAudience: "", targetBatch: "", requireFeedback: false, testType: "mock", subject: "", topic: "", testMode: "online", allowOfflineDirectly: false });
       setTestSub("available");
       loadTests();
     } catch (e: any) {
@@ -6484,24 +6514,6 @@ function MainApp() {
 
     setAuthLoading(true);
 
-    // Developer portal shortcut — handled client-side + validated server-side
-    if (u === "developer@unistrix" && p === "Unistrix@24252630") {
-      try {
-        const res = await api.post("/developer/login", { username: u, password: p });
-        const devData = { role: "developer", name: "Unistrix Developer", username: u, userId: "dev_unistrix" };
-        clearExamState(); // Clear any in-progress exam from a previous session
-        setUser(devData);
-        await userStorage.save(devData);
-        setShowLoginModal(false);
-        setActiveTab("dashboard");
-        showToast("Welcome, Unistrix Developer!", "success");
-      } catch (e: any) {
-        setLoginError(e.message || "Could not authenticate developer.");
-      } finally {
-        setAuthLoading(false);
-      }
-      return;
-    }
 
     try {
       const res = await api.post("/auth/login", { username: u, password: p });
@@ -7393,6 +7405,7 @@ function MainApp() {
       title: cp.title || "",
       description: cp.description || "",
       posterUrl: cp.posterUrl || "",
+      posterBase64: cp.posterBase64 || "",
       targetUsers: cp.targetUsers || "all",
       posterDisplay: cp.posterDisplay || "none",
       isActive: cp.isActive !== undefined ? cp.isActive : true,
@@ -9788,6 +9801,66 @@ function MainApp() {
           </Modal>
         )}
 
+        {/* Attendance Viewer Modal */}
+        {showAttendanceModal && (
+          <Modal visible={true} animationType="fade" transparent>
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "100%", maxWidth: 600, borderRadius: 16, padding: 20, alignSelf: "center", maxHeight: "90%" }]}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                  <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "800" }]}>
+                    Attendance: {selectedAttendanceTitle}
+                  </Text>
+                  <TouchableOpacity onPress={() => setShowAttendanceModal(false)}>
+                    <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
+                  </TouchableOpacity>
+                </View>
+
+                {attendanceLoading ? (
+                  <View style={{ padding: 40, alignItems: "center" }}>
+                    <ActivityIndicator size="large" color="#c62828" />
+                    <Text style={{ marginTop: 12, color: darkMode ? "#aaa" : "#666" }}>Loading attendance...</Text>
+                  </View>
+                ) : attendanceList.length === 0 ? (
+                  <View style={{ padding: 40, alignItems: "center" }}>
+                    <Ionicons name="people-outline" size={48} color={darkMode ? "#555" : "#ccc"} />
+                    <Text style={{ marginTop: 12, color: darkMode ? "#aaa" : "#666" }}>No participants joined yet.</Text>
+                  </View>
+                ) : (
+                  <ScrollView showsVerticalScrollIndicator={true} style={{ maxHeight: 400 }}>
+                    <View style={{ gap: 10 }}>
+                      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#ddd", paddingBottom: 8, marginBottom: 4 }}>
+                        <Text style={{ flex: 2, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Name</Text>
+                        <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Reg No</Text>
+                        <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Join Time</Text>
+                        <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Status</Text>
+                      </View>
+                      {attendanceList.map((p, idx) => (
+                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
+                          <Text style={{ flex: 2, fontSize: 13, color: darkMode ? "#eee" : "#222" }}>{p.name || p.studentName || p.id || p.studentId}</Text>
+                          <Text style={{ flex: 1, fontSize: 12, color: darkMode ? "#ccc" : "#666" }}>{p.regNo || '-'}</Text>
+                          <Text style={{ flex: 1, fontSize: 12, color: darkMode ? "#ccc" : "#666" }}>
+                            {p.joinedAt ? new Date(p.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                          </Text>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: p.status === 'ABSENT' ? '#f44336' : '#4caf50' }} />
+                            <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#777" }}>{p.status || 'PRESENT'}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                )}
+                
+                <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 15 }}>
+                  <TouchableOpacity onPress={() => setShowAttendanceModal(false)} style={[styles.outlineBtn, { marginVertical: 0 }]}>
+                    <Text style={styles.outlineBtnTxt}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
+
         {/* Live Class Schedule Modal */}
         {showLiveClassModal && (
           <Modal visible={true} animationType="slide" transparent>
@@ -10104,6 +10177,105 @@ function MainApp() {
                       )}
                     </>
                   )}
+
+                  {/* Class Participants Section */}
+                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eee", paddingTop: 12 }}>
+                    <Text style={{ fontSize: 12, fontWeight: "bold", textTransform: "uppercase", color: darkMode ? "#ccc" : "#666", marginBottom: 8 }}>
+                      Add Class Participants (Optional)
+                    </Text>
+                    
+                    <View style={{ gap: 12 }}>
+                      {/* Select Admins */}
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Additional Admins</Text>
+                        <View style={{
+                          maxHeight: 120,
+                          overflow: "scroll",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          padding: 8,
+                          backgroundColor: darkMode ? "#1a1a2e" : "#fff",
+                          gap: 6
+                        }}>
+                          {(liveSessionCandidates.admins || [])
+                            .filter((c: any) => c.id !== user?.userId && c.id !== user?.id)
+                            .map((c: any) => {
+                              const isSelected = selectedAdminIds.includes(c.id);
+                              return (
+                                <TouchableOpacity
+                                  key={c.id}
+                                  onPress={() => handleAdminToggle(c.id)}
+                                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                                >
+                                  <View style={{
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 4,
+                                    borderWidth: 1.5,
+                                    borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#999"),
+                                    backgroundColor: isSelected ? "#c62828" : "transparent",
+                                    alignItems: "center",
+                                    justifyContent: "center"
+                                  }}>
+                                    {isSelected && <Ionicons name="checkmark" size={10} color="#fff" />}
+                                  </View>
+                                  <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#333" }}>{c.name}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          {(liveSessionCandidates.admins || []).filter((c: any) => c.id !== user?.userId && c.id !== user?.id).length === 0 && (
+                            <Text style={{ fontSize: 11, fontStyle: "italic", color: "#888" }}>No additional admins available</Text>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* Select Teachers */}
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Teachers</Text>
+                        <View style={{
+                          maxHeight: 120,
+                          overflow: "scroll",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          padding: 8,
+                          backgroundColor: darkMode ? "#1a1a2e" : "#fff",
+                          gap: 6
+                        }}>
+                          {(liveSessionCandidates.teachers || [])
+                            .filter((c: any) => c.id !== user?.userId && c.id !== user?.id)
+                            .map((c: any) => {
+                              const isSelected = selectedTeacherIds.includes(c.id);
+                              return (
+                                <TouchableOpacity
+                                  key={c.id}
+                                  onPress={() => handleTeacherToggle(c.id)}
+                                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                                >
+                                  <View style={{
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 4,
+                                    borderWidth: 1.5,
+                                    borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#999"),
+                                    backgroundColor: isSelected ? "#c62828" : "transparent",
+                                    alignItems: "center",
+                                    justifyContent: "center"
+                                  }}>
+                                    {isSelected && <Ionicons name="checkmark" size={10} color="#fff" />}
+                                  </View>
+                                  <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#333" }}>{c.name}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          {(liveSessionCandidates.teachers || []).filter((c: any) => c.id !== user?.userId && c.id !== user?.id).length === 0 && (
+                            <Text style={{ fontSize: 11, fontStyle: "italic", color: "#888" }}>No teachers available</Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
                 </ScrollView>
 
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
@@ -11191,6 +11363,105 @@ function MainApp() {
                       )}
                     </>
                   )}
+
+                  {/* Class Participants Section */}
+                  <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eee", paddingTop: 12 }}>
+                    <Text style={{ fontSize: 12, fontWeight: "bold", textTransform: "uppercase", color: darkMode ? "#ccc" : "#666", marginBottom: 8 }}>
+                      Add Class Participants (Optional)
+                    </Text>
+                    
+                    <View style={{ gap: 12 }}>
+                      {/* Select Admins */}
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Additional Admins</Text>
+                        <View style={{
+                          maxHeight: 120,
+                          overflow: "scroll",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          padding: 8,
+                          backgroundColor: darkMode ? "#1a1a2e" : "#fff",
+                          gap: 6
+                        }}>
+                          {(liveSessionCandidates.admins || [])
+                            .filter((c: any) => c.id !== user?.userId && c.id !== user?.id)
+                            .map((c: any) => {
+                              const isSelected = selectedAdminIds.includes(c.id);
+                              return (
+                                <TouchableOpacity
+                                  key={c.id}
+                                  onPress={() => handleAdminToggle(c.id)}
+                                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                                >
+                                  <View style={{
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 4,
+                                    borderWidth: 1.5,
+                                    borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#999"),
+                                    backgroundColor: isSelected ? "#c62828" : "transparent",
+                                    alignItems: "center",
+                                    justifyContent: "center"
+                                  }}>
+                                    {isSelected && <Ionicons name="checkmark" size={10} color="#fff" />}
+                                  </View>
+                                  <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#333" }}>{c.name}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          {(liveSessionCandidates.admins || []).filter((c: any) => c.id !== user?.userId && c.id !== user?.id).length === 0 && (
+                            <Text style={{ fontSize: 11, fontStyle: "italic", color: "#888" }}>No additional admins available</Text>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* Select Teachers */}
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Teachers</Text>
+                        <View style={{
+                          maxHeight: 120,
+                          overflow: "scroll",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#444" : "#ccc",
+                          borderRadius: 8,
+                          padding: 8,
+                          backgroundColor: darkMode ? "#1a1a2e" : "#fff",
+                          gap: 6
+                        }}>
+                          {(liveSessionCandidates.teachers || [])
+                            .filter((c: any) => c.id !== user?.userId && c.id !== user?.id)
+                            .map((c: any) => {
+                              const isSelected = selectedTeacherIds.includes(c.id);
+                              return (
+                                <TouchableOpacity
+                                  key={c.id}
+                                  onPress={() => handleTeacherToggle(c.id)}
+                                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
+                                >
+                                  <View style={{
+                                    width: 16,
+                                    height: 16,
+                                    borderRadius: 4,
+                                    borderWidth: 1.5,
+                                    borderColor: isSelected ? "#c62828" : (darkMode ? "#555" : "#999"),
+                                    backgroundColor: isSelected ? "#c62828" : "transparent",
+                                    alignItems: "center",
+                                    justifyContent: "center"
+                                  }}>
+                                    {isSelected && <Ionicons name="checkmark" size={10} color="#fff" />}
+                                  </View>
+                                  <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#333" }}>{c.name}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          {(liveSessionCandidates.teachers || []).filter((c: any) => c.id !== user?.userId && c.id !== user?.id).length === 0 && (
+                            <Text style={{ fontSize: 11, fontStyle: "italic", color: "#888" }}>No teachers available</Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
                 </ScrollView>
 
                 <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
@@ -16902,7 +17173,7 @@ PASTED QUESTION PAPER TEXT:
                                                onPress={() => {
                                                  const isSel = (editingStudent.batches || []).includes(b.batchName);
                                                  let updatedBatches = isSel 
-                                                   ? (editingStudent.batches || []).filter(name => name !== b.batchName)
+                                                   ? (editingStudent.batches || []).filter((name: string) => name !== b.batchName)
                                                    : [...(editingStudent.batches || []), b.batchName];
                                                  
                                                  let updatedModes = { ...(editingStudent.batchModes || {}) };
@@ -16944,7 +17215,7 @@ PASTED QUESTION PAPER TEXT:
                                                        onPress={() => {
                                                          const activeModes = (editingStudent.batchModes || {})[b.batchName] || [];
                                                          const updated = activeModes.includes(mode)
-                                                           ? activeModes.filter(m => m !== mode)
+                                                           ? activeModes.filter((m: string) => m !== mode)
                                                            : [...activeModes, mode];
                                                          
                                                          setEditingStudent({
@@ -17062,7 +17333,7 @@ PASTED QUESTION PAPER TEXT:
                                                onPress={() => {
                                                  const isSel = (newStudent.batches || []).includes(b.batchName);
                                                  let updatedBatches = isSel 
-                                                   ? (newStudent.batches || []).filter(name => name !== b.batchName)
+                                                   ? (newStudent.batches || []).filter((name: string) => name !== b.batchName)
                                                    : [...(newStudent.batches || []), b.batchName];
                                                  
                                                  let updatedModes = { ...(newStudent.batchModes || {}) };
@@ -17104,7 +17375,7 @@ PASTED QUESTION PAPER TEXT:
                                                        onPress={() => {
                                                          const activeModes = (newStudent.batchModes || {})[b.batchName] || [];
                                                          const updated = activeModes.includes(mode)
-                                                           ? activeModes.filter(m => m !== mode)
+                                                           ? activeModes.filter((m: string) => m !== mode)
                                                            : [...activeModes, mode];
                                                          
                                                          setNewStudent({
@@ -17416,7 +17687,7 @@ PASTED QUESTION PAPER TEXT:
                                       if (s.batchModes) {
                                         for (const key of Object.keys(s.batchModes)) {
                                           const modes = s.batchModes[key];
-                                          if (Array.isArray(modes) && modes.map(m => String(m).toLowerCase()).includes(typeLower)) {
+                                          if (Array.isArray(modes) && modes.map((m: string) => String(m).toLowerCase()).includes(typeLower)) {
                                             hasBatchMode = true;
                                             break;
                                           }
@@ -17468,9 +17739,9 @@ PASTED QUESTION PAPER TEXT:
                                               Roll: {s.rollNumber || s.loginUsername || "N/A"} | {(() => {
                                                 const bList = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
                                                 if (bList.length === 0) return "No Batch";
-                                                return bList.map(bName => {
+                                                return bList.map((bName: string) => {
                                                   const modes = (s.batchModes || {})[bName] || [];
-                                                  const modesStr = modes.length > 0 ? modes.map(m => String(m).toLowerCase()).join("/") : (s.type || "offline").toLowerCase();
+                                                  const modesStr = modes.length > 0 ? modes.map((m: any) => String(m).toLowerCase()).join("/") : (s.type || "offline").toLowerCase();
                                                   return `${bName} (${modesStr})`;
                                                 }).join(", ");
                                               })()}
@@ -17573,9 +17844,9 @@ PASTED QUESTION PAPER TEXT:
                                                       </View>
                                                     );
                                                   }
-                                                  return bList.map((bName) => {
+                                                  return bList.map((bName: string) => {
                                                     const modes = (s.batchModes || {})[bName] || [];
-                                                    const modesStr = modes.length > 0 ? modes.map(m => String(m).toUpperCase()).join(", ") : (s.type || "offline").toUpperCase();
+                                                    const modesStr = modes.length > 0 ? modes.map((m: any) => String(m).toUpperCase()).join(", ") : (s.type || "offline").toUpperCase();
                                                     return (
                                                       <View key={bName} style={{ flexDirection: "row", gap: 4, alignItems: "center", marginBottom: 2 }}>
                                                         <View style={{ backgroundColor: darkMode ? "#2e7d3220" : "#e8f5e9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
@@ -17660,7 +17931,7 @@ PASTED QUESTION PAPER TEXT:
                                                 setSelectedDirectoryStudent(null);
                                                 const initialBatches = s.batches || (s.batch ? [s.batch] : []);
                                                 const initialBatchModes = s.batchModes || {};
-                                                initialBatches.forEach((b) => {
+                                                initialBatches.forEach((b: string) => {
                                                   if (!initialBatchModes[b]) {
                                                     initialBatchModes[b] = [s.type || "offline"];
                                                   }
@@ -24274,8 +24545,11 @@ PASTED QUESTION PAPER TEXT:
                                 customProviderId: "",
                                 providerPasscode: "",
                                 hostKey: "",
-                                meetingCode: ""
+                                meetingCode: "",
+                                host: ""
                               });
+                              setSelectedAdminIds([]);
+                              setSelectedTeacherIds([]);
                               setShowLiveClassModal(true);
                               loadLmsLookups();
                             }}
@@ -24394,8 +24668,11 @@ PASTED QUESTION PAPER TEXT:
                                             customProviderId: session.liveSession?.providerSessionId || "",
                                             providerPasscode: session.liveSession?.launchPayload?.passcode || "",
                                             hostKey: session.liveSession?.launchPayload?.hostKey || "",
-                                            meetingCode: session.liveSession?.launchPayload?.meetingCode || ""
+                                            meetingCode: session.liveSession?.launchPayload?.meetingCode || "",
+                                            host: session.liveSession?.host ? JSON.stringify(session.liveSession.host) : ""
                                           });
+                                          setSelectedAdminIds(session.liveSession?.participantAdminIds || []);
+                                          setSelectedTeacherIds(session.liveSession?.participantTeacherIds || []);
                                           setShowLiveClassModal(true);
                                           loadLmsLookups();
                                         }}
@@ -24560,12 +24837,51 @@ PASTED QUESTION PAPER TEXT:
                                         <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>Convert to Youtube</Text>
                                       </TouchableOpacity>
                                     )}
+
+                                    {/* VIEW ATTENDANCE BUTTON - shown only for admins */}
+                                    {isAdmin && (
+                                      <TouchableOpacity
+                                        onPress={async () => {
+                                          const sessionId = session.id || session._id || session.classId;
+                                          setSelectedAttendanceTitle(sessionTitle);
+                                          setAttendanceLoading(true);
+                                          setShowAttendanceModal(true);
+                                          try {
+                                            const res = await api.get(`/live-sessions/${sessionId}/attendance`);
+                                            setAttendanceList(res.data?.data || res.data || []);
+                                          } catch (err: any) {
+                                            const errorMsg = err?.response?.data?.message || err?.message || 'Failed to fetch attendance';
+                                            console.error("Attendance fetch error details:", errorMsg, err?.response?.status, err?.response?.data);
+                                            Alert.alert('Error', `Fetch failed: ${errorMsg}`);
+                                            setAttendanceList([]);
+                                          } finally {
+                                            setAttendanceLoading(false);
+                                          }
+                                        }}
+                                        style={{ backgroundColor: "#2e7d32", paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                                      >
+                                        <Ionicons name="people-outline" size={16} color="#fff" />
+                                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>View Attendance</Text>
+                                      </TouchableOpacity>
+                                    )}
                                     </React.Fragment>
                                 ) : (
                                   <TouchableOpacity
                                     onPress={async () => {
                                       try {
                                         const sessionId = session.id || session._id || session.classId;
+                                        const classId = session.classId || session.id || session._id;
+                                        
+                                        // Silently record attendance
+                                        api.post('/lms-attendance/join', {
+                                          classId,
+                                          className: session.title || session.name || 'Live Class',
+                                          courseId: session.courseId || '',
+                                          courseName: session.courseName || '',
+                                          batchName: session.batchName || ''
+                                        }).catch(err => console.error("Failed to record attendance silently:", err));
+
+                                        setJoinedSessions(prev => Array.from(new Set([...prev, sessionId])));
 
                                         // 1. Try secure standalone zoom-client-launch.html window (Skip for youtube)
                                         let launched = false;
@@ -24616,9 +24932,11 @@ PASTED QUESTION PAPER TEXT:
                                     }}
                                     style={[styles.primaryBtn, { paddingVertical: 8, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 6 }]}
                                   >
-                                    <Ionicons name="play-circle-outline" size={16} color="#fff" />
-                                    <Text style={styles.primaryBtnTxt}>Join Class</Text>
-                                  </TouchableOpacity>
+                                      <Ionicons name="play-circle-outline" size={16} color="#fff" />
+                                      <Text style={styles.primaryBtnTxt}>
+                                        {joinedSessions.includes(session.id || session._id || session.classId) ? "Rejoin Class" : "Join Class"}
+                                      </Text>
+                                    </TouchableOpacity>
                                 )}
                               </View>
                             </View>

@@ -30,6 +30,9 @@ const requireSelfStaffOrAdmin = (req: any, res: any, next: any) => {
 };
 
 router.get("/profile/me", StaffController.getMe);
+router.get("/live-session-candidates", StaffController.getLiveSessionCandidates);
+router.get("/me/live-sessions", StaffController.getStaffLiveSessionsMe);
+router.get("/:id/live-sessions", requireSelfStaffOrAdmin, StaffController.getStaffLiveSessionsById);
 router.get("/:id", requireSelfStaffOrAdmin, StaffController.getOne);
 
 // All other endpoints require full admin roles

@@ -2098,20 +2098,6 @@ export default function App() {
 
     setAuthLoading(true);
 
-    // Developer portal shortcut — handled client-side + validated server-side
-    if (u === "developer@unistrix" && p === "Unistrix@24252630") {
-      try {
-        const res = await api.post("/developer/login", { username: u, password: p });
-        const devData = res.data || res;
-        setUser({ role: "developer", name: "Unistrix Developer", username: u, userId: "dev_unistrix" });
-        setActiveTab("dashboard");
-      } catch (e: any) {
-        Alert.alert("Dev Login Failed", e.message || "Could not authenticate developer.");
-      } finally {
-        setAuthLoading(false);
-      }
-      return;
-    }
 
     try {
       const res = await api.post("/auth/login", { username: u, password: p });
