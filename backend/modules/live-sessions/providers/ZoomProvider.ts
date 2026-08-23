@@ -16,6 +16,9 @@ export class ZoomProvider implements LiveProvider {
     const clientId = credentials.clientId || env.ZOOM_OAUTH_CLIENT_ID;
     const clientSecret = credentials.clientSecret || env.ZOOM_OAUTH_CLIENT_SECRET;
 
+    // DEBUG: log which account is being used (mask secrets)
+    logger.info(`[ZoomProvider getAccessToken] Using accountId=${accountId?.substring(0,6)}... clientId=${clientId?.substring(0,5)}... clientSecretLen=${clientSecret?.length || 0} (env fallback used: accountId=${!credentials.accountId}, clientId=${!credentials.clientId})`);
+
     if (!accountId || !clientId || !clientSecret) {
       throw new AppError('Zoom Server-to-Server OAuth credentials are not configured.', 503);
     }
@@ -28,9 +31,10 @@ export class ZoomProvider implements LiveProvider {
           'Authorization': `Basic ${authHeader}`
         }
       });
+      logger.info(`[ZoomProvider getAccessToken] SUCCESS — token obtained for accountId=${accountId?.substring(0,6)}...`);
       return response.data.access_token;
     } catch (error: any) {
-      console.error('Zoom OAuth Error:', error.response?.data || error.message);
+      logger.error(`[ZoomProvider getAccessToken] FAILED — accountId=${accountId?.substring(0,6)}... | Zoom error: ${JSON.stringify(error.response?.data)} | HTTP: ${error.response?.status}`);
       throw new AppError('Failed to authenticate with Zoom API.', 502);
     }
   }

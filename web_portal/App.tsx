@@ -24996,6 +24996,9 @@ PASTED QUESTION PAPER TEXT:
                                           batchName: session.batchName || ''
                                         }).catch(err => console.error("Failed to record attendance silently:", err));
 
+                                        // Register with real-time live attendance module
+                                        api.post(`/live-attendance/student/${sessionId}/join`).catch(err => console.error("Failed to register live attendance:", err));
+
                                         setJoinedSessions(prev => Array.from(new Set([...prev, sessionId])));
 
                                         // 1. Try secure standalone zoom-client-launch.html window (Skip for youtube)

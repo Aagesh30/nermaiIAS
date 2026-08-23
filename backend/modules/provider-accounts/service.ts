@@ -9,7 +9,35 @@ export class ProviderAccountService {
 
   static async listAccounts(tenantId?: string): Promise<IProviderAccount[]> {
     const accounts = await this.repo.findAll(tenantId);
-    return accounts.map(a => this.stripSecrets(a));
+    const stripped = accounts.map(a => this.stripSecrets(a));
+
+    // Also merge in legacy zoom_accounts so they appear in the Schedule dialog dropdown
+    try {
+      const zoomSnap = await db.collection('zoom_accounts').get();
+      const zoomAccounts: IProviderAccount[] = zoomSnap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          provider: 'zoom',
+          displayName: data?.name || 'Zoom Account',
+          status: (data?.status === 'valid' ? 'healthy' : 'disconnected') as any,
+          priority: 0,
+          healthStatus: data?.status || 'unknown',
+          isActive: data?.status === 'valid',
+          maxConcurrentMeetings: 1,
+          currentRunningMeetings: 0,
+          credentials: { clientId: '***', accountId: '***' }
+        } as unknown as IProviderAccount;
+      });
+
+      // Merge: skip any zoom_accounts whose ID is already in provider_accounts (no duplicates)
+      const existingIds = new Set(stripped.map(a => a.id));
+      const newZoomAccounts = zoomAccounts.filter(za => !existingIds.has(za.id!));
+      return [...stripped, ...newZoomAccounts];
+    } catch (err) {
+      // If zoom_accounts fails, still return what we have
+      return stripped;
+    }
   }
 
   static async getAccountById(id: string, includeSecrets = false): Promise<IProviderAccount | null> {
@@ -20,7 +48,7 @@ export class ProviderAccountService {
       const zoomDoc = await db.collection('zoom_accounts').doc(id).get();
       if (zoomDoc.exists) {
         const data = zoomDoc.data();
-        account = {
+        const zoomAccount = {
           id: zoomDoc.id,
           provider: 'zoom',
           displayName: data?.name || 'Zoom Account',
@@ -38,8 +66,9 @@ export class ProviderAccountService {
             sdkSecret: (data?.meetingSdkSecret?.includes(':') ? decrypt(data.meetingSdkSecret) : (data?.meetingSdkSecret || '')).trim(),
           }
         } as unknown as IProviderAccount;
-        // The above mapping decrypts the fields immediately because provider_accounts only expects secrets to be encrypted,
-        // but zoom_accounts encrypts EVERYTHING (including accountId and clientId).
+        // Credentials are already decrypted above — return immediately to avoid double-decryption.
+        if (includeSecrets) return zoomAccount;
+        return this.stripSecrets(zoomAccount);
       }
     }
 
@@ -75,10 +104,48 @@ export class ProviderAccountService {
       account = await this.repo.acquireAccount(provider, tenantId);
     }
 
+    // Fallback: if no provider_accounts available, check zoom_accounts (legacy)
+    if (!account && provider === 'zoom') {
+      try {
+        const zoomSnap = await db.collection('zoom_accounts')
+          .where('status', '==', 'valid')
+          .limit(1)
+          .get();
+        if (!zoomSnap.empty) {
+          const doc = zoomSnap.docs[0];
+          const data = doc.data();
+          account = {
+            id: doc.id,
+            provider: 'zoom',
+            displayName: data?.name || 'Zoom Account',
+            status: 'healthy' as any,
+            priority: 0,
+            healthStatus: 'valid',
+            isActive: true,
+            maxConcurrentMeetings: 1,
+            currentRunningMeetings: 0,
+            credentials: {
+              accountId: (data?.s2sAccountId?.includes(':') ? decrypt(data.s2sAccountId) : (data?.s2sAccountId || '')).trim(),
+              clientId: (data?.s2sClientId?.includes(':') ? decrypt(data.s2sClientId) : (data?.s2sClientId || '')).trim(),
+              clientSecret: (data?.s2sClientSecret?.includes(':') ? decrypt(data.s2sClientSecret) : (data?.s2sClientSecret || '')).trim(),
+              sdkKey: (data?.meetingSdkKey?.includes(':') ? decrypt(data.meetingSdkKey) : (data?.meetingSdkKey || '')).trim(),
+              sdkSecret: (data?.meetingSdkSecret?.includes(':') ? decrypt(data.meetingSdkSecret) : (data?.meetingSdkSecret || '')).trim(),
+            }
+          } as unknown as IProviderAccount;
+        }
+      } catch (err) {
+        // ignore fallback errors
+      }
+    }
+
     if (!account) {
       throw new AppError(`No available ${provider} accounts. All accounts are at maximum capacity or unhealthy.`, 503);
     }
 
+    // For zoom_accounts fallback the credentials are already decrypted, so only run decryptCredentials for provider_accounts
+    if (account.id && !account.credentials?.clientSecret?.includes(':')) {
+      return account;
+    }
     return this.decryptCredentials(account);
   }
 

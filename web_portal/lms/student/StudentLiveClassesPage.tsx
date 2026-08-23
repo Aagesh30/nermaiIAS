@@ -778,8 +778,16 @@ export const StudentLiveClassesPage = () => {
               cls.courseName || '',
               cls.batchName || ''
             ).catch(() => {});
+            
+            // Also register with the real-time Live Attendance module (LAMS)
+            // It safely returns 200 if no active session is running yet.
+            const liveSessionIdForLams = cls.sessionId || cls.id || classId;
+            import('../core/services').then(({ LiveAttendanceApi }) => {
+               LiveAttendanceApi.studentJoin(liveSessionIdForLams).catch(() => {});
+            }).catch(() => {});
           }
         }
+
       } catch (tokErr) {
         console.warn("Join token resolution failed, checking join API:", tokErr);
       }

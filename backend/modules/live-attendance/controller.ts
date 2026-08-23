@@ -114,10 +114,15 @@ export const getSessionLogs = async (req: Request, res: Response, next: NextFunc
  */
 export const studentJoin = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = req.params.sessionId as string;
+    const liveSessionId = req.params.sessionId as string;
     const { userId: studentId } = req.user!;
 
-    const log = await liveAttendanceService.logStudentJoin(sessionId, studentId as string);
+    const activeSession = await liveAttendanceService.getActiveSession(liveSessionId);
+    if (!activeSession) {
+      return res.status(200).json({ status: 'success', message: 'No active attendance session running' });
+    }
+
+    const log = await liveAttendanceService.logStudentJoin(activeSession.id, studentId as string);
     res.status(200).json({ status: 'success', data: log });
   } catch (err) {
     next(err);
@@ -130,10 +135,15 @@ export const studentJoin = async (req: Request, res: Response, next: NextFunctio
  */
 export const studentLeave = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = req.params.sessionId as string;
+    const liveSessionId = req.params.sessionId as string;
     const { userId: studentId } = req.user!;
 
-    await liveAttendanceService.logStudentLeave(sessionId, studentId as string);
+    const activeSession = await liveAttendanceService.getActiveSession(liveSessionId);
+    if (!activeSession) {
+      return res.status(200).json({ status: 'success', message: 'No active attendance session running' });
+    }
+
+    await liveAttendanceService.logStudentLeave(activeSession.id, studentId as string);
     res.status(200).json({ status: 'success' });
   } catch (err) {
     next(err);
