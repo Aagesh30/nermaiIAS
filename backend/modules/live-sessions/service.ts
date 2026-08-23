@@ -1304,9 +1304,11 @@ Launch Payload Exists: ${!!session.launchPayload}
             joinedAt: new Date().toISOString()
           };
           const db = require('firebase-admin').firestore();
-          await db.collection(this.collection).doc(sessionId).update({
-            [`joinedParticipantsDetails.${userId}`]: joinedUser
-          });
+          await db.collection(this.collection).doc(sessionId).set({
+            joinedParticipantsDetails: {
+              [userId]: joinedUser
+            }
+          }, { merge: true });
         }
       } catch (err) {
         console.error("Failed to append joined participant to live session:", err);

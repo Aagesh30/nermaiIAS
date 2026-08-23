@@ -1,0 +1,1 @@
+﻿import { db } from '../infrastructure/firebase/index'; async function run() { const snap = await db.collection('live_sessions').limit(5).get(); snap.docs.forEach(doc => { console.log(doc.id, 'joinedParticipantsDetails:', doc.data().joinedParticipantsDetails); }); process.exit(0); } run().catch(e => { console.error(e); process.exit(1); });

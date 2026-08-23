@@ -1,0 +1,1 @@
+﻿import { db } from '../infrastructure/firebase/index'; async function run() { try { const ref = db.collection('test_updates').doc('temp1'); await ref.set({ name: 'test' }); await ref.update({ 'joinedParticipantsDetails.user123': { name: 'Bob' } }); console.log('Update succeeded!'); } catch (e) { console.error('Update failed:', e.message); } process.exit(0); } run();
