@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "nermaiiasacademy-519c8"
+  },
   "targets": {
     "nermaiiasacademy-519c8": {
       "storage": {
