@@ -158,7 +158,7 @@ export const QRCodePermissionsPage = () => {
     
     const messages = {
       batch: 'Are you sure you want to enable QR access for all active students in this batch?',
-      paid: 'Are you sure you want to enable QR access for all Paid tier students?',
+      paid: 'Are you sure you want to enable QR access for all Enrolled tier students?',
       free: 'Are you sure you want to enable QR access for all Free tier students?',
       requested: 'Are you sure you want to enable QR access for all students with pending requests?'
     };
@@ -491,7 +491,7 @@ export const QRCodePermissionsPage = () => {
                     className="w-full text-xs font-bold border-[#8B0000]/30 text-[#8B0000] dark:border-[#ff8a80]/30 dark:text-[#ff8a80]"
                     disabled={bulkActionLoading}
                   >
-                    Enable All Paid
+                    Enable All Enrolled
                   </AdminButton>
                   
                   <AdminButton 

@@ -360,8 +360,8 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">Target Audience *</label>
                     <select value={visibility} onChange={e=>setVisibility(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2 text-white focus:border-red-500 focus:outline-none">
                       <option value="public">All Users (Public)</option>
-                      <option value="premium">Paid All (All Paid Students)</option>
-                      <option value="batch">Paid Batch Wise (Specific Batches)</option>
+                      <option value="premium">Enrolled All (All Enrolled Students)</option>
+                      <option value="batch">Enrolled Batch Wise (Specific Batches)</option>
                     </select>
                   </div>
                   <div>

@@ -468,12 +468,47 @@ export class ReviewController {
         try {
             const { studentId } = req.params;
 
-            const attemptsSnapshot = await db.collection("student_attempts")
-                .where("studentId", "==", studentId)
-                .where("isDeleted", "==", false)
-                .get();
+            // Fetch any corresponding student record IDs to cover both userId and studentId queries
+            const matchedStudentIds = new Set<string>([studentId]);
+            
+            try {
+                const studentsSnap = await db.collection("students").get();
+                studentsSnap.docs.forEach(doc => {
+                    const s = doc.data();
+                    const sid = doc.id;
+                    const uid = s.userId || s.id;
+                    if (uid === studentId || sid === studentId) {
+                        matchedStudentIds.add(sid);
+                        if (s.userId) matchedStudentIds.add(s.userId);
+                    }
+                });
+            } catch (_) {}
 
-            const attempts = attemptsSnapshot.docs.map(doc => doc.data());
+            try {
+                const usersSnap = await db.collection("users").get();
+                usersSnap.docs.forEach(doc => {
+                    const u = doc.data();
+                    const uid = u.id || doc.id;
+                    if (uid === studentId || u.studentId === studentId) {
+                        matchedStudentIds.add(uid);
+                        if (u.studentId) matchedStudentIds.add(u.studentId);
+                    }
+                });
+            } catch (_) {}
+
+            let attempts: any[] = [];
+            for (const sid of matchedStudentIds) {
+                const attemptsSnapshot = await db.collection("student_attempts")
+                    .where("studentId", "==", sid)
+                    .where("isDeleted", "==", false)
+                    .get();
+                attemptsSnapshot.docs.forEach(doc => {
+                    const data = doc.data();
+                    if (!attempts.some(a => a.id === data.id)) {
+                        attempts.push(data);
+                    }
+                });
+            }
             
             // Sort in memory by createdAt desc
             attempts.sort((a, b) => {
@@ -483,15 +518,16 @@ export class ReviewController {
             });
 
             // Fetch results for scores
-            const resultsSnapshot = await db.collection("results")
-                .where("studentId", "==", studentId)
-                .where("isDeleted", "==", false)
-                .get();
-
             const resultsMap: { [attemptId: string]: any } = {};
-            resultsSnapshot.docs.forEach(doc => {
-                resultsMap[doc.data().attemptId] = doc.data();
-            });
+            for (const sid of matchedStudentIds) {
+                const resultsSnapshot = await db.collection("results")
+                    .where("studentId", "==", sid)
+                    .where("isDeleted", "==", false)
+                    .get();
+                resultsSnapshot.docs.forEach(doc => {
+                    resultsMap[doc.data().attemptId] = doc.data();
+                });
+            }
 
             // Fetch tests for titles
             const testIds = Array.from(new Set(attempts.map(a => a.testId)));

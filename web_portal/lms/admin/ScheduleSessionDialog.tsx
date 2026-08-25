@@ -912,8 +912,8 @@ export const ScheduleSessionDialog: React.FC<ScheduleSessionDialogProps> = ({
                     value={formData.accessLevel}
                     onChange={(e: any) => setFormData({ ...formData, accessLevel: e.target.value })}
                     options={[
-                      { value: 'premium', label: 'All Paid Students' },
-                      { value: 'free', label: 'All Students (Free & Paid)' },
+                      { value: 'premium', label: 'All Enrolled Students' },
+                      { value: 'free', label: 'All Students (Free & Enrolled)' },
                       { value: 'batch', label: 'Specific Batch' }
                     ]}
                   />      

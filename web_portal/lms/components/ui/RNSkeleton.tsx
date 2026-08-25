@@ -15,12 +15,12 @@ export const RNSkeleton: React.FC<RNSkeletonProps> = ({ style, darkMode = false 
         Animated.timing(opacity, {
           toValue: 0.8,
           duration: 800,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(opacity, {
           toValue: 0.3,
           duration: 800,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ])
     );

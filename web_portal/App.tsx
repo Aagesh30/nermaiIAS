@@ -109,35 +109,31 @@ import * as Sharing from "expo-sharing";
 import { handleFirebaseGoogleSignIn, db } from "./firebaseConfig";
 import { doc, setDoc, onSnapshot, collection, deleteDoc } from "firebase/firestore";
 
-// Inject Vector Icon FontFace styles dynamically for production Web builds
+const USE_NATIVE_DRIVER = Platform.OS !== "web";
+
+// Inject Vector Icon FontFace styles dynamically for production Web builds using bundled assets
 if (Platform.OS === "web" && typeof document !== "undefined") {
   try {
     const iconFontStyles = `
       @font-face {
         font-family: 'Ionicons';
-        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype'),
-             url('https://unpkg.com/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype'),
-             url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/Ionicons.ttf') format('truetype');
+        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.6148e7019854f3bde85b633cb88f3c25.ttf') format('truetype');
       }
       @font-face {
         font-family: 'MaterialIcons';
-        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/MaterialIcons.ttf') format('truetype'),
-             url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/MaterialIcons.ttf') format('truetype');
+        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.4e85bc9ebe07e0340c9c4fc2f6c38908.ttf') format('truetype');
       }
       @font-face {
         font-family: 'MaterialCommunityIcons';
-        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/MaterialCommunityIcons.ttf') format('truetype'),
-             url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/MaterialCommunityIcons.ttf') format('truetype');
+        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.b62641afc9ab487008e996a5c5865e56.ttf') format('truetype');
       }
       @font-face {
         font-family: 'FontAwesome';
-        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/FontAwesome.ttf') format('truetype'),
-             url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/FontAwesome.ttf') format('truetype');
+        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.b06871f281fee6b241d60582ae9369b9.ttf') format('truetype');
       }
       @font-face {
         font-family: 'Feather';
-        src: url('https://unpkg.com/react-native-vector-icons@latest/Fonts/Feather.ttf') format('truetype'),
-             url('https://cdn.jsdelivr.net/npm/react-native-vector-icons@latest/Fonts/Feather.ttf') format('truetype');
+        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Feather.a76d309774d33d9856f650bed4292a23.ttf') format('truetype');
       }
     `;
     const style = document.createElement("style");
@@ -384,10 +380,9 @@ function DateTimePickerSelect({
   label: string;
   darkMode: boolean;
 }) {
-  const [showModal, setShowModal] = useState(false);
-  const [activeField, setActiveField] = useState<"year" | "month" | "day" | "hour" | "minute" | null>(null);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
-  // Parse current value
+  // Parse current value or fallback to now
   let date = new Date();
   if (value) {
     const parsed = new Date(value);
@@ -396,131 +391,383 @@ function DateTimePickerSelect({
     }
   }
 
-  const curYear = date.getFullYear();
-  const curMonth = date.getMonth() + 1; // 1-12
-  const curDay = date.getDate();
-  const curHour = date.getHours();
-  const curMin = date.getMinutes();
+  const [viewYear, setViewYear] = useState(date.getFullYear());
+  const [viewMonth, setViewMonth] = useState(date.getMonth()); // 0 - 11
 
-  // Options arrays
-  const years = Array.from({ length: 6 }, (_, i) => String(new Date().getFullYear() + i));
-  const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
-  const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
-  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
-  const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
-
-  const updateParts = (updates: { y?: string; m?: string; d?: string; hr?: string; min?: string }) => {
-    const y = updates.y || String(curYear);
-    const m = updates.m || String(curMonth).padStart(2, "0");
-    const d = updates.d || String(curDay).padStart(2, "0");
-    const hr = updates.hr || String(curHour).padStart(2, "0");
-    const min = updates.min || String(curMin).padStart(2, "0");
-    onChange(`${y}-${m}-${d}T${hr}:${min}`);
+  // Format value for input type="datetime-local" (YYYY-MM-DDTHH:mm)
+  const formatDateTimeLocal = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hr = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${y}-${m}-${day}T${hr}:${min}`;
   };
 
-  const getActiveOptions = () => {
-    if (activeField === "year") return years;
-    if (activeField === "month") return months;
-    if (activeField === "day") return days;
-    if (activeField === "hour") return hours;
-    if (activeField === "minute") return minutes;
-    return [];
+  const currentInputValue = formatDateTimeLocal(date);
+
+  // Calendar math
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay(); // 0 = Sun
+
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const handlePrevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear(prev => prev - 1);
+    } else {
+      setViewMonth(prev => prev - 1);
+    }
   };
 
-  const getActiveTitle = () => {
-    if (activeField === "year") return "Select Year";
-    if (activeField === "month") return "Select Month";
-    if (activeField === "day") return "Select Day";
-    if (activeField === "hour") return "Select Hour";
-    if (activeField === "minute") return "Select Minute";
-    return "";
+  const handleNextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear(prev => prev + 1);
+    } else {
+      setViewMonth(prev => prev + 1);
+    }
   };
 
-  const handleSelect = (val: string) => {
-    if (activeField === "year") updateParts({ y: val });
-    else if (activeField === "month") updateParts({ m: val });
-    else if (activeField === "day") updateParts({ d: val });
-    else if (activeField === "hour") updateParts({ hr: val });
-    else if (activeField === "minute") updateParts({ min: val });
-    setShowModal(false);
-    setActiveField(null);
+  const handleSelectDay = (day: number) => {
+    const newDate = new Date(date);
+    newDate.setFullYear(viewYear);
+    newDate.setMonth(viewMonth);
+    newDate.setDate(day);
+    onChange(formatDateTimeLocal(newDate));
   };
 
-  const openPicker = (field: "year" | "month" | "day" | "hour" | "minute") => {
-    setActiveField(field);
-    setShowModal(true);
+  const handleTimeChange = (type: "hour" | "minute", val: number) => {
+    const newDate = new Date(date);
+    if (type === "hour") newDate.setHours(val);
+    if (type === "minute") newDate.setMinutes(val);
+    onChange(formatDateTimeLocal(newDate));
   };
 
-  const monthNames: Record<string, string> = {
-    "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun",
-    "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"
+  const isToday = (day: number) => {
+    const today = new Date();
+    return (
+      today.getDate() === day &&
+      today.getMonth() === viewMonth &&
+      today.getFullYear() === viewYear
+    );
   };
+
+  const isSelected = (day: number) => {
+    return (
+      date.getDate() === day &&
+      date.getMonth() === viewMonth &&
+      date.getFullYear() === viewYear
+    );
+  };
+
+  // Formatted display string e.g. "Aug 25, 2026 at 10:30"
+  const displayFormatted = date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }) + " at " + String(date.getHours()).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0");
 
   return (
-    <View style={{ marginBottom: 12 }}>
-      <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#444", marginBottom: 6 }}>{label}</Text>
+    <View style={{ marginBottom: 14 }}>
+      <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#444", marginBottom: 6 }}>
+        {label}
+      </Text>
 
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        {/* Day */}
-        <TouchableOpacity onPress={() => openPicker("day")} style={{ flex: 1, padding: 10, borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 8, backgroundColor: darkMode ? "#222" : "#fff", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>{String(curDay).padStart(2, "0")}</Text>
-          <Text style={{ color: "#888", fontSize: 9, marginTop: 2 }}>Day</Text>
-        </TouchableOpacity>
+      {Platform.OS === "web" ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          {/* HTML5 Native Calendar Input for Web */}
+          <View style={{ flex: 1 }}>
+            <input
+              type="datetime-local"
+              value={currentInputValue}
+              onChange={(e) => {
+                if (e.target.value) {
+                  onChange(e.target.value);
+                  const p = new Date(e.target.value);
+                  if (!isNaN(p.getTime())) {
+                    setViewYear(p.getFullYear());
+                    setViewMonth(p.getMonth());
+                  }
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                fontSize: "14px",
+                fontWeight: "600",
+                borderRadius: "8px",
+                border: darkMode ? "1px solid #444" : "1px solid #ccc",
+                backgroundColor: darkMode ? "#222" : "#ffffff",
+                color: darkMode ? "#ffffff" : "#212121",
+                fontFamily: "inherit",
+                cursor: "pointer",
+                outline: "none",
+                boxSizing: "border-box"
+              }}
+            />
+          </View>
 
-        {/* Month */}
-        <TouchableOpacity onPress={() => openPicker("month")} style={{ flex: 1.5, padding: 10, borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 8, backgroundColor: darkMode ? "#222" : "#fff", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>{monthNames[String(curMonth).padStart(2, "0")] || String(curMonth).padStart(2, "0")}</Text>
-          <Text style={{ color: "#888", fontSize: 9, marginTop: 2 }}>Month</Text>
-        </TouchableOpacity>
-
-        {/* Year */}
-        <TouchableOpacity onPress={() => openPicker("year")} style={{ flex: 1.5, padding: 10, borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 8, backgroundColor: darkMode ? "#222" : "#fff", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>{curYear}</Text>
-          <Text style={{ color: "#888", fontSize: 9, marginTop: 2 }}>Year</Text>
-        </TouchableOpacity>
-
-        {/* Hour */}
-        <TouchableOpacity onPress={() => openPicker("hour")} style={{ flex: 1.2, padding: 10, borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 8, backgroundColor: darkMode ? "#222" : "#fff", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>{String(curHour).padStart(2, "0")}</Text>
-          <Text style={{ color: "#888", fontSize: 9, marginTop: 2 }}>Hr</Text>
-        </TouchableOpacity>
-
-        {/* Colon separator */}
-        <View style={{ justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#444", fontWeight: "bold", fontSize: 16 }}>:</Text>
+          {/* Graphical Calendar Modal Trigger Button */}
+          <TouchableOpacity
+            onPress={() => {
+              setViewYear(date.getFullYear());
+              setViewMonth(date.getMonth());
+              setShowCalendarModal(true);
+            }}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              backgroundColor: darkMode ? "#1a3a1a" : "#e8f5e9",
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: darkMode ? "#2e7d32" : "#a5d6a7",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6
+            }}
+          >
+            <Ionicons name="calendar-outline" size={18} color="#2e7d32" />
+            <Text style={{ fontSize: 12, fontWeight: "bold", color: "#2e7d32" }}>Calendar</Text>
+          </TouchableOpacity>
         </View>
-
-        {/* Minute */}
-        <TouchableOpacity onPress={() => openPicker("minute")} style={{ flex: 1.2, padding: 10, borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 8, backgroundColor: darkMode ? "#222" : "#fff", alignItems: "center" }}>
-          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>{String(curMin).padStart(2, "0")}</Text>
-          <Text style={{ color: "#888", fontSize: 9, marginTop: 2 }}>Min</Text>
+      ) : (
+        <TouchableOpacity
+          onPress={() => {
+            setViewYear(date.getFullYear());
+            setViewMonth(date.getMonth());
+            setShowCalendarModal(true);
+          }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: 12,
+            borderWidth: 1,
+            borderColor: darkMode ? "#444" : "#ccc",
+            borderRadius: 8,
+            backgroundColor: darkMode ? "#222" : "#fff"
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Ionicons name="calendar-outline" size={20} color="#c62828" />
+            <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 13, fontWeight: "bold" }}>
+              {displayFormatted}
+            </Text>
+          </View>
+          <Ionicons name="chevron-down" size={16} color="#888" />
         </TouchableOpacity>
-      </View>
+      )}
 
-      {showModal && (
-        <Modal visible={true} transparent animationType="fade">
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-            <View style={{ width: "80%", maxHeight: "60%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: darkMode ? "#333" : "#eee" }}>
-              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#eee", alignItems: "center", backgroundColor: darkMode ? "#222" : "#f9f9f9" }}>
-                <Text style={{ fontWeight: "bold", fontSize: 15, color: darkMode ? "#fff" : "#212121" }}>{getActiveTitle()}</Text>
+      {/* GRAPHICAL CALENDAR MODAL */}
+      {showCalendarModal && (
+        <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowCalendarModal(false)}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+            <View style={{
+              width: "100%",
+              maxWidth: 380,
+              backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+              borderRadius: 16,
+              overflow: "hidden",
+              borderWidth: 1,
+              borderColor: darkMode ? "#333" : "#e0e0e0",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 6 },
+              shadowOpacity: 0.15,
+              shadowRadius: 10,
+              elevation: 8
+            }}>
+
+              {/* CALENDAR HEADER */}
+              <View style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                backgroundColor: darkMode ? "#282828" : "#c62828",
+                borderBottomWidth: 1,
+                borderBottomColor: darkMode ? "#333" : "#b71c1c"
+              }}>
+                <TouchableOpacity onPress={handlePrevMonth} style={{ padding: 6, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.15)" }}>
+                  <Ionicons name="chevron-back" size={20} color="#ffffff" />
+                </TouchableOpacity>
+
+                <Text style={{ fontSize: 16, fontWeight: "bold", color: "#ffffff" }}>
+                  {monthNames[viewMonth]} {viewYear}
+                </Text>
+
+                <TouchableOpacity onPress={handleNextMonth} style={{ padding: 6, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.15)" }}>
+                  <Ionicons name="chevron-forward" size={20} color="#ffffff" />
+                </TouchableOpacity>
               </View>
-              <ScrollView>
-                {getActiveOptions().map((opt) => (
-                  <TouchableOpacity
-                    key={opt}
-                    onPress={() => handleSelect(opt)}
-                    style={{ paddingVertical: 14, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}
-                  >
-                    <Text style={{ fontSize: 15, color: darkMode ? "#fff" : "#212121", textAlign: "center" }}>{opt}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <TouchableOpacity
-                onPress={() => { setShowModal(false); setActiveField(null); }}
-                style={{ padding: 14, alignItems: "center", backgroundColor: darkMode ? "#222" : "#f9f9f9", borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee" }}
-              >
-                <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 14 }}>Cancel</Text>
-              </TouchableOpacity>
+
+              <View style={{ padding: 16 }}>
+
+                {/* DAYS OF WEEK HEADER */}
+                <View style={{ flexDirection: "row", marginBottom: 10 }}>
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dayName, idx) => (
+                    <Text
+                      key={dayName}
+                      style={{
+                        flex: 1,
+                        textAlign: "center",
+                        fontSize: 11,
+                        fontWeight: "bold",
+                        color: idx === 0 || idx === 6 ? (darkMode ? "#ef5350" : "#c62828") : (darkMode ? "#aaa" : "#666")
+                      }}
+                    >
+                      {dayName}
+                    </Text>
+                  ))}
+                </View>
+
+                {/* CALENDAR GRID (DAYS) */}
+                <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+                  {/* Empty slots before day 1 */}
+                  {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+                    <View key={`empty-${i}`} style={{ width: `${100 / 7}%`, height: 40 }} />
+                  ))}
+
+                  {/* Day numbers 1..daysInMonth */}
+                  {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                    const selected = isSelected(d);
+                    const today = isToday(d);
+
+                    return (
+                      <TouchableOpacity
+                        key={`day-${d}`}
+                        onPress={() => handleSelectDay(d)}
+                        style={{
+                          width: `${100 / 7}%`,
+                          height: 40,
+                          justifyContent: "center",
+                          alignItems: "center"
+                        }}
+                      >
+                        <View style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          justifyContent: "center",
+                          alignItems: "center",
+                          backgroundColor: selected
+                            ? (darkMode ? "#c62828" : "#c62828")
+                            : "transparent",
+                          borderWidth: today && !selected ? 1.5 : 0,
+                          borderColor: darkMode ? "#ef5350" : "#c62828"
+                        }}>
+                          <Text style={{
+                            fontSize: 13,
+                            fontWeight: selected || today ? "bold" : "500",
+                            color: selected
+                              ? "#ffffff"
+                              : (darkMode ? "#ffffff" : "#212121")
+                          }}>
+                            {d}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* TIME PICKER SECTION */}
+                <View style={{
+                  marginTop: 16,
+                  paddingTop: 14,
+                  borderTopWidth: 1,
+                  borderTopColor: darkMode ? "#333" : "#eee",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between"
+                }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Ionicons name="time-outline" size={18} color={darkMode ? "#ccc" : "#444"} />
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Time:</Text>
+                  </View>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    {/* Hour Select */}
+                    <View style={{ borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 6, backgroundColor: darkMode ? "#222" : "#f9f9f9", overflow: "hidden" }}>
+                      <select
+                        value={date.getHours()}
+                        onChange={(e) => handleTimeChange("hour", Number(e.target.value))}
+                        style={{
+                          padding: "6px 10px",
+                          fontSize: "13px",
+                          fontWeight: "bold",
+                          border: "none",
+                          backgroundColor: "transparent",
+                          color: darkMode ? "#fff" : "#111",
+                          cursor: "pointer",
+                          outline: "none"
+                        }}
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i} style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>
+                            {String(i).padStart(2, "0")} hr
+                          </option>
+                        ))}
+                      </select>
+                    </View>
+
+                    <Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>:</Text>
+
+                    {/* Minute Select */}
+                    <View style={{ borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 6, backgroundColor: darkMode ? "#222" : "#f9f9f9", overflow: "hidden" }}>
+                      <select
+                        value={Math.floor(date.getMinutes() / 5) * 5}
+                        onChange={(e) => handleTimeChange("minute", Number(e.target.value))}
+                        style={{
+                          padding: "6px 10px",
+                          fontSize: "13px",
+                          fontWeight: "bold",
+                          border: "none",
+                          backgroundColor: "transparent",
+                          color: darkMode ? "#fff" : "#111",
+                          cursor: "pointer",
+                          outline: "none"
+                        }}
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i * 5).map((m) => (
+                          <option key={m} value={m} style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>
+                            {String(m).padStart(2, "0")} min
+                          </option>
+                        ))}
+                      </select>
+                    </View>
+                  </View>
+                </View>
+
+              </View>
+
+              {/* MODAL FOOTER */}
+              <View style={{
+                padding: 12,
+                backgroundColor: darkMode ? "#252525" : "#f9f9f9",
+                borderTopWidth: 1,
+                borderTopColor: darkMode ? "#333" : "#eee",
+                alignItems: "center"
+              }}>
+                <TouchableOpacity
+                  onPress={() => setShowCalendarModal(false)}
+                  style={{
+                    width: "100%",
+                    paddingVertical: 10,
+                    backgroundColor: "#c62828",
+                    borderRadius: 8,
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 13 }}>Done & Close</Text>
+                </TouchableOpacity>
+              </View>
+
             </View>
           </View>
         </Modal>
@@ -646,12 +893,12 @@ function SplashScreen({ onDone }: { onDone: () => void }) {
 
     Animated.sequence([
       Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.spring(logoScale, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 900, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.spring(logoScale, { toValue: 1, tension: 50, friction: 7, useNativeDriver: USE_NATIVE_DRIVER }),
       ]),
-      Animated.timing(textOpacity, { toValue: 1, duration: 600, delay: 100, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
-      Animated.timing(taglineOpacity, { toValue: 1, duration: 500, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
-      Animated.spring(starScale, { toValue: 1, tension: 80, friction: 6, useNativeDriver: true }),
+      Animated.timing(textOpacity, { toValue: 1, duration: 600, delay: 100, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.out(Easing.ease) }),
+      Animated.timing(taglineOpacity, { toValue: 1, duration: 500, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.out(Easing.ease) }),
+      Animated.spring(starScale, { toValue: 1, tension: 80, friction: 6, useNativeDriver: USE_NATIVE_DRIVER }),
     ]).start();
 
     const timer = setTimeout(() => onDone(), 2800);
@@ -756,7 +1003,7 @@ function OnboardingScreens({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     contentAnim.setValue(0);
-    Animated.timing(contentAnim, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.back(1.0)) }).start();
+    Animated.timing(contentAnim, { toValue: 1, duration: 600, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.out(Easing.back(1.0)) }).start();
 
     if (slide === 0) {
       cardsAnim.forEach(anim => anim.setValue(0));
@@ -764,7 +1011,7 @@ function OnboardingScreens({ onDone }: { onDone: () => void }) {
         Animated.timing(anim, {
           toValue: 1,
           duration: 500,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           easing: Easing.out(Easing.back(0.8))
         })
       );
@@ -772,13 +1019,13 @@ function OnboardingScreens({ onDone }: { onDone: () => void }) {
     }
 
     Animated.loop(
-      Animated.timing(orbitAnim, { toValue: 1, duration: 10000, useNativeDriver: true, easing: Easing.linear })
+      Animated.timing(orbitAnim, { toValue: 1, duration: 10000, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.linear })
     ).start();
 
     Animated.loop(
       Animated.sequence([
-        Animated.timing(floatAnim, { toValue: 1, duration: 1800, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-        Animated.timing(floatAnim, { toValue: 0, duration: 1800, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(floatAnim, { toValue: 1, duration: 1800, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 1800, useNativeDriver: USE_NATIVE_DRIVER, easing: Easing.inOut(Easing.sin) }),
       ])
     ).start();
 
@@ -788,7 +1035,7 @@ function OnboardingScreens({ onDone }: { onDone: () => void }) {
         Animated.timing(anim, {
           toValue: 1,
           duration: 500,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
           easing: Easing.out(Easing.ease)
         })
       );
@@ -2473,35 +2720,52 @@ function MainApp() {
   ];
   const [contactFormType, setContactFormType] = useState<"admission" | "inquiry" | null>(null);
   const [showAuthFlip, setShowAuthFlip] = useState(false);
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<any | null>(null);
 
-  const handleGoogleAuthSignIn = async () => {
-    if (!guestNameInput.trim()) {
-      Alert.alert("Required Info", "Please enter your Name first.");
-      return;
-    }
-    if (!guestPhoneInput.trim()) {
-      Alert.alert("Required Info", "Please enter your Contact Number first.");
-      return;
-    }
-
+  const handleGoogleAuthSignIn = async (passedName?: string, passedPhone?: string, existingGoogleObj?: any) => {
     try {
-      const googleUser = (await handleFirebaseGoogleSignIn(guestNameInput, guestPhoneInput)) as any;
-      const email = googleUser.email;
+      let googleUser = existingGoogleObj;
+      if (!googleUser) {
+        googleUser = await handleFirebaseGoogleSignIn(passedName || guestNameInput, passedPhone || guestPhoneInput);
+      }
+      const email = googleUser?.email;
       if (!email) {
         Alert.alert("Google Auth Error", "No email returned from Google account.");
         return;
       }
 
+      const reqName = (passedName !== undefined ? passedName : guestNameInput).trim();
+      const reqPhone = (passedPhone !== undefined ? passedPhone : guestPhoneInput).trim();
+
       const res = await api.post("/crm/leads/guest-login", {
         email: email.toLowerCase(),
-        name: guestNameInput.trim() || googleUser.name,
-        phone: guestPhoneInput.trim()
+        name: reqName || undefined,
+        phone: reqPhone || undefined
       });
       const data = res.data || res;
+
+      // Check if user has incomplete profile (name is email prefix or phone is empty)
+      const emailPrefix = email.toLowerCase().split("@")[0];
+      const isNameIncomplete = !data.name || data.name.toLowerCase() === emailPrefix;
+      const isPhoneIncomplete = !data.phone || data.phone.trim() === "";
+
+      if ((data.isNew || isNameIncomplete || isPhoneIncomplete) && (!reqName || !reqPhone)) {
+        // First time / missing details -> Save Google auth object & prompt user to enter Name & Phone
+        setPendingGoogleUser({
+          ...googleUser,
+          email: email.toLowerCase(),
+          token: data.token,
+          leadId: data.leadId
+        });
+        if (data.name && data.name.toLowerCase() !== emailPrefix) setGuestNameInput(data.name);
+        if (data.phone) setGuestPhoneInput(data.phone);
+        return;
+      }
+
       const guestUser = {
         role: "guest",
-        name: guestNameInput.trim() || googleUser.name || data.name || email.split("@")[0],
-        phone: guestPhoneInput.trim() || data.phone || "",
+        name: reqName || data.name || googleUser.name || email.split("@")[0],
+        phone: reqPhone || data.phone || "",
         email: email.toLowerCase(),
         leadId: data.leadId,
         hasApplied: data.hasApplied || false,
@@ -2514,7 +2778,7 @@ function MainApp() {
       setUser(guestUser);
       setGuestEmailUnlocked(true);
       setAdmissionSubmitted(data.hasApplied || false);
-      setShowGuestGoogleAuthModal(false);
+      setPendingGoogleUser(null);
       if (pendingGuestTab) {
         setGuestTab(pendingGuestTab);
         setPendingGuestTab(null);
@@ -2613,7 +2877,7 @@ function MainApp() {
   const [filterDirBatch, setFilterDirBatch] = useState("all");
   const [filterDirType, setFilterDirType] = useState("all");
   const [filterDirStatus, setFilterDirStatus] = useState<"all" | "active" | "pending">("all");
-  const [newBatch, setNewBatch] = useState({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [] as string[] });
+  const [newBatch, setNewBatch] = useState({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [] as string[], enableSpecialRollNo: false });
   const [batchTab, setBatchTab] = useState<"general" | "special">("general");
   const [editingBatch, setEditingBatch] = useState<any>(null);
   const [showTestBatchDropdown, setShowTestBatchDropdown] = useState(false);
@@ -2680,15 +2944,18 @@ function MainApp() {
     }
   };
   const [extractedQuestions, setExtractedQuestions] = useState<any[]>([]);
-  const [extractMode, setExtractMode] = useState<"auto" | "local" | "ai">("auto");
+  const [extractMode, setExtractMode] = useState<"local" | "ai">("local");
   const [extractDraftId, setExtractDraftId] = useState<string | null>(null);
   const [pdfExtractText, setPdfExtractText] = useState("");
   const [genMode, setGenMode] = useState<"file" | "text" | "json">("file");
   const [jsonQuestionsInput, setJsonQuestionsInput] = useState("");
-  const [showAiPromptHelper, setShowAiPromptHelper] = useState(false);
+    const [showAiPromptHelper, setShowAiPromptHelper] = useState(false);
   const [promptNumQs, setPromptNumQs] = useState("50");
   const [promptTopic, setPromptTopic] = useState("");
-  const [selectedPromptType, setSelectedPromptType] = useState("en-ta");
+  const [selectedPromptType, setSelectedPromptType] = useState<"normal" | "formula">("normal");
+  const [targetLangs, setTargetLangs] = useState<string[]>(["English", "Tamil"]);
+  const [customTargetLang, setCustomTargetLang] = useState("");
+  const [testLangFilter, setTestLangFilter] = useState("en-ta");
   const [editingNotice, setEditingNotice] = useState<any | null>(null);
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
@@ -2829,6 +3096,7 @@ function MainApp() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [reviewData, setReviewData] = useState<any | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [attemptQuestions, setAttemptQuestions] = useState<any[]>([]);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -2994,11 +3262,20 @@ function MainApp() {
         const res = await api.get(`/test-portal/test-creation/permission-requests?${params.toString()}`);
         const data = Array.isArray(res) ? res : (res?.data || []);
         
+        const activeData = data.filter((req: any) => {
+          const completed = isRequestForCompletedTest(req);
+          if (completed && req.id) {
+            api.delete(`/test-portal/test-creation/permission-requests/${req.id}`).catch(() => {});
+            return false;
+          }
+          return true;
+        });
+
         // Synchronize state and localStorage with server data
-        setOfflineTestRequests(data);
+        setOfflineTestRequests(activeData);
         try {
           if (typeof localStorage !== "undefined") {
-            localStorage.setItem("nermai_offline_test_requests", JSON.stringify(data));
+            localStorage.setItem("nermai_offline_test_requests", JSON.stringify(activeData));
           }
         } catch (storageErr) {}
       } catch (e) {
@@ -3023,19 +3300,97 @@ function MainApp() {
 
 
   // Load offline test permission requests from backend
+  const isRequestForCompletedTest = (req: any) => {
+    if (!req) return false;
+    const flatResults = Array.isArray(allTestResults)
+      ? allTestResults.flatMap((t: any) => (t.entries || []).map((e: any) => ({ ...e, testId: t.testId })))
+      : [];
+    const attempts = [
+      ...(Array.isArray(studentAttempts) ? studentAttempts : []),
+      ...flatResults
+    ];
+    return attempts.some((att: any) => {
+      const attTestId = String(att.testId || att.test?._id || att.test || '').trim();
+      const reqTestId = String(req.testId || '').trim();
+      if (attTestId && reqTestId && attTestId !== reqTestId) return false;
+
+      const attStudentId = String(att.studentId || att.userId || att.username || att.rollNumber || '').trim().toLowerCase();
+      const reqStudentId = String(req.studentId || req.username || req.rollNumber || '').trim().toLowerCase();
+
+      const attRoll = String(att.rollNumber || att.rollNo || '').trim().toLowerCase();
+      const reqRoll = String(req.rollNumber || '').trim().toLowerCase();
+
+      const attName = String(att.studentName || att.name || '').trim().toLowerCase();
+      const reqName = String(req.studentName || '').trim().toLowerCase();
+
+      const isUserMatch = (reqStudentId && attStudentId === reqStudentId) ||
+                          (reqRoll && (attRoll === reqRoll || attStudentId === reqRoll || attRoll === reqStudentId)) ||
+                          (reqStudentId && attRoll === reqStudentId);
+      const isNameMatch = reqName && attName && attName === reqName;
+
+      const isCompleted = att.status === "submitted" || att.status === "evaluated" || att.status === "pass" || att.status === "fail" || att.isSubmitted || !!att.submittedAt || att.obtainedMarks !== undefined;
+
+      return (isUserMatch || isNameMatch) && isCompleted;
+    });
+  };
+
+  // Load offline test permission requests from backend
+  const isRequestInvalidOrCompleted = (req: any) => {
+    if (!req) return true;
+
+    // 1. Is student attempt completed?
+    if (isRequestForCompletedTest(req)) return true;
+
+    // 2. Is test deleted, non-existent, or past its endTime (test is OVER)?
+    const allTestsList = [
+      ...(Array.isArray(tests) ? tests : []),
+      ...(Array.isArray(liveTests) ? liveTests : []),
+      ...(Array.isArray(pastTests) ? pastTests : [])
+    ];
+    if (req.testId && allTestsList.length > 0) {
+      const reqTestId = String(req.testId).trim();
+      const matchingTest = allTestsList.find((t: any) => String(t.id || t._id).trim() === reqTestId);
+
+      if (!matchingTest || matchingTest.isDeleted) {
+        // Test no longer exists or was deleted!
+        return true;
+      }
+
+      // Check if test is OVER (endTime has passed)
+      if (matchingTest.endTime) {
+        const endTimeMs = typeof matchingTest.endTime?.toDate === "function"
+          ? matchingTest.endTime.toDate().getTime()
+          : new Date(matchingTest.endTime).getTime();
+        if (!isNaN(endTimeMs) && Date.now() > endTimeMs) {
+          // Test is OVER!
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  // Load offline test permission requests from backend
   const loadOfflineTestRequests = async () => {
     try {
       const res = await api.get("/test-portal/test-creation/permission-requests");
       const data = res?.data || res || [];
       if (Array.isArray(data)) {
-        setOfflineTestRequests(data);
+        const activeRequests = data.filter((req: any) => {
+          const invalidOrCompleted = isRequestInvalidOrCompleted(req);
+          if (invalidOrCompleted && req.id) {
+            api.delete(`/test-portal/test-creation/permission-requests/${req.id}`).catch(() => {});
+            return false;
+          }
+          return true;
+        });
+        setOfflineTestRequests(activeRequests);
       }
     } catch (e) {
       // silently ignore
     }
   };
-
-  // Admin: auto-poll every 10s so new student requests appear without manual refresh
   useEffect(() => {
     if (!isAdmin) return;
     loadOfflineTestRequests();
@@ -4907,7 +5262,9 @@ function MainApp() {
 
       if (user && (user.role === "student" || user.role === "guest")) {
         try {
-          const attemptsRes = await api.get(`/test-portal/review/history/${user.userId}`);
+          const myStudent = getLoggedInStudent(user, students);
+          const lookupId = myStudent?.id || user.studentId || user.userId;
+          const attemptsRes = await api.get(`/test-portal/review/history/${lookupId}`);
           const newAttempts = attemptsRes?.data || attemptsRes || [];
           setStudentAttempts(prev => {
             if (JSON.stringify(prev) === JSON.stringify(newAttempts)) {
@@ -6242,16 +6599,23 @@ function MainApp() {
       const normalized = parsed.map((q: any) => {
         const questionEn = q.questionEn || q.questionText || q.question || "";
         const questionTa = q.questionTa || "";
+        const questionMl = q.questionMl || "";
+        const questionTe = q.questionTe || "";
+        const formula = q.formula || "";
+        const explanation = q.explanation || "";
+
         let optionsObj: any = {
-          A: { en: "", ta: "" },
-          B: { en: "", ta: "" },
-          C: { en: "", ta: "" },
-          D: { en: "", ta: "" }
+          A: { en: "", ta: "", ml: "", te: "" },
+          B: { en: "", ta: "", ml: "", te: "" },
+          C: { en: "", ta: "", ml: "", te: "" },
+          D: { en: "", ta: "", ml: "", te: "" }
         };
         if (q.options && typeof q.options === "object" && !Array.isArray(q.options)) {
           ["A", "B", "C", "D"].forEach(k => {
             optionsObj[k].en = q.options[k]?.en || q.options[k] || "";
             optionsObj[k].ta = q.options[k]?.ta || "";
+            optionsObj[k].ml = q.options[k]?.ml || "";
+            optionsObj[k].te = q.options[k]?.te || "";
           });
         } else if (Array.isArray(q.options)) {
           ["A", "B", "C", "D"].forEach((k, idx) => {
@@ -6259,12 +6623,23 @@ function MainApp() {
           });
         }
         ["A", "B", "C", "D"].forEach(k => {
-          const flatEn = q[`option ${k.toLowerCase()}`] || q[`option${k}`] || "";
-          const flatTa = q[`option ${k.toLowerCase()} ta`] || q[`option${k}Ta`] || "";
+          const lk = k.toLowerCase();
+          const flatEn = q[`option ${lk}`] || q[`option${k}`] || "";
+          const flatTa = q[`optionTa_${lk}`] || q[`optionTa_${k}`] || q[`option ${lk} ta`] || q[`option${k}Ta`] || "";
+          const flatMl = q[`optionMl_${lk}`] || q[`optionMl_${k}`] || q[`option ${lk} ml`] || q[`option${k}Ml`] || "";
+          const flatTe = q[`optionTe_${lk}`] || q[`optionTe_${k}`] || q[`option ${lk} te`] || q[`option${k}Te`] || "";
           if (flatEn && !optionsObj[k].en) optionsObj[k].en = flatEn;
           if (flatTa && !optionsObj[k].ta) optionsObj[k].ta = flatTa;
+          if (flatMl && !optionsObj[k].ml) optionsObj[k].ml = flatMl;
+          if (flatTe && !optionsObj[k].te) optionsObj[k].te = flatTe;
         });
-        let correctAnswer = q.correctAnswer || q.correctOption || q.answer || "";
+
+        // Generate optionsTa, optionsMl, optionsTe lists for convenient access
+        const optionsTa = ["A", "B", "C", "D"].map(k => optionsObj[k].ta).filter(Boolean);
+        const optionsMl = ["A", "B", "C", "D"].map(k => optionsObj[k].ml).filter(Boolean);
+        const optionsTe = ["A", "B", "C", "D"].map(k => optionsObj[k].te).filter(Boolean);
+
+        let correctAnswer = q.correctAnswer || q.correctOption || q["correct option"] || q.answer || "";
         correctAnswer = correctAnswer.toString().trim().toUpperCase();
         if (!["A", "B", "C", "D"].includes(correctAnswer)) {
           correctAnswer = "A";
@@ -6273,7 +6648,14 @@ function MainApp() {
           ...q,
           questionEn,
           questionTa,
+          questionMl,
+          questionTe,
+          formula,
+          explanation,
           options: optionsObj,
+          optionsTa: optionsTa.length > 0 ? optionsTa : q.optionsTa,
+          optionsMl: optionsMl.length > 0 ? optionsMl : q.optionsMl,
+          optionsTe: optionsTe.length > 0 ? optionsTe : q.optionsTe,
           correctAnswer
         };
       });
@@ -6719,16 +7101,20 @@ function MainApp() {
   const createStudentRecord = async () => {
     const roll = (newStudent.loginUsername || "").trim();
     const phone = (newStudent.phone || "").trim();
+    const studentName = (newStudent.firstName || "").trim();
     const generatedPassword = roll + (phone.length >= 4 ? phone.slice(-4) : phone);
     
     const studentToSave = {
       ...newStudent,
+      name: studentName,
+      firstName: studentName,
       rollNumber: roll,
       loginPassword: generatedPassword
     };
 
     const hasBatches = studentToSave.batches && studentToSave.batches.length > 0;
     if (
+      !studentToSave.firstName ||
       !studentToSave.loginUsername ||
       !studentToSave.phone ||
       !hasBatches ||
@@ -6738,7 +7124,7 @@ function MainApp() {
       !studentToSave.joiningDate ||
       !studentToSave.modeOfPayment
     ) {
-      Alert.alert("Error", "All fields are required (including Username/Roll Number and Phone Number for password generation)");
+      Alert.alert("Error", "All fields are required (including Student Full Name, Username/Roll Number, and Phone Number)");
       return;
     }
     const total = Number(studentToSave.totalFees) || 0;
@@ -6749,7 +7135,7 @@ function MainApp() {
     }
     setIsSavingStudent(true);
     try {
-      await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user.name });
+      await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user?.name || user?.username || "Super Admin", createdByAdmin: user?.username || user?.name || "Super Admin" });
       Alert.alert("Success", "Student created successfully.");
       setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
       loadStudents();
@@ -6857,6 +7243,44 @@ function MainApp() {
     }
   };
 
+  const generateSpecialRollNumbersForBatch = async (batchName: string, subBatches: string[], enableSpecialRollNo: boolean) => {
+    if (!enableSpecialRollNo || !subBatches || subBatches.length === 0) return {};
+
+    const digitsMatch = (batchName || "").match(/\d+/);
+    const prefix = digitsMatch ? digitsMatch[0] : "18";
+
+    let orderedStudents: any[] = [];
+    subBatches.forEach(bName => {
+      const bStudents = students.filter(s => (s.batch || s.batchName) === bName);
+      bStudents.sort((a, b) => {
+        const rA = String(a.rollNumber || a.name || "");
+        const rB = String(b.rollNumber || b.name || "");
+        return rA.localeCompare(rB, undefined, { numeric: true });
+      });
+      orderedStudents.push(...bStudents);
+    });
+
+    const studentRollMap: Record<string, string> = {};
+    for (let i = 0; i < orderedStudents.length; i++) {
+      const s = orderedStudents[i];
+      const seq = String(i + 1).padStart(4, '0');
+      const specialRollNo = `${prefix}${seq}`;
+      studentRollMap[s.id] = specialRollNo;
+
+      try {
+        const updatedSpecialRolls = { ...(s.specialRollNumbers || {}), [batchName]: specialRollNo };
+        await api.put(`/erp/students/${s.id}`, {
+          ...s,
+          specialRollNumbers: updatedSpecialRolls,
+          specialRollNo: specialRollNo
+        });
+      } catch (err) {
+        console.log(`Could not update special roll for student ${s.id}:`, err);
+      }
+    }
+    return studentRollMap;
+  };
+
   const createBatch = async (isSpecialBatch: boolean = false) => {
     if (!newBatch.batchName || !newBatch.course) {
       Alert.alert("Error", "Batch name and course are required.");
@@ -6864,14 +7288,20 @@ function MainApp() {
     }
     setIsSavingBatch(true);
     try {
+      let studentRollMap: Record<string, string> = {};
+      if (isSpecialBatch && newBatch.enableSpecialRollNo && (newBatch.subBatches || []).length > 0) {
+        studentRollMap = await generateSpecialRollNumbersForBatch(newBatch.batchName, newBatch.subBatches, true);
+      }
+
       const payload = {
         ...newBatch,
         isSpecial: isSpecialBatch,
+        studentRollMap,
         createdBy: user.name
       };
       await api.post("/erp/batch", payload);
-      Alert.alert("Success", isSpecialBatch ? "Special Batch created successfully." : "Batch created successfully.");
-      setNewBatch({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [] });
+      Alert.alert("Success", isSpecialBatch ? `Special Batch created successfully with ${Object.keys(studentRollMap).length > 0 ? Object.keys(studentRollMap).length + ' special roll numbers generated!' : 'same general roll numbers.'}` : "Batch created successfully.");
+      setNewBatch({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [], enableSpecialRollNo: false });
       loadBatches();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to create batch.");
@@ -6883,7 +7313,11 @@ function MainApp() {
   const updateBatch = async () => {
     if (!editingBatch || !editingBatch.id) return;
     try {
-      await api.put(`/erp/batch/${editingBatch.id}`, { ...editingBatch, updatedBy: user.name });
+      let studentRollMap: Record<string, string> = editingBatch.studentRollMap || {};
+      if (editingBatch.isSpecial && editingBatch.enableSpecialRollNo && (editingBatch.subBatches || []).length > 0) {
+        studentRollMap = await generateSpecialRollNumbersForBatch(editingBatch.batchName, editingBatch.subBatches, true);
+      }
+      await api.put(`/erp/batch/${editingBatch.id}`, { ...editingBatch, studentRollMap, updatedBy: user.name });
       Alert.alert("Success", "Batch updated successfully!");
       setEditingBatch(null);
       loadBatches();
@@ -7336,11 +7770,67 @@ function MainApp() {
     }
   };
 
+    const renderTestFeedbackModal = () => {
+    if (!testFeedbackModal.visible) return null;
+    return (
+      <Modal visible={true} animationType="slide" transparent>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
+          <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "100%", maxWidth: 450, borderRadius: 16, padding: 20, alignSelf: "center", justifyContent: "center" }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "800" }]}>Exam Feedback Required</Text>
+                <Text style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{testFeedbackModal.testTitle}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setTestFeedbackModal({ visible: false, testId: "", attemptId: "", testTitle: "", rating: 5, comments: "" })}>
+                <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 350 }} contentContainerStyle={{ gap: 12 }}>
+              <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>Your Name</Text>
+              <View style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444" }, { justifyContent: "center", height: 38, opacity: 0.8 }]}>
+                <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{user?.name || "Student"}</Text>
+              </View>
+
+              <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>How would you rate this test paper?</Text>
+              <View style={{ flexDirection: "row", gap: 14, marginVertical: 6, justifyContent: "center" }}>
+                {[1, 2, 3, 4, 5].map(r => (
+                  <TouchableOpacity key={r} onPress={() => setTestFeedbackModal(prev => ({ ...prev, rating: r }))} style={{ alignItems: "center" }}>
+                    <Ionicons name={r <= testFeedbackModal.rating ? "star" : "star-outline"} size={36} color={r <= testFeedbackModal.rating ? "#FFA000" : "#bdbdbd"} />
+                    <Text style={{ fontSize: 10, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 2 }}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>Your comments * (Mandatory)</Text>
+              <TextInput
+                style={[styles.input, { height: 90, textAlignVertical: "top" }, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                placeholder="Provide your feedback about the exam questions, difficulty level, etc..."
+                placeholderTextColor={darkMode ? "#666" : "#999"}
+                multiline
+                value={testFeedbackModal.comments}
+                onChangeText={txt => setTestFeedbackModal(prev => ({ ...prev, comments: txt }))}
+              />
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={submitTestFeedback}
+              style={[styles.primaryBtn, { width: "100%", marginTop: 15, backgroundColor: "#e65100" }]}
+            >
+              <Text style={styles.primaryBtnTxt}>Submit Exam Feedback</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   const submitTestFeedback = async () => {
     if (!testFeedbackModal.comments.trim()) {
       Alert.alert("Input Required", "Please enter comments before submitting.");
       return;
     }
+    const currentAttemptId = testFeedbackModal.attemptId;
     try {
       await api.post("/test-portal/test-creation/feedback", {
         testId: testFeedbackModal.testId,
@@ -7352,8 +7842,11 @@ function MainApp() {
         submittedAt: new Date().toISOString()
       });
       Alert.alert("Thank You!", "Your test feedback has been submitted.");
-      setTestFeedbackModal({ visible: false, testId: "", testTitle: "", rating: 5, comments: "" });
+      setTestFeedbackModal({ visible: false, testId: "", attemptId: "", testTitle: "", rating: 5, comments: "" });
       loadTestFeedbacks();
+      if (currentAttemptId) {
+        await launchReview(currentAttemptId);
+      }
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to submit feedback.");
     }
@@ -7765,6 +8258,22 @@ function MainApp() {
 
       examLocalStorage.saveDraft(attemptData.attemptId, { attempt: attemptData, questions: qRes || [], answers: {} });
     } catch (e: any) {
+      if (e.message && (e.message.toLowerCase().includes("already completed") || e.message.toLowerCase().includes("completed this test"))) {
+        try {
+          const myStudent = getLoggedInStudent(user, students);
+          const lookupId = myStudent?.id || user.studentId || user.userId;
+          const attemptsRes = await api.get(`/test-portal/review/history/${lookupId}`);
+          const newAttempts = attemptsRes?.data || attemptsRes || [];
+          setStudentAttempts(newAttempts);
+          const matchedAttempt = newAttempts.find((a: any) => a.testId === test.id);
+          if (matchedAttempt) {
+            await launchReview(matchedAttempt.attemptId || matchedAttempt.id);
+            return;
+          }
+        } catch (historyErr) {
+          console.log("Failed to auto-resolve completed attempt review:", historyErr);
+        }
+      }
       Alert.alert("Error Starting Exam", e.message || "Could not initialize test attempt.");
     } finally {
       setStartingTestId(null);
@@ -7848,23 +8357,40 @@ function MainApp() {
       examLocalStorage.clearDraft(attemptId);
       loadTests();
 
-      // 5. Transition to feedback or review screen
-      const testObj = tests.find((t: any) => t.id === testId);
-      const isFeedbackRequired = testObj?.requireFeedback === true;
+      // AUTO-DELETE OFFLINE STUDENT TEST REQUEST ON COMPLETION
+      try {
+        const reqToDelete = offlineTestRequests.find((r: any) =>
+          r.testId === testId &&
+          (r.studentId === (myStudent?.id || user?.userId) || r.rollNumber === (myStudent?.rollNumber || user?.username))
+        );
+        if (reqToDelete && reqToDelete.id) {
+          api.delete(`/test-portal/test-creation/permission-requests/${reqToDelete.id}`).catch(() => {});
+        }
+        api.delete(`/test-portal/test-creation/permission-requests?testId=${testId}&studentId=${myStudent?.id || user?.userId || ''}`).catch(() => {});
+        setOfflineTestRequests(prev => prev.filter((r: any) =>
+          !(r.testId === testId && (r.studentId === (myStudent?.id || user?.userId) || r.rollNumber === (myStudent?.rollNumber || user?.username)))
+        ));
+      } catch (e) {
+        console.log("Note clearing offline request:", e);
+      }
 
-      if (isFeedbackRequired) {
+      // 5. Always launch test review/results immediately so feedback/analysis appears right away
+      await launchReview(attemptId);
+
+      // 6. If feedback is enabled on this test, pop up the feedback modal over the review results
+      const testObj = tests.find((t: any) => t.id === testId);
+      if (testObj?.requireFeedback === true) {
         setTestFeedbackModal({
           visible: true,
           testId: testId,
+          attemptId: attemptId,
           testTitle: testObj?.title || "Test",
           rating: 5,
           comments: ""
         });
-      } else {
-        await launchReview(attemptId);
       }
 
-      // 6. Show score alert
+      // 7. Show score alert
       if (evalData) {
         const obtained = evalData?.obtainedMarks ?? 0;
         const total = evalData?.totalMarks ?? 0;
@@ -7881,8 +8407,6 @@ function MainApp() {
       await launchReview(attemptId);
     } finally {
       setReviewLoading(false);
-      submitInProgressRef.current = false;
-      setSubmitLoading(false);
     }
   };
 
@@ -9055,9 +9579,9 @@ function MainApp() {
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 15 }}>
                     {[
                       { label: "All Users", value: "all" },
-                      { label: "Paid (All)", value: "paid" },
-                      { label: "Paid (Batch)", value: "batch" },
-                      { label: "Free Only", value: "free" }
+                      { label: "Enrolled (All)", value: "paid" },
+                      { label: "Enrolled (Batch)", value: "batch" },
+                      { label: "Free (Guest)", value: "free" }
                     ].map((aud) => (
                       <TouchableOpacity
                         key={aud.value}
@@ -9096,8 +9620,14 @@ function MainApp() {
                           backgroundColor: darkMode ? "#222" : "#fff"
                         }}
                       >
-                        <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>
-                          {newTest.targetBatch || "Choose a Batch..."}
+                        <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12, fontWeight: "bold" }}>
+                          {(() => {
+                            const raw = newTest.targetBatch || "";
+                            const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                            if (list.length === 0) return "Choose Target Batches...";
+                            if (list.length === 1) return list[0];
+                            return `${list.length} Batches Selected (${list.join(", ")})`;
+                          })()}
                         </Text>
                         <Ionicons name={showManualTestBatchDropdown ? "chevron-up" : "chevron-down"} size={14} color="#757575" />
                       </TouchableOpacity>
@@ -9108,26 +9638,50 @@ function MainApp() {
                           borderRadius: 8,
                           marginTop: 4,
                           backgroundColor: darkMode ? "#222" : "#fff",
-                          maxHeight: 150,
+                          maxHeight: 180,
                           overflow: "hidden"
                         }}>
                           <ScrollView nestedScrollEnabled>
-                            {batches.map((b) => (
-                              <TouchableOpacity
-                                key={b.id}
-                                onPress={() => {
-                                  setNewTest({ ...newTest, targetBatch: b.batchName });
-                                  setShowManualTestBatchDropdown(false);
-                                }}
-                                style={{
-                                  padding: 10,
-                                  borderBottomWidth: 1,
-                                  borderBottomColor: darkMode ? "#333" : "#f0f0f0"
-                                }}
-                              >
-                                <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>{b.batchName} ({b.course})</Text>
-                              </TouchableOpacity>
-                            ))}
+                            {batches.map((b: any) => {
+                              const raw = newTest.targetBatch || "";
+                              const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                              const isSelected = list.includes(b.batchName);
+
+                              const toggleBatch = () => {
+                                let newList: string[];
+                                if (isSelected) {
+                                  newList = list.filter((item: string) => item !== b.batchName);
+                                } else {
+                                  newList = [...list, b.batchName];
+                                }
+                                setNewTest({ ...newTest, targetBatch: newList.join(", ") });
+                              };
+
+                              return (
+                                <TouchableOpacity
+                                  key={b.id}
+                                  onPress={toggleBatch}
+                                  style={{
+                                    padding: 10,
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    borderBottomWidth: 1,
+                                    borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                    backgroundColor: isSelected ? (darkMode ? "#3a1c1c" : "#ffebee") : "transparent"
+                                  }}
+                                >
+                                  <Ionicons
+                                    name={isSelected ? "checkbox" : "square-outline"}
+                                    size={16}
+                                    color={isSelected ? "#c62828" : (darkMode ? "#aaa" : "#757575")}
+                                  />
+                                  <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#212121"), fontSize: 12, fontWeight: isSelected ? "bold" : "normal" }}>
+                                    {b.batchName} ({b.course})
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
                             {batches.length === 0 && (
                               <Text style={{ padding: 10, color: "#888", fontSize: 12, textAlign: "center" }}>No batches found</Text>
                             )}
@@ -9689,8 +10243,8 @@ function MainApp() {
                         }}
                       >
                         <option value="public">All Users (Public)</option>
-                        <option value="premium">Paid All (All Paid Students)</option>
-                        <option value="batch">Paid Batch Wise (Specific Batches)</option>
+                        <option value="premium">Enrolled All (All Enrolled Students)</option>
+                        <option value="batch">Enrolled Batch Wise (Specific Batches)</option>
                       </select>
                     </View>
                   </View>
@@ -9993,7 +10547,7 @@ function MainApp() {
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="premium">All Paid Students</option>
+                        <option value="premium">All Enrolled Students</option>
                         <option value="free">All Students (Free & Paid)</option>
                         <option value="batch">Specific Batch</option>
                       </select>
@@ -10012,7 +10566,7 @@ function MainApp() {
                           }}
                         >
                           <option value="all">All Users</option>
-                          <option value="all_paid">All Paid Users</option>
+                          <option value="all_paid">All Enrolled Users</option>
                           <option value="all_free">All Free Users</option>
                           <option value="erp">ERP Batches (All)</option>
                           <option value="select">Select Specific Batches</option>
@@ -10491,8 +11045,8 @@ function MainApp() {
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="premium">All Paid Students</option>
-                        <option value="free">All Students (Free & Paid)</option>
+                        <option value="premium">All Enrolled Students</option>
+                        <option value="free">All Students (Free & Enrolled)</option>
                         <option value="batch">Specific Batch</option>
                       </select>
                     </View>
@@ -10510,7 +11064,7 @@ function MainApp() {
                           }}
                         >
                           <option value="all">All Users</option>
-                          <option value="all_paid">All Paid Users</option>
+                          <option value="all_paid">All Enrolled Users</option>
                           <option value="all_free">All Free Users</option>
                           <option value="erp">ERP Batches (All)</option>
                           <option value="select">Select Specific Batches</option>
@@ -10654,49 +11208,84 @@ function MainApp() {
             {!showAuthFlip ? (
               // REGISTER PANEL
               <View style={{ gap: 12 }}>
-                <View style={{ gap: 4 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Your Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your full name"
-                    placeholderTextColor="#999"
-                    value={guestNameInput}
-                    onChangeText={setGuestNameInput}
-                  />
-                </View>
-                <View style={{ gap: 4 }}>
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Contact Number *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="10-digit mobile number"
-                    placeholderTextColor="#999"
-                    keyboardType="phone-pad"
-                    maxLength={10}
-                    value={guestPhoneInput}
-                    onChangeText={v => setGuestPhoneInput(cleanPhone(v))}
-                  />
-                </View>
-                {(() => {
-                  const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
-                  const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
-                  return (
-                    <View style={{ gap: 8 }}>
-                      <TouchableOpacity
-                        onPress={() => { setPendingGuestTab("courses"); handleGoogleAuthSignIn(); }}
-                        disabled={!isFormFilled}
-                        style={[styles.primaryBtn, { backgroundColor: isFormFilled ? "#4285F4" : "#e0e0e0", marginVertical: 0, gap: 8 }]}
-                      >
-                        <Ionicons name="logo-google" size={18} color={isFormFilled ? "#fff" : "#9e9e9e"} />
-                        <Text style={[styles.primaryBtnTxt, { color: isFormFilled ? "#fff" : "#9e9e9e" }]}>Continue with Google</Text>
+                {pendingGoogleUser ? (
+                  // STEP 2: Google Account Logged In -> Ask for Name and Contact Number (New User)
+                  <View style={{ gap: 12 }}>
+                    <View style={{ backgroundColor: "#e8f0fe", padding: 12, borderRadius: 10, borderLeftWidth: 4, borderLeftColor: "#4285F4", flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <Ionicons name="logo-google" size={20} color="#4285F4" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 11, color: "#1565c0", fontWeight: "700" }}>Google Account Connected</Text>
+                        <Text style={{ fontSize: 12, color: "#3c4043", fontWeight: "600" }}>{pendingGoogleUser.email}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setPendingGoogleUser(null)}>
+                        <Ionicons name="close-circle" size={18} color="#757575" />
                       </TouchableOpacity>
-                      {!isFormFilled && (
-                        <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
-                          {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
-                        </Text>
-                      )}
                     </View>
-                  );
-                })()}
+                    <Text style={{ fontSize: 12, color: "#5f6368", fontStyle: "italic", textAlign: "center" }}>
+                      Welcome! Please complete your name and contact number to finish registration.
+                    </Text>
+
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Your Name *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Enter your full name"
+                        placeholderTextColor="#999"
+                        value={guestNameInput}
+                        onChangeText={setGuestNameInput}
+                      />
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "800", color: "#424242", letterSpacing: 0.8, textTransform: "uppercase" }}>Contact Number *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="10-digit mobile number"
+                        placeholderTextColor="#999"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={guestPhoneInput}
+                        onChangeText={v => setGuestPhoneInput(cleanPhone(v))}
+                      />
+                    </View>
+
+                    {(() => {
+                      const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
+                      const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
+                      return (
+                        <View style={{ gap: 8 }}>
+                          <TouchableOpacity
+                            onPress={() => { setPendingGuestTab("courses"); handleGoogleAuthSignIn(guestNameInput, guestPhoneInput, pendingGoogleUser); }}
+                            disabled={!isFormFilled}
+                            style={[styles.primaryBtn, { backgroundColor: isFormFilled ? "#c62828" : "#e0e0e0", marginVertical: 0, gap: 8 }]}
+                          >
+                            <Ionicons name="checkmark-circle" size={18} color={isFormFilled ? "#fff" : "#9e9e9e"} />
+                            <Text style={[styles.primaryBtnTxt, { color: isFormFilled ? "#fff" : "#9e9e9e" }]}>Complete Registration</Text>
+                          </TouchableOpacity>
+                          {!isFormFilled && (
+                            <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
+                              {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })()}
+                  </View>
+                ) : (
+                  // STEP 1: Direct Google Login Button
+                  <View style={{ gap: 16, paddingVertical: 10 }}>
+                    <Text style={{ fontSize: 13, color: "#616161", textAlign: "center", lineHeight: 18 }}>
+                      Register or Sign In with your Google account to access public mock tests & study materials.
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => { setPendingGuestTab("courses"); handleGoogleAuthSignIn(); }}
+                      style={[styles.primaryBtn, { backgroundColor: "#4285F4", marginVertical: 0, gap: 10, paddingVertical: 14, borderRadius: 12 }]}
+                    >
+                      <Ionicons name="logo-google" size={20} color="#fff" />
+                      <Text style={[styles.primaryBtnTxt, { color: "#fff", fontSize: 15, fontWeight: "700" }]}>Continue with Google</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
                 <TouchableOpacity onPress={() => setShowAuthFlip(true)} style={{ alignItems: "center", marginTop: 8 }}>
                   <Text style={{ fontSize: 13, color: "#1565c0", fontWeight: "700" }}>Already a registered student? Sign in →</Text>
                 </TouchableOpacity>
@@ -10916,57 +11505,7 @@ function MainApp() {
         )}
 
         {/* Test Feedback Modal */}
-        {testFeedbackModal.visible && (
-          <Modal visible={true} animationType="slide" transparent>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "100%", maxWidth: 450, borderRadius: 16, padding: 20, alignSelf: "center", justifyContent: "center" }]}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                  <View style={{ flex: 1, marginRight: 10 }}>
-                    <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "800" }]}>Exam Feedback Required</Text>
-                    <Text style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{testFeedbackModal.testTitle}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setTestFeedbackModal({ visible: false, testId: "", testTitle: "", rating: 5, comments: "" })}>
-                    <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 350 }} contentContainerStyle={{ gap: 12 }}>
-                  <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>Your Name</Text>
-                  <View style={[styles.input, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444" }, { justifyContent: "center", height: 38, opacity: 0.8 }]}>
-                    <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13 }}>{user?.name || "Student"}</Text>
-                  </View>
-
-                  <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>How would you rate this test paper?</Text>
-                  <View style={{ flexDirection: "row", gap: 14, marginVertical: 6, justifyContent: "center" }}>
-                    {[1, 2, 3, 4, 5].map(r => (
-                      <TouchableOpacity key={r} onPress={() => setTestFeedbackModal(prev => ({ ...prev, rating: r }))} style={{ alignItems: "center" }}>
-                        <Ionicons name={r <= testFeedbackModal.rating ? "star" : "star-outline"} size={36} color={r <= testFeedbackModal.rating ? "#FFA000" : "#bdbdbd"} />
-                        <Text style={{ fontSize: 10, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 2 }}>{r}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={[styles.label, darkMode && { color: "#aaa" }, { marginBottom: 2, fontSize: 12 }]}>Your comments * (Mandatory)</Text>
-                  <TextInput
-                    style={[styles.input, { height: 90, textAlignVertical: "top" }, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
-                    placeholder="Provide your feedback about the exam questions, difficulty level, etc..."
-                    placeholderTextColor={darkMode ? "#666" : "#999"}
-                    multiline
-                    value={testFeedbackModal.comments}
-                    onChangeText={txt => setTestFeedbackModal(prev => ({ ...prev, comments: txt }))}
-                  />
-                </ScrollView>
-
-                <TouchableOpacity
-                  onPress={submitTestFeedback}
-                  style={[styles.primaryBtn, { width: "100%", marginTop: 15, backgroundColor: "#e65100" }]}
-                >
-                  <Text style={styles.primaryBtnTxt}>Submit Exam Feedback</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-        )}
+        {renderTestFeedbackModal()}
 
         {/* Resource Creation/Edit Modal */}
         {showResourceModal && (
@@ -12880,21 +13419,77 @@ function MainApp() {
         <StatusBar style="light" />
 
         {/* ── EXAM HEADER ─────────────────────────────────── */}
-        <View style={[styles.header, { backgroundColor: "#c62828", flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 }]}>
-          <View style={{ flex: 1, marginRight: 8 }}>
+        <View style={[styles.header, { backgroundColor: "#c62828", flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10, flexWrap: "wrap", gap: 8, zIndex: 99999, elevation: 99999, overflow: "visible" }]}>
+          <View style={{ flex: 1, minWidth: 150, marginRight: 8 }}>
             <Text style={[styles.headerTitle, { fontSize: 13 }]} numberOfLines={1}>{activeAttempt.title || "Examination in Progress"}</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            {/* Instructions button */}
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {/* Top Bar Language View Selector Custom Dropdown */}
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, position: "relative", zIndex: 99999 }}>
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#ffffff", marginRight: 6 }}>文A View:</Text>
+              <View style={{ position: "relative" }}>
+                <TouchableOpacity 
+                  onPress={() => setShowLangDropdown(!showLangDropdown)}
+                  style={{ backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6 }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: "bold", color: "#c62828" }}>
+                    {(() => {
+                      const mapping = {
+                        "en-ta": "English + Tamil 🇮🇳",
+                        "en": "English Only 🇬🇧",
+                        "ta": "Tamil Only 🇮🇳",
+                        "en-ml": "English + Malayalam 🇮🇳",
+                        "ml": "Malayalam Only 🇮🇳",
+                        "en-te": "English + Telugu 🇮🇳",
+                        "te": "Telugu Only 🇮🇳"
+                      };
+                      return mapping[testLangFilter || "en-ta"];
+                    })()}
+                  </Text>
+                  <Ionicons name={showLangDropdown ? "chevron-up" : "chevron-down"} size={12} color="#c62828" />
+                </TouchableOpacity>
+                
+                {showLangDropdown && (
+                  <View style={{ position: "absolute", top: 32, right: 0, backgroundColor: "#ffffff", borderRadius: 8, padding: 4, width: 190, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5, zIndex: 100000 }}>
+                    {[
+                      { key: "en-ta", label: "English + Tamil 🇮🇳" },
+                      { key: "en", label: "English Only 🇬🇧" },
+                      { key: "ta", label: "Tamil Only 🇮🇳" },
+                      { key: "en-ml", label: "English + Malayalam 🇮🇳" },
+                      { key: "ml", label: "Malayalam Only 🇮🇳" },
+                      { key: "en-te", label: "English + Telugu 🇮🇳" },
+                      { key: "te", label: "Telugu Only 🇮🇳" }
+                    ].map(l => (
+                      <TouchableOpacity
+                        key={l.key}
+                        onPress={() => {
+                          setTestLangFilter(l.key);
+                          setShowLangDropdown(false);
+                        }}
+                        style={{ padding: 8, borderRadius: 4, backgroundColor: (testLangFilter || "en-ta") === l.key ? "#ffebee" : "transparent" }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: "bold", color: (testLangFilter || "en-ta") === l.key ? "#c62828" : "#333" }}>
+                          {l.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* Info button */}
             <TouchableOpacity
               onPress={() => setShowInstructions(true)}
-              style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4 }}
+              style={{ backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
             >
               <Ionicons name="information-circle-outline" size={16} color="#ffffff" />
               <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 11 }}>Info</Text>
             </TouchableOpacity>
+
             {/* Countdown timer */}
-            <View style={{ backgroundColor: "rgba(0,0,0,0.2)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+            <View style={{ backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
               <Text style={{ color: timeLeft <= 300 ? "#ffcdd2" : "#ffffff", fontWeight: "bold", fontSize: 16 }}>
                 {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, "0")}
               </Text>
@@ -13001,6 +13596,8 @@ function MainApp() {
             </View>
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={true} contentContainerStyle={{ paddingBottom: 20 }}>
+
+
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <Text style={{ color: "#c62828", fontWeight: "bold", fontSize: 13 }}>
                   QUESTION {currentQIdx + 1} OF {attemptQuestions.length}
@@ -13021,21 +13618,50 @@ function MainApp() {
                 >
                   <Ionicons name="warning-outline" size={14} color={userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "#c62828" : "#757575"} />
                   <Text style={{ fontSize: 11, fontWeight: "700", color: userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "#c62828" : "#616161" }}>
-                    {userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "Reported" : "Report Wrong Answer"}
+                    {userReportedSet.has(`${activeAttempt.testId}_${currentQIdx}`) ? "Reported" : "Report Question"}
                   </Text>
                 </TouchableOpacity>
               </View>
 
-              <Text style={{ fontSize: 17, fontWeight: "bold", color: "#212121", marginBottom: 6 }}>
-                {attemptQuestions[currentQIdx].question}
-              </Text>
-              {attemptQuestions[currentQIdx].questionTa ? (
-                <Text style={{ fontSize: 15, fontWeight: "500", color: "#455a64", marginBottom: 20, fontStyle: "italic" }}>
-                  {attemptQuestions[currentQIdx].questionTa}
-                </Text>
-              ) : (
-                <View style={{ height: 14 }} />
-              )}
+              {/* Dynamic Question Statement rendering based on testLangFilter */}
+              {(() => {
+                const currentQ = attemptQuestions[currentQIdx];
+                const filter = testLangFilter || "en-ta";
+                const showEn = filter.includes("en");
+                const showTa = filter.includes("ta");
+                const showMl = filter.includes("ml");
+                const showTe = filter.includes("te");
+
+                return (
+                  <View style={{ marginBottom: 12, gap: 4 }}>
+                    {showEn && (currentQ.question || currentQ.questionEn) && (
+                      <Text style={{ fontSize: 17, fontWeight: "bold", color: "#212121" }}>
+                        {currentQ.questionEn || currentQ.question}
+                      </Text>
+                    )}
+                    {showTa && currentQ.questionTa && (
+                      <Text style={{ fontSize: 15, fontWeight: "500", color: "#455a64", fontStyle: "italic" }}>
+                        {currentQ.questionTa}
+                      </Text>
+                    )}
+                    {showMl && currentQ.questionMl && (
+                      <Text style={{ fontSize: 15, fontWeight: "500", color: "#00838f", fontStyle: "italic" }}>
+                        {currentQ.questionMl}
+                      </Text>
+                    )}
+                    {showTe && currentQ.questionTe && (
+                      <Text style={{ fontSize: 15, fontWeight: "500", color: "#f57f17", fontStyle: "italic" }}>
+                        {currentQ.questionTe}
+                      </Text>
+                    )}
+                    {currentQ.formula && (
+                      <Text style={{ fontSize: 13, fontWeight: "bold", color: "#512da8", marginTop: 4 }}>
+                        Formula: {currentQ.formula}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })()}
 
               {/* Question Image Attachment if Present */}
               {(attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage) && (
@@ -13056,23 +13682,45 @@ function MainApp() {
 
               <View style={{ gap: 10 }}>
                 {attemptQuestions[currentQIdx].options?.map((opt: string, oIdx: number) => {
-                  const selected = selectedAnswers[attemptQuestions[currentQIdx].id] === opt;
-                  const optTa = attemptQuestions[currentQIdx].optionsTa?.[oIdx];
+                  const currentQ = attemptQuestions[currentQIdx];
+                  const selected = selectedAnswers[currentQ.id] === opt;
+                  const filter = testLangFilter || "en-ta";
+                  const showEn = filter.includes("en");
+                  const showTa = filter.includes("ta");
+                  const showMl = filter.includes("ml");
+                  const showTe = filter.includes("te");
+
+                  const optTa = currentQ.optionsTa?.[oIdx];
+                  const optMl = currentQ.optionsMl?.[oIdx];
+                  const optTe = currentQ.optionsTe?.[oIdx];
+
                   return (
                     <TouchableOpacity
                       key={oIdx}
                       onPress={() => selectAnswer(opt)}
                       style={[styles.modalOptionBtn, selected && styles.modalOptionBtnSelected, { minHeight: 48, paddingVertical: 8 }]}
                     >
-                      <View style={{ flexDirection: "column" }}>
-                        <Text style={{ color: selected ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 14 }}>
-                          {`${String.fromCharCode(65 + oIdx)}. ${opt}`}
-                        </Text>
-                        {optTa ? (
-                          <Text style={{ color: selected ? "#e0f2f1" : "#546e7a", fontSize: 13, marginTop: 2, fontStyle: "italic" }}>
-                            {optTa}
+                      <View style={{ flexDirection: "column", gap: 2 }}>
+                        {showEn && (
+                          <Text style={{ color: selected ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 14 }}>
+                            {`${String.fromCharCode(65 + oIdx)}. ${opt}`}
                           </Text>
-                        ) : null}
+                        )}
+                        {showTa && optTa && (
+                          <Text style={{ color: selected ? "#e0f2f1" : "#546e7a", fontSize: 13, fontStyle: "italic" }}>
+                            {!showEn ? `${String.fromCharCode(65 + oIdx)}. ${optTa}` : optTa}
+                          </Text>
+                        )}
+                        {showMl && optMl && (
+                          <Text style={{ color: selected ? "#b2ebf2" : "#00838f", fontSize: 13, fontStyle: "italic" }}>
+                            {!showEn && !showTa ? `${String.fromCharCode(65 + oIdx)}. ${optMl}` : optMl}
+                          </Text>
+                        )}
+                        {showTe && optTe && (
+                          <Text style={{ color: selected ? "#fff9c4" : "#f57f17", fontSize: 13, fontStyle: "italic" }}>
+                            {!showEn && !showTa && !showMl ? `${String.fromCharCode(65 + oIdx)}. ${optTe}` : optTe}
+                          </Text>
+                        )}
                       </View>
                     </TouchableOpacity>
                   );
@@ -13450,6 +14098,7 @@ function MainApp() {
             })
           )}
         </ScrollView>
+        {renderTestFeedbackModal()}
       </SafeAreaView>
     );
   }
@@ -14363,44 +15012,121 @@ function MainApp() {
 
 
                 {isAdmin ? (
-                  <>
-                    <View style={styles.row}>
-                      <View style={[styles.card, { flex: 1 }]}>
-                        <Text style={styles.cardVal}>{students.length}</Text>
-                        <Text style={styles.cardLbl}>Registered Students</Text>
-                      </View>
-                      <View style={[styles.card, { flex: 1 }]}>
-                        <Text style={styles.cardVal}>{staff.length}</Text>
-                        <Text style={styles.cardLbl}>Faculty & Mentors</Text>
-                      </View>
+                  <View style={{ marginVertical: 12 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, paddingHorizontal: 4 }}>
+                      <Ionicons name="flash-outline" size={18} color="#c62828" style={{ marginRight: 6 }} />
+                      <Text style={{ fontSize: 15, fontWeight: "bold", color: "#c62828" }}>Quick Access</Text>
                     </View>
-                    <View style={styles.row}>
-                      <View style={[styles.card, { flex: 1 }]}>
-                        <Text style={styles.cardVal}>{tests.length}</Text>
-                        <Text style={styles.cardLbl}>Active Mock Exams</Text>
-                      </View>
-                      <View style={[styles.card, { flex: 1 }]}>
-                        <Text style={styles.cardVal}>{admissions.length}</Text>
-                        <Text style={styles.cardLbl}>Logged Inquiries</Text>
-                      </View>
-                    </View>
-                    <View style={styles.row}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16, gap: 12 }}>
                       <TouchableOpacity
-                        onPress={() => { changeErpSub("profile-requests"); setProfileRequestsTab("incomplete"); setActiveTab("erp"); }}
-                        style={[styles.card, { flex: 1 }]}
+                        onPress={() => { setActiveTab("crm"); changeCrmSub("admission"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2a1b38" : "#f3e5f5",
+                          borderWidth: 1, borderColor: darkMode ? "#4a148c" : "#e1bee7", minHeight: 90, justifyContent: "space-between"
+                        }}
                       >
-                        <Text style={styles.cardVal}>{students.filter((s: any) => s.profileComplete).length}</Text>
-                        <Text style={styles.cardLbl}>Completed Profiles</Text>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="mail-outline" size={20} color="#7b1fa2" />
+                          <Ionicons name="arrow-forward" size={14} color="#7b1fa2" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#e1bee7" : "#4a148c" }}>Admission Applications</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#ba68c8" : "#7b1fa2", marginTop: 2 }}>CRM Portal</Text>
+                        </View>
                       </TouchableOpacity>
+
                       <TouchableOpacity
-                        onPress={() => { changeErpSub("profile-requests"); setProfileRequestsTab("requests"); setActiveTab("erp"); }}
-                        style={[styles.card, { flex: 1 }]}
+                        onPress={() => { setActiveTab("crm"); changeCrmSub("queries"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#192a3a" : "#e1f5fe",
+                          borderWidth: 1, borderColor: darkMode ? "#0277bd" : "#b3e5fc", minHeight: 90, justifyContent: "space-between"
+                        }}
                       >
-                        <Text style={styles.cardVal}>{profileRequests.filter((r: any) => r.status === "pending").length}</Text>
-                        <Text style={styles.cardLbl}>Pending Profile Approvals</Text>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="chatbubble-ellipses-outline" size={20} color="#0288d1" />
+                          <Ionicons name="arrow-forward" size={14} color="#0288d1" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#b3e5fc" : "#01579b" }}>Inquiries</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#4fc3f7" : "#0288d1", marginTop: 2 }}>CRM Leads & Queries</Text>
+                        </View>
                       </TouchableOpacity>
-                    </View>
-                  </>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("erp"); changeErpSub("profile-requests"); setProfileRequestsTab("requests"); }}
+                        style={{
+                          width: 230, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#332219" : "#fff3e0",
+                          borderWidth: 1, borderColor: darkMode ? "#e65100" : "#ffe0b2", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="person-add-outline" size={20} color="#e65100" />
+                          <View style={{ backgroundColor: "#e65100", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                            <Text style={{ color: "#fff", fontSize: 10, fontWeight: "bold" }}>
+                              {profileRequests.filter((r: any) => r.status === "pending").length} Pending
+                            </Text>
+                          </View>
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#ffe0b2" : "#e65100" }}>Profile Requests</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#ffb74d" : "#ef6c00", marginTop: 2 }}>
+                            {profileRequests.filter((r: any) => r.status === "pending").length} new request(s) awaiting review
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("lms"); setLmsSubTab("qrcode-permissions"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#19302c" : "#e0f2f1",
+                          borderWidth: 1, borderColor: darkMode ? "#00695c" : "#b2dfdb", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="qr-code-outline" size={20} color="#00796b" />
+                          <Ionicons name="arrow-forward" size={14} color="#00796b" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#b2dfdb" : "#004d40" }}>QR Code Permissions</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#80cbc4" : "#00796b", marginTop: 2 }}>Scanner Security</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("erp"); changeErpSub("profile-requests"); setProfileRequestsTab("requests"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#361b24" : "#fce4ec",
+                          borderWidth: 1, borderColor: darkMode ? "#880e4f" : "#f8bbd0", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="shield-checkmark-outline" size={20} color="#c2185b" />
+                          <Ionicons name="arrow-forward" size={14} color="#c2185b" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#f8bbd0" : "#880e4f" }}>Profile Edit Requests</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#f48fb1" : "#c2185b", marginTop: 2 }}>Edit Permissions</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("erp"); changeErpSub("finance"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1b2e1e" : "#e8f5e9",
+                          borderWidth: 1, borderColor: darkMode ? "#1b5e20" : "#c8e6c9", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="cash-outline" size={20} color="#2e7d32" />
+                          <Ionicons name="arrow-forward" size={14} color="#2e7d32" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#c8e6c9" : "#1b5e20" }}>Fees Portal</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#81c784" : "#2e7d32", marginTop: 2 }}>Student Finance</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </ScrollView>
+                  </View>
                 ) : (
                   <>
                     {user.role === "student" && (() => {
@@ -15036,86 +15762,6 @@ function MainApp() {
 
                     return (
                       <View style={{ gap: 12 }}>
-                        {/* Search & Filter Options Bar */}
-                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 16, marginBottom: 8, gap: 14 }]}>
-                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                            <Text style={{ fontWeight: "bold", fontSize: 14, color: darkMode ? "#fff" : "#2e7d32" }}>🔍 Search & Filter Tests</Text>
-                          </View>
-
-                          <TextInput
-                            style={[styles.input, { marginBottom: 4 }]}
-                            placeholder="Search by test title..."
-                            placeholderTextColor="#999"
-                            value={testFilterQuery}
-                            onChangeText={setTestFilterQuery}
-                          />
-
-                          {/* Category Filter Chips */}
-                          <View style={{ gap: 6 }}>
-                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#555" }}>CATEGORY</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                              {[
-                                { id: "all", label: "All Categories" },
-                                { id: "daily", label: "📅 Daily" },
-                                { id: "weekly", label: "📆 Weekly" },
-                                { id: "mock", label: "🏆 Mock" }
-                              ].map(item => {
-                                const isSelected = testFilterCategory === item.id;
-                                return (
-                                  <TouchableOpacity
-                                    key={item.id}
-                                    onPress={() => setTestFilterCategory(item.id)}
-                                    style={{
-                                      paddingHorizontal: 12,
-                                      paddingVertical: 6,
-                                      borderRadius: 20,
-                                      borderWidth: 2,
-                                      borderColor: isSelected ? "#2e7d32" : (darkMode ? "#444" : "#e0e0e0"),
-                                      backgroundColor: isSelected ? (darkMode ? "#e8f5e9" : "#e8f5e9") : (darkMode ? "#2a2a2a" : "#f5f5f5")
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 12, fontWeight: isSelected ? "bold" : "500", color: isSelected ? "#2e7d32" : (darkMode ? "#ccc" : "#666") }}>
-                                      {item.label}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </ScrollView>
-                          </View>
-
-                          {/* Status Filter Chips */}
-                          <View style={{ gap: 6 }}>
-                            <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#aaa" : "#555" }}>STATUS</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-                              {[
-                                { id: "all", label: "All Statuses" },
-                                { id: "live", label: "🟢 Live" },
-                                { id: "scheduled", label: "⏰ Upcoming" },
-                                ...(!isAdmin ? [{ id: "past", label: "📚 Past / Study" }] : [])
-                              ].map(item => {
-                                const isSelected = testFilterStatus === item.id;
-                                return (
-                                  <TouchableOpacity
-                                    key={item.id}
-                                    onPress={() => setTestFilterStatus(item.id)}
-                                    style={{
-                                      paddingHorizontal: 12,
-                                      paddingVertical: 6,
-                                      borderRadius: 20,
-                                      borderWidth: 2,
-                                      borderColor: isSelected ? "#2e7d32" : (darkMode ? "#444" : "#e0e0e0"),
-                                      backgroundColor: isSelected ? (darkMode ? "#e8f5e9" : "#e8f5e9") : (darkMode ? "#2a2a2a" : "#f5f5f5")
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 12, fontWeight: isSelected ? "bold" : "500", color: isSelected ? "#2e7d32" : (darkMode ? "#ccc" : "#666") }}>
-                                      {item.label}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </ScrollView>
-                          </View>
-                        </View>
 
                         {testsLoading || isInitialLoading ? (
                           <RNCardGridSkeleton count={4} darkMode={darkMode} />
@@ -15136,7 +15782,7 @@ function MainApp() {
                                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                                     <Ionicons name="key-outline" size={20} color="#c62828" />
                                     <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>
-                                      Offline Student Test Requests ({offlineTestRequests.filter((r: any) => r.status === "pending").length} Pending)
+                                      Offline Student Test Requests ({offlineTestRequests.filter((r: any) => r.status === "pending" && !isRequestInvalidOrCompleted(r)).length} Pending)
                                     </Text>
                                   </View>
                                   <View style={{ flexDirection: "row", gap: 6 }}>
@@ -15164,11 +15810,11 @@ function MainApp() {
                                   </View>
                                 </View>
 
-                                {offlineTestRequests.length === 0 ? (
+                                {offlineTestRequests.filter((req: any) => !isRequestInvalidOrCompleted(req)).length === 0 ? (
                                   <Text style={{ fontSize: 12, color: "#9e9e9e", fontStyle: "italic" }}>No offline student permission requests yet.</Text>
                                 ) : (
                                   <View style={{ gap: 8, marginTop: 6 }}>
-                                    {offlineTestRequests.map((req: any) => (
+                                    {offlineTestRequests.filter((req: any) => !isRequestInvalidOrCompleted(req)).map((req: any) => (
                                       <View key={req.id} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 10, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#eee" }}>
                                         <View style={{ flex: 1, paddingRight: 10 }}>
                                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -15349,17 +15995,27 @@ function MainApp() {
                                             <Text style={styles.primaryBtnTxt}>{req?.status === "rejected" ? "❌ Request Rejected (Tap to Re-send)" : "✋ Request Permission to Attend Test"}</Text>
                                           </TouchableOpacity>
                                         )
-                                      ) : (
-                                        <TouchableOpacity
-                                          disabled={statusInfo.disabled || startingTestId === t.id || reviewLoading}
-                                          onPress={() => startExam(t)}
-                                          style={[styles.primaryBtn, { marginTop: 10, flexDirection: "row", gap: 6 }, (statusInfo.disabled) && { backgroundColor: "#bdbdbd" }]}
-                                        >
-                                          {startingTestId === t.id || (statusInfo.status === "completed" && reviewLoading)
-                                            ? <ActivityIndicator size="small" color="#ffffff" />
-                                            : <Text style={styles.primaryBtnTxt}>{req?.status === "approved" ? "🚀 Start Exam (Permission Granted)" : statusInfo.label}</Text>
-                                          }
-                                        </TouchableOpacity>
+                                       ) : statusInfo.status === "completed" ? (
+                                         <TouchableOpacity
+                                           disabled={reviewLoading}
+                                           onPress={() => launchReview(statusInfo.attemptId)}
+                                           style={[styles.primaryBtn, { marginTop: 10, backgroundColor: "#2e7d32", flexDirection: "row", gap: 6, justifyContent: "center" }]}
+                                         >
+                                           <Ionicons name="eye-outline" size={18} color="#fff" />
+                                           <Text style={styles.primaryBtnTxt}>📊 View Score & Review Answers</Text>
+                                         </TouchableOpacity>
+                                       ) : (
+                                         <TouchableOpacity
+                                           disabled={statusInfo.disabled || startingTestId === t.id || reviewLoading}
+                                           onPress={() => startExam(t)}
+                                           style={[styles.primaryBtn, { marginTop: 10, flexDirection: "row", gap: 6 }, (statusInfo.disabled) && { backgroundColor: "#bdbdbd" }]}
+                                         >
+                                           {startingTestId === t.id || (statusInfo.status === "completed" && reviewLoading)
+                                             ? <ActivityIndicator size="small" color="#ffffff" />
+                                             : <Text style={styles.primaryBtnTxt}>{req?.status === "approved" ? "🚀 Start Exam (Permission Granted)" : statusInfo.label}</Text>
+                                           }
+                                         </TouchableOpacity>
+                                       )}
                                       )}
                                     </View>
                                   );
@@ -15570,18 +16226,6 @@ function MainApp() {
                               <Text style={[styles.label, darkMode && styles.labelDark]}>Extraction Mode:</Text>
                               <View style={{ flexDirection: "row", marginBottom: 15, borderRadius: 8, backgroundColor: darkMode ? "#222" : "#eee", padding: 4 }}>
                                 <TouchableOpacity
-                                  onPress={() => setExtractMode("auto")}
-                                  style={{
-                                    flex: 1,
-                                    paddingVertical: 8,
-                                    borderRadius: 6,
-                                    backgroundColor: extractMode === "auto" ? (darkMode ? "#333" : "#fff") : "transparent",
-                                    alignItems: "center"
-                                  }}
-                                >
-                                  <Text style={{ fontWeight: "bold", color: extractMode === "auto" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 11 }}>Auto (Recommended)</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
                                   onPress={() => setExtractMode("local")}
                                   style={{
                                     flex: 1,
@@ -15679,183 +16323,164 @@ function MainApp() {
                               </TouchableOpacity>
 
                               {showAiPromptHelper && (() => {
-                                const numQ = promptNumQs || "50";
-                                const topic = promptTopic || "[Enter your topic above]";
+                                 const allSelectedLangs = [...targetLangs];
+                                 if (customTargetLang.trim()) {
+                                   customTargetLang.split(",").forEach(s => {
+                                     const t = s.trim();
+                                     if (t && !allSelectedLangs.includes(t)) allSelectedLangs.push(t);
+                                   });
+                                 }
+                                 const targetLangsStr = "[" + (allSelectedLangs.length > 0 ? allSelectedLangs.join(", ") : "English, Tamil") + "]";
+                                 
+                                 const rawP1 = "You are an expert at extracting, translating, and converting MCQ question papers into structured JSON.\n\nThe user will provide a question paper containing multiple-choice questions. The paper may be written in one or more languages.\n\nTARGET LANGUAGES:\n[TARGET_LANGUAGES]\n\nThe languages listed above are the REQUIRED FINAL OUTPUT LANGUAGES.\n\nSUPPORTED LANGUAGES:\n- English\n- Tamil\n- Malayalam\n- Telugu\n\n==================================================\n1. TARGET LANGUAGE RULE\n==================================================\n\nThe final JSON MUST contain every language specified in [TARGET_LANGUAGES].\n\nThe source question paper may contain one or more languages.\n\nFor every question:\n\n1. If a selected target language is present in the source:\n   - Extract that language faithfully.\n   - Do not unnecessarily rewrite or paraphrase it.\n\n2. If a selected target language is NOT present in the source:\n   - Translate the question and all four options into that target language.\n   - Preserve the exact meaning of the original question.\n   - Do not omit the selected language.\n\n3. If multiple source languages contain the same question:\n   - Treat them as ONE MCQ.\n   - Do NOT create duplicate questions.\n\n4. Every selected target language MUST be present for every question.\n\nExample:\n\nTARGET_LANGUAGES:\n[English, Tamil, Malayalam]\n\nIf the source contains only English + Tamil:\n\nEnglish → extract\nTamil → extract\nMalayalam → translate\n\nThe final JSON MUST contain all three languages.\n\n==================================================\n2. LANGUAGE FIELD NAMES\n==================================================\n\nEnglish:\n\"question\"\n\"option a\"\n\"option b\"\n\"option c\"\n\"option d\"\n\nTamil:\n\"questionTa\"\n\"optionTa_a\"\n\"optionTa_b\"\n\"optionTa_c\"\n\"optionTa_d\"\n\nMalayalam:\n\"questionMl\"\n\"optionMl_a\"\n\"optionMl_b\"\n\"optionMl_c\"\n\"optionMl_d\"\n\nTelugu:\n\"questionTe\"\n\"optionTe_a\"\n\"optionTe_b\"\n\"optionTe_c\"\n\"optionTe_d\"\n\nOnly include fields belonging to the selected target languages.\n\nDo NOT create fields for unselected languages.\n\n==================================================\n3. EXACT JSON STRUCTURE\n==================================================\n\nFor English only:\n\n[\n  {\n    \"question\": \"Question text in English\",\n    \"option a\": \"Option A\",\n    \"option b\": \"Option B\",\n    \"option c\": \"Option C\",\n    \"option d\": \"Option D\",\n    \"correct option\": \"A\",\n    \"explanation\": \"Brief explanation in English of why the answer is correct\"\n  }\n]\n\nFor multiple target languages, add the corresponding language fields to the SAME JSON object.\n\nDo NOT create separate JSON objects for different language versions of the same question.\n\n==================================================\n4. LANGUAGE ORDER\n==================================================\n\nWhen multiple target languages are selected, use this order:\n\n1. English\n2. Tamil\n3. Malayalam\n4. Telugu\n\nOnly include selected languages.\n\n==================================================\n5. QUESTION EXTRACTION\n==================================================\n\n- Extract ALL distinct MCQ questions from the source.\n- Do NOT create new questions.\n- Do NOT delete questions.\n- Do NOT paraphrase the original source unnecessarily.\n- Do NOT combine unrelated questions.\n- Do NOT split one MCQ into multiple questions.\n- Maintain the original question order.\n- Preserve question numbering when it is part of the source.\n- Extract all four answer options.\n- Preserve numerical values exactly.\n- Preserve units exactly.\n- Preserve names, dates, terminology, and factual information.\n- Preserve punctuation and special characters wherever possible.\n\n==================================================\n6. BILINGUAL / MULTILINGUAL QUESTIONS\n==================================================\n\nIf the same question appears in multiple languages:\n\n- Recognize them as ONE MCQ.\n- Put each language version into its corresponding field.\n- Do NOT create duplicates.\n\nIf a selected target language is missing from the source:\n\n- Translate the question and all options into that language.\n- Keep the same question meaning.\n- Keep the same option order.\n- Keep the same correct option.\n\n==================================================\n7. TRANSLATION RULES\n==================================================\n\nWhen generating a missing target language:\n\n- Translate accurately and naturally.\n- Preserve the exact meaning.\n- Preserve numerical values.\n- Preserve units.\n- Preserve names.\n- Preserve technical terminology.\n- Preserve option order.\n- Do NOT change the correct answer.\n- Do NOT add information that is absent from the source.\n- Do NOT simplify the question in a way that changes its meaning.\n\nUse the best available source-language version as the translation source.\n\nTranslation priority:\n\n1. English, if available.\n2. Otherwise another reliable language version available in the source.\n\n==================================================\n8. CORRECT OPTION\n==================================================\n\n\"correct option\" MUST be exactly:\n\n\"A\"\n\"B\"\n\"C\"\n\"D\"\n\nIf the answer is explicitly provided in the source, use it.\n\nIf it is not provided, determine the correct answer from the question and options.\n\nDo NOT guess.\n\nThe correct option MUST remain identical across all language versions.\n\n==================================================\n9. EXPLANATION\n==================================================\n\nThe explanation MUST always be in English.\n\n- Keep it brief and clear.\n- Explain why the selected answer is correct.\n- For numerical questions, show the essential calculation.\n- For conceptual questions, briefly explain the relevant concept.\n- Do not modify the source question or options inside the explanation.\n\n==================================================\n10. SOURCE FIDELITY\n==================================================\n\nThe uploaded/pasted question paper is the source for the original question and answer options.\n\nGeneral knowledge may be used ONLY for:\n\n- Determining the correct option\n- Writing the explanation\n\nGeneral knowledge MUST NOT be used to:\n\n- Create questions\n- Invent options\n- Reconstruct missing source text\n- Silently correct source errors\n- Invent missing information\n\nIf the source contains an obvious spelling, numerical, factual, or formatting error:\n\n- Preserve the source content.\n- Report the issue in the verification notes.\n\n==================================================\n11. UNCERTAIN CONTENT\n==================================================\n\nIf any question, option, number, symbol, or other content is unclear:\n\n- Do NOT silently guess.\n- Preserve the readable content.\n- Identify the affected question number.\n- Explain what should be manually verified.\n- Do not fabricate missing information.\n\n==================================================\n12. LARGE QUESTION PAPERS / CHUNK PROCESSING\n==================================================\n\nThis rule is extremely important.\n\nIf the question paper contains a large number of questions and generating the complete JSON in one response may exceed the reliable output limit:\n\nDO NOT attempt to force the entire paper into one response.\n\nFirst inform the user that the question paper is large and should be generated in chunks.\n\nThen determine a practical chunk size.\n\nExample:\n\n\"The question paper contains 100 questions. To ensure reliable JSON generation, I recommend splitting it into 5 chunks of 20 questions each:\n\nChunk 1: Questions 1–20\nChunk 2: Questions 21–40\nChunk 3: Questions 41–60\nChunk 4: Questions 61–80\nChunk 5: Questions 81–100\n\nYou can request each chunk one by one and paste each JSON block into your question bank.\"\n\nIMPORTANT:\n\n- Do NOT generate all chunks automatically in the same response if doing so risks truncation.\n- Wait for the user to request the next chunk.\n- Maintain the exact original question order.\n- Never skip or duplicate questions between chunks.\n- Each chunk must contain complete JSON objects.\n- A question must NEVER be split between chunks.\n- Keep the same target languages for every chunk.\n- Keep the same JSON structure for every chunk.\n\nWhen the user requests a specific chunk:\n\n- Generate ONLY that chunk.\n- Clearly identify the requested question range before generating ONLY if necessary.\n- The JSON itself must remain valid.\n- Do not include questions belonging to another chunk.\n\nIMPORTANT CHUNK ENDING RULE:\n\nFor intermediate chunks, do NOT provide final verification notes.\n\nEach intermediate chunk should end after its JSON array.\n\nOnly the FINAL chunk should contain:\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nThis ensures that verification issues are reported only after the entire question paper has been processed.\n\n==================================================\n13. CHUNK CONSISTENCY\n==================================================\n\nWhen processing chunks:\n\n- Use exactly the same extraction rules for every chunk.\n- Maintain the same target languages.\n- Maintain the same field names.\n- Maintain the original numbering.\n- Do not renumber questions.\n- Do not change translations between chunks unless correcting an identified error.\n- Do not repeat questions from previous chunks.\n- Do not skip questions.\n\nExample:\n\nChunk 1:\nQuestions 1–20\n\nChunk 2:\nQuestions 21–40\n\nChunk 3:\nQuestions 41–60\n\nNever output Question 20 again in Chunk 2.\n\n==================================================\n14. OUTPUT VALIDATION\n==================================================\n\nBefore returning the output, verify:\n\n1. Every requested question in the current chunk is included.\n2. No duplicate question exists.\n3. Question order is preserved.\n4. Every selected target language is present.\n5. Every selected language has its question and four options.\n6. Correct option is A/B/C/D only.\n7. Correct option is consistent across languages.\n8. No unselected language fields are present.\n9. Missing target languages have been translated.\n10. JSON syntax is valid.\n11. No question or option has been invented.\n12. No question has been accidentally omitted.\n\n==================================================\n15. VERIFICATION NOTES\n==================================================\n\nONLY AFTER THE FINAL CHUNK, output:\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nList ONLY genuine issues requiring manual verification.\n\nFor each issue include:\n\n- Question number\n- What is unclear or potentially incorrect\n- What should be verified\n\nExamples:\n\n- Question 9: One word in the source is unclear. Verify against the original paper.\n- Question 15: The source option appears incomplete. Verify against the original paper.\n- Question 25: Malayalam was generated by translation because Malayalam was not present in the source.\n- Question 38: A numerical value appears unclear and should be verified.\n\nDo NOT list normal translations as issues.\n\nIf there are no issues:\n\nEND OF JSON\n\nVERIFICATION NOTES:\nNo obvious extraction or translation issues found.\n\n==================================================\n16. FINAL OUTPUT RULE\n==================================================\n\nFor a normal single-response paper:\n\nReturn:\n\nJSON ARRAY\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nFor an intermediate chunk:\n\nReturn ONLY:\n\nJSON ARRAY\n\nDo NOT include final verification notes.\n\nFor the final chunk:\n\nReturn:\n\nJSON ARRAY\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nDo NOT add any other text.\n\nDo NOT use markdown.\n\nDo NOT use ```json.\n\nDo NOT add conversational text.\n\nSOURCE QUESTION PAPER:\n[PASTED QUESTION PAPER TEXT]";
+                                 const rawP2 = "You are an expert at extracting, translating, solving, and converting Mathematics and Science MCQ question papers into structured JSON.\n\nThe user will provide a Mathematics or Science question paper.\n\nThe paper may contain:\n\n- Mathematics\n- Physics\n- Chemistry\n- Biology\n- General Science\n- Mathematical equations\n- Scientific formulas\n- Chemical formulas\n- Chemical equations\n- Fractions\n- Square roots\n- Powers\n- Superscripts\n- Subscripts\n- Greek symbols\n- Scientific notation\n- Units\n- Ionic charges\n- Mathematical operators\n\nTARGET LANGUAGES:\n[TARGET_LANGUAGES]\n\nThe languages listed above are the REQUIRED FINAL OUTPUT LANGUAGES.\n\nSUPPORTED LANGUAGES:\n- English\n- Tamil\n- Malayalam\n- Telugu\n\n==================================================\n1. TARGET LANGUAGE RULE\n==================================================\n\nThe final JSON MUST contain every language specified in [TARGET_LANGUAGES].\n\nFor every question:\n\n1. If the selected language exists in the source:\n   Extract it faithfully.\n\n2. If the selected language does NOT exist in the source:\n   Translate the question and all options into that target language.\n\n3. Do NOT omit a selected target language.\n\n4. If the same question appears in multiple source languages:\n   Treat it as ONE MCQ.\n\n5. Do NOT create duplicate questions.\n\nExample:\n\nTARGET_LANGUAGES:\n[English, Tamil, Malayalam]\n\nSource:\nEnglish + Tamil\n\nOutput:\nEnglish → extracted\nTamil → extracted\nMalayalam → generated by translation\n\n==================================================\n2. LANGUAGE FIELD NAMES\n==================================================\n\nEnglish:\n\"question\"\n\"option a\"\n\"option b\"\n\"option c\"\n\"option d\"\n\nTamil:\n\"questionTa\"\n\"optionTa_a\"\n\"optionTa_b\"\n\"optionTa_c\"\n\"optionTa_d\"\n\nMalayalam:\n\"questionMl\"\n\"optionMl_a\"\n\"optionMl_b\"\n\"optionMl_c\"\n\"optionMl_d\"\n\nTelugu:\n\"questionTe\"\n\"optionTe_a\"\n\"optionTe_b\"\n\"optionTe_c\"\n\"optionTe_d\"\n\nOnly include selected languages.\n\n==================================================\n3. JSON STRUCTURE\n==================================================\n\nEvery question MUST follow this structure:\n\n[\n  {\n    \"question\": \"English question\",\n    \"questionTa\": \"Tamil question\",\n    \"questionMl\": \"Malayalam question\",\n    \"questionTe\": \"Telugu question\",\n    \"option a\": \"English option A\",\n    \"option b\": \"English option B\",\n    \"option c\": \"English option C\",\n    \"option d\": \"English option D\",\n    \"optionTa_a\": \"Tamil option A\",\n    \"optionTa_b\": \"Tamil option B\",\n    \"optionTa_c\": \"Tamil option C\",\n    \"optionTa_d\": \"Tamil option D\",\n    \"optionMl_a\": \"Malayalam option A\",\n    \"optionMl_b\": \"Malayalam option B\",\n    \"optionMl_c\": \"Malayalam option C\",\n    \"optionMl_d\": \"Malayalam option D\",\n    \"optionTe_a\": \"Telugu option A\",\n    \"optionTe_b\": \"Telugu option B\",\n    \"optionTe_c\": \"Telugu option C\",\n    \"optionTe_d\": \"Telugu option D\",\n    \"formula\": \"Relevant formula or equation\",\n    \"correct option\": \"A\",\n    \"explanation\": \"Step-by-step solution in English\"\n  }\n]\n\nIMPORTANT:\n\nThe above is the maximum possible structure.\n\nOnly include language fields corresponding to languages selected in [TARGET_LANGUAGES].\n\nDo NOT include unselected language fields.\n\n==================================================\n4. EXTRACTION RULES\n==================================================\n\n- Extract ALL distinct MCQs.\n- Do NOT create new questions.\n- Do NOT delete questions.\n- Do NOT split one question into multiple questions.\n- Do NOT combine unrelated questions.\n- Maintain exact question order.\n- Preserve original question numbering when applicable.\n- Preserve numerical values.\n- Preserve units.\n- Preserve formulas.\n- Preserve scientific notation.\n- Preserve option order.\n\n==================================================\n5. BILINGUAL / MULTILINGUAL QUESTIONS\n==================================================\n\nIf the same question appears in multiple languages:\n\n- Treat all versions as ONE MCQ.\n- Extract each available source language.\n- Generate missing selected languages through translation.\n- Never create duplicates.\n\n==================================================\n6. TRANSLATION OF MATHS / SCIENCE\n==================================================\n\nWhen generating a missing target language:\n\nTranslate the natural-language portion while preserving:\n\n- Mathematical expressions\n- Variables\n- Numbers\n- Units\n- Chemical formulas\n- Scientific notation\n- Symbols\n- Equations\n- Option order\n- Mathematical/scientific meaning\n\nExample:\n\nEnglish:\n\"Find the value of x² + 5.\"\n\nTamil:\n\"x² + 5 இன் மதிப்பைக் காண்க.\"\n\nMalayalam:\n\"x² + 5 ന്റെ മൂല്യം കണ്ടെത്തുക.\"\n\nThe expression:\n\nx² + 5\n\nmust remain unchanged.\n\n==================================================\n7. MATHEMATICAL NOTATION\n==================================================\n\nPreserve:\n\n√ ² ³ ⁴ ⁵ ₁ ₂ ₃ ⁻ π α β γ Δ θ λ μ σ ρ Ω ± × ÷ ≤ ≥ ≠ ≈ ∞ ∠ °\n\nExamples:\n\nx² + y² = z²\n\n√25\n\nπr²\n\n45°\n\n10⁻³\n\na₁\n\nΔABC\n\nDo NOT convert:\n\nx² → x2\n\n√ → sqrt\n\nπ → pi\n\n² → 2\n\n³ → 3\n\n× → x\n\n≤ → <\n\n≥ → >\n\n° → o\n\n==================================================\n8. SCIENTIFIC / CHEMICAL NOTATION\n==================================================\n\nPreserve:\n\nH₂O\n\nCO₂\n\nH₂SO₄\n\nCa²⁺\n\nCl⁻\n\nNa⁺\n\n6.022 × 10²³\n\nm/s²\n\nN\n\nJ\n\nPa\n\nΩ\n\nλ\n\nΔT\n\n2H₂ + O₂ → 2H₂O\n\nDo NOT unnecessarily convert these to ASCII.\n\n==================================================\n9. WORD EQUATIONS\n==================================================\n\nThe source may contain Microsoft Word Equation Editor objects.\n\nIf an equation is present:\n\n- Interpret it accurately.\n- Preserve mathematical meaning.\n- Preserve superscripts.\n- Preserve subscripts.\n- Preserve roots.\n- Preserve fractions.\n- Preserve Greek symbols.\n- Preserve operators.\n- Preserve chemical charges.\n- Preserve reaction arrows.\n- Preserve brackets and parentheses.\n\nIf necessary, convert the equation into an unambiguous plain-text representation.\n\nExample:\n\nx = (-b ± √(b² - 4ac)) / 2a\n\nDo NOT convert it to:\n\nx = (-b +- sqrt(b2 - 4ac)) / 2a\n\n==================================================\n10. FRACTIONS\n==================================================\n\nPreserve fractions whenever possible.\n\n½ → preserve as ½\n\nIf a structured fraction cannot be represented directly:\n\n1/2\n\nDo NOT change the mathematical value.\n\n3/4 must never become 4/3.\n\n==================================================\n11. FORMULA FIELD\n==================================================\n\nEvery question MUST contain:\n\n\"formula\": \"...\"\n\nThe formula may be:\n\n- Mathematical formula\n- Physics equation\n- Chemistry equation\n- Scientific relationship\n- Law or principle\n\nExamples:\n\n\"KE = 1/2 mv^2\"\n\n\"F = ma\"\n\n\"v = u + at\"\n\n\"V = IR\"\n\n\"P = VI\"\n\n\"PV = nRT\"\n\n\"A = πr^2\"\n\n\"D = b^2 − 4ac\"\n\n\"pH = −log[H⁺]\"\n\n\"Sum = −b/a, Product = c/a\"\n\nIf no specific formula applies:\n\n\"formula\": \"\"\n\nDo NOT invent a formula.\n\n==================================================\n12. SOURCE FIDELITY\n==================================================\n\nThe source document is the source for the original question and options.\n\nGeneral mathematical/scientific knowledge may ONLY be used for:\n\n- Calculating the answer\n- Selecting the correct option\n- Identifying the formula\n- Writing the explanation\n- Translating missing target languages\n\nIt MUST NOT be used to:\n\n- Invent questions\n- Invent options\n- Silently correct source errors\n- Guess missing numbers\n- Guess missing symbols\n- Reconstruct lost equations\n\n==================================================\n13. NO RECONSTRUCTION OF LOST SYMBOLS\n==================================================\n\nIf a symbol, variable, number, exponent, subscript, root, Greek letter, or equation is missing or unclear:\n\nDO NOT guess it merely because the mathematical answer appears obvious.\n\nFor example:\n\n\"If ___ and ___ are the roots...\"\n\nDo NOT automatically convert this to:\n\n\"If α and β are the roots...\"\n\nunless α and β are actually present in the source.\n\nInstead, preserve the available source content and report the issue in the verification notes.\n\n==================================================\n14. CORRECT OPTION\n==================================================\n\n\"correct option\" MUST be exactly:\n\n\"A\"\n\"B\"\n\"C\"\n\"D\"\n\nIf explicitly provided, use it.\n\nOtherwise determine it mathematically/scientifically.\n\nDo NOT guess.\n\nThe correct option must remain identical across all language versions.\n\n==================================================\n15. EXPLANATION\n==================================================\n\nThe explanation MUST be in English.\n\nFor numerical questions:\n\n1. Identify given values.\n2. State formula.\n3. Substitute values.\n4. Calculate.\n5. State final answer.\n6. Identify correct option.\n\nFor conceptual Science questions:\n\n- Identify the relevant scientific principle.\n- Briefly explain why the answer is correct.\n\n==================================================\n16. LARGE QUESTION PAPERS / CHUNK PROCESSING\n==================================================\n\nThis rule is extremely important.\n\nIf the paper contains many questions and the complete JSON cannot be generated reliably in one response:\n\nDO NOT attempt to generate the entire paper at once.\n\nFirst inform the user that the paper is large and should be generated in chunks.\n\nDetermine a practical chunk size.\n\nExample:\n\n\"The question paper contains 100 questions. To ensure reliable generation without truncation, it will be split into 5 chunks of 20 questions:\n\nChunk 1: Questions 1–20\nChunk 2: Questions 21–40\nChunk 3: Questions 41–60\nChunk 4: Questions 61–80\nChunk 5: Questions 81–100\n\nYou can request each chunk one by one and paste each JSON block into your question bank.\"\n\nDo NOT generate all chunks automatically if doing so risks truncation.\n\nWait for the user to request a chunk.\n\nWhen the user requests a chunk:\n\n- Generate ONLY that chunk.\n- Preserve exact question order.\n- Do NOT skip questions.\n- Do NOT duplicate questions.\n- Do NOT split a question between chunks.\n- Use the same target languages.\n- Use the same JSON structure.\n- Use the same translations consistently.\n\n==================================================\n17. CHUNK CONSISTENCY\n==================================================\n\nExample:\n\nChunk 1:\nQuestions 1–20\n\nChunk 2:\nQuestions 21–40\n\nChunk 3:\nQuestions 41–60\n\nChunk 4:\nQuestions 61–80\n\nChunk 5:\nQuestions 81–100\n\nNever repeat Question 20 in Chunk 2.\n\nNever skip Question 21.\n\nDo not renumber questions.\n\n==================================================\n18. VERIFICATION NOTES AND FINAL CHUNK\n==================================================\n\nFor intermediate chunks:\n\nReturn ONLY the JSON array.\n\nDo NOT output:\n\nEND OF JSON\n\nDo NOT output verification notes.\n\nOnly AFTER the FINAL CHUNK, output:\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nThen list ONLY genuine issues found across the entire question paper.\n\nThe verification notes must appear AFTER the final JSON array of the FINAL CHUNK.\n\nExamples:\n\nEND OF JSON\n\nVERIFICATION NOTES:\n- Question 9: A mathematical variable appears missing in the source. Verify against the original paper.\n- Question 15: The equation appears incomplete and should be manually verified.\n- Question 27: Malayalam was generated by translation because Malayalam was not present in the source.\n\nDo NOT report normal translations as issues.\n\nIf there are no issues:\n\nEND OF JSON\n\nVERIFICATION NOTES:\nNo obvious extraction, mathematical, scientific, or translation issues found.\n\n==================================================\n19. OUTPUT VALIDATION\n==================================================\n\nBefore returning each chunk, verify:\n\n1. Every question in the requested range is included.\n2. No question is duplicated.\n3. No question is skipped.\n4. Question order is preserved.\n5. Every selected target language is present.\n6. Every selected language has the correct fields.\n7. Mathematical/scientific notation is preserved.\n8. Formula field exists.\n9. Correct option is A/B/C/D only.\n10. Correct option is consistent across languages.\n11. JSON syntax is valid.\n12. No source content was silently invented.\n\n==================================================\n20. FINAL OUTPUT RULE\n==================================================\n\nIf the paper fits in one response:\n\nReturn:\n\nJSON ARRAY\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nIf the paper requires chunks:\n\nFIRST RESPONSE:\nInform the user that the paper is large and provide the chunk plan.\n\nDo NOT generate the entire paper.\n\nINTERMEDIATE CHUNK:\nReturn ONLY the JSON array.\n\nFINAL CHUNK:\nReturn:\n\nJSON ARRAY\n\nEND OF JSON\n\nVERIFICATION NOTES:\n\nDo NOT add any other text after the verification notes.\n\nDo NOT use markdown.\n\nDo NOT use ```json.\n\nDo NOT add conversational text around the JSON when generating a chunk.\n\nSOURCE QUESTION PAPER:\n[PASTED QUESTION PAPER TEXT]";
+                                 const p1 = rawP1.replace("[TARGET_LANGUAGES]", targetLangsStr);
+                                 const p2 = rawP2.replace("[TARGET_LANGUAGES]", targetLangsStr);
 
-                                const enTaPrompt = `You are an expert at extracting and converting MCQ question papers into structured JSON.
+                                 const currentPrompt = selectedPromptType === "formula" ? p2 : p1;
 
-Convert the pasted question paper text below into a JSON array of multiple choice questions. You must extract and preserve the exact questions and options from the text.
+                                 const toggleLang = (lang: string) => {
+                                   if (targetLangs.includes(lang)) {
+                                     if (targetLangs.length > 1) {
+                                       setTargetLangs(targetLangs.filter(l => l !== lang));
+                                     }
+                                   } else {
+                                     setTargetLangs([...targetLangs, lang]);
+                                   }
+                                 };
 
-Each question MUST follow this EXACT JSON format (no extra fields, no markdown):
-[
-  {
-    "question": "The question text in English",
-    "questionTa": "கேள்வி உரை தமிழில்",
-    "option a": "English option A",
-    "option b": "English option B",
-    "option c": "English option C",
-    "option d": "English option D",
-    "optionTa_a": "தமிழில் விருப்பம் A",
-    "optionTa_b": "தமிழில் விருப்பம் B",
-    "optionTa_c": "தமிழில் விருப்பம் C",
-    "optionTa_d": "தமிழில் விருப்பம் D",
-    "correct option": "B",
-    "explanation": "Brief explanation in English of why the answer is correct"
-  }
-]
+                                 return (
+                                   <View style={{ backgroundColor: darkMode ? "#111a11" : "#f1f8e9", borderRadius: 10, padding: 14, marginBottom: 15, borderWidth: 1, borderColor: darkMode ? "#2d4a2d" : "#c8e6c9" }}>
+                                     <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32", marginBottom: 6 }}>STEP 1: SELECT PROMPT TYPE & TARGET LANGUAGES:</Text>
+                                     
+                                     {/* 2 Generalized Prompts */}
+                                     <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                                       <TouchableOpacity
+                                         onPress={() => setSelectedPromptType("normal")}
+                                         style={{
+                                           flex: 1,
+                                           padding: 10,
+                                           borderRadius: 8,
+                                           borderWidth: 2,
+                                           borderColor: selectedPromptType === "normal" ? "#2e7d32" : (darkMode ? "#333" : "#e0e0e0"),
+                                           backgroundColor: selectedPromptType === "normal" ? (darkMode ? "#1b3a1b" : "#e8f5e9") : (darkMode ? "#1a1a1a" : "#ffffff"),
+                                           alignItems: "center"
+                                         }}
+                                       >
+                                         <Text style={{ fontSize: 16 }}>📋</Text>
+                                         <Text style={{ fontWeight: "bold", fontSize: 11, color: selectedPromptType === "normal" ? "#2e7d32" : (darkMode ? "#aaa" : "#555"), marginTop: 2 }}>Prompt 1: Normal / General</Text>
+                                         <Text style={{ fontSize: 9, color: darkMode ? "#777" : "#888", textAlign: "center" }}>Extract & Translate MCQs faithfully across selected languages</Text>
+                                       </TouchableOpacity>
 
-STRICT RULES:
-- Do NOT generate new questions. Extract the exact questions and options from the pasted text below.
-- "correct option" must be exactly "A", "B", "C", or "D" (single uppercase letter ONLY). If not specified in the text, determine the correct choice.
-- All options must be copied exactly as they are written.
-- Tamil translations of questions and options must match the Tamil version in the paper.
-- Return ONLY the raw JSON array — no markdown (do not wrap in \`\`\`json blocks), no extra explanation or conversational text before or after.
+                                       <TouchableOpacity
+                                         onPress={() => setSelectedPromptType("formula")}
+                                         style={{
+                                           flex: 1,
+                                           padding: 10,
+                                           borderRadius: 8,
+                                           borderWidth: 2,
+                                           borderColor: selectedPromptType === "formula" ? "#2e7d32" : (darkMode ? "#333" : "#e0e0e0"),
+                                           backgroundColor: selectedPromptType === "formula" ? (darkMode ? "#1b3a1b" : "#e8f5e9") : (darkMode ? "#1a1a1a" : "#ffffff"),
+                                           alignItems: "center"
+                                         }}
+                                       >
+                                         <Text style={{ fontSize: 16 }}>🔬</Text>
+                                         <Text style={{ fontWeight: "bold", fontSize: 11, color: selectedPromptType === "formula" ? "#2e7d32" : (darkMode ? "#aaa" : "#555"), marginTop: 2 }}>Prompt 2: Maths & Science</Text>
+                                         <Text style={{ fontSize: 9, color: darkMode ? "#777" : "#888", textAlign: "center" }}>Preserves formulas, equations, symbols, & calculation steps</Text>
+                                       </TouchableOpacity>
+                                     </View>
 
----
-PASTED QUESTION PAPER TEXT:
-[Paste your question paper text here]`;
+                                     {/* Target Languages Toggle Buttons */}
+                                     <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#ccc" : "#424242", marginBottom: 6 }}>TARGET LANGUAGES (Select all required):</Text>
+                                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                                       {[
+                                         { key: "English", flag: "🇬🇧" },
+                                         { key: "Tamil", flag: "🇮🇳" },
+                                         { key: "Malayalam", flag: "🌴" },
+                                         { key: "Telugu", flag: "🏛️" }
+                                       ].map(l => {
+                                         const active = targetLangs.includes(l.key);
+                                         return (
+                                           <TouchableOpacity
+                                             key={l.key}
+                                             onPress={() => toggleLang(l.key)}
+                                             style={{
+                                               flexDirection: "row",
+                                               alignItems: "center",
+                                               gap: 4,
+                                               paddingHorizontal: 10,
+                                               paddingVertical: 6,
+                                               borderRadius: 20,
+                                               borderWidth: 1.5,
+                                               borderColor: active ? "#2e7d32" : (darkMode ? "#444" : "#ccc"),
+                                               backgroundColor: active ? (darkMode ? "#1b3a1b" : "#c8e6c9") : (darkMode ? "#222" : "#ffffff")
+                                             }}
+                                           >
+                                             <Text style={{ fontSize: 12 }}>{l.flag}</Text>
+                                             <Text style={{ fontSize: 11, fontWeight: active ? "bold" : "500", color: active ? "#1b5e20" : (darkMode ? "#aaa" : "#555") }}>
+                                               {l.key} {active ? "✓" : ""}
+                                             </Text>
+                                           </TouchableOpacity>
+                                         );
+                                       })}
+                                     </View>
 
-                                const enPrompt = `You are an expert at extracting and converting MCQ question papers into structured JSON.
+                                     {/* Custom Target Language Input */}
+                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                                       <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", fontWeight: "bold" }}>Custom Language(s):</Text>
+                                       <TextInput
+                                         style={{
+                                           flex: 1,
+                                           backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+                                           borderWidth: 1,
+                                           borderColor: darkMode ? "#444" : "#ccc",
+                                           borderRadius: 6,
+                                           paddingHorizontal: 10,
+                                           paddingVertical: 4,
+                                           fontSize: 11,
+                                           color: darkMode ? "#ffffff" : "#212121"
+                                         }}
+                                         placeholder="e.g. Hindi, French"
+                                         placeholderTextColor="#888"
+                                         value={customTargetLang}
+                                         onChangeText={setCustomTargetLang}
+                                       />
+                                     </View>
 
-Convert the pasted question paper text below into a JSON array of multiple choice questions. Extract the questions exactly as written in the text.
+                                     {/* Selected Target Languages Preview Tag */}
+                                     <View style={{ backgroundColor: darkMode ? "#1e2e1e" : "#e8f5e9", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                       <Ionicons name="pricetag-outline" size={14} color="#2e7d32" />
+                                       <Text style={{ fontSize: 11, fontWeight: "bold", color: "#2e7d32" }}>
+                                         Active Target Languages in Prompt: {targetLangsStr}
+                                       </Text>
+                                     </View>
 
-Each question MUST follow this EXACT JSON format:
-[
-  {
-    "question": "The question text in English",
-    "option a": "Option A",
-    "option b": "Option B",
-    "option c": "Option C",
-    "option d": "Option D",
-    "correct option": "A",
-    "explanation": "Brief explanation of why A is the correct answer"
-  }
-]
+                                     {/* Generated Prompt Output Box */}
+                                     <View style={{ backgroundColor: darkMode ? "#0a130a" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a3a2a" : "#dcedc8", padding: 10, marginBottom: 10, maxHeight: 240 }}>
+                                       <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+                                         <Text selectable style={{ fontFamily: "monospace", fontSize: 10, color: darkMode ? "#b2dfdb" : "#212121", lineHeight: 16 }}>{currentPrompt}</Text>
+                                       </ScrollView>
+                                     </View>
 
-STRICT RULES:
-- Do NOT generate new questions. Extract the exact questions and options from the pasted text below.
-- "correct option" must be exactly "A", "B", "C", or "D" (single uppercase letter ONLY).
-- Return ONLY the raw JSON array — no markdown (do not wrap in \`\`\`json blocks), no extra text.
-
----
-PASTED QUESTION PAPER TEXT:
-[Paste your question paper text here]`;
-
-                                const formulaPrompt = `You are an expert at extracting formula-based MCQ question papers (Mathematics/Science) into structured JSON.
-
-Convert the pasted formula-based question paper text below into a JSON array of MCQ questions.
-
-Each question MUST follow this EXACT JSON format:
-[
-  {
-    "question": "The question text (include numerical values exactly as in the paper)",
-    "formula": "Relevant formula or equation used (e.g. KE = 1/2 mv^2, F = ma, PV = nRT)",
-    "option a": "Answer option A (include units exactly)",
-    "option b": "Answer option B",
-    "option c": "Answer option C",
-    "option d": "Answer option D",
-    "correct option": "B",
-    "explanation": "Step-by-step solution showing the calculation and working"
-  }
-]
-
-STRICT RULES:
-- Do NOT generate new questions. Extract the exact questions and options from the pasted text below.
-- "correct option" must be exactly "A", "B", "C", or "D".
-- formula field: Extract the mathematical formula/equation used to solve the question. Use plain text. For powers use ^ (e.g. m/s^2, x^2). Greek symbols: α β γ Δ Ω π θ λ μ σ ρ.
-- If no specific formula applies, set formula to "".
-- Return ONLY the raw JSON array — no markdown (do not wrap in \`\`\`json blocks), no extra text.
-
----
-PASTED QUESTION PAPER TEXT:
-[Paste your question paper text here]`;
-
-                                const taPrompt = `விடைத்தாள் மற்றும் வினாக்களை JSON ஆக மாற்றுவதில் நீங்கள் ஒரு நிபுணர்.
-
-கீழே ஒட்டப்பட்ட தமிழ் வினாத்தாள் உரையை MCQ JSON வரிசையாக (array) மாற்றவும். வினாக்கள் மற்றும் விருப்பங்களை அப்படியே துல்லியமாக பிரித்தெடுக்கவும்.
-
-ஒவ்வொரு வினாவும் இந்த சரியான JSON வடிவத்தை பின்பற்ற வேண்டும்:
-[
-  {
-    "question": "தமிழில் வினா உரை",
-    "option a": "விருப்பம் அ",
-    "option b": "விருப்பம் ஆ",
-    "option c": "விருப்பம் இ",
-    "option d": "விருப்பம் ஈ",
-    "correct option": "A",
-    "explanation": "சரியான விடையின் விளக்கம் தமிழில்"
-  }
-]
-
-கட்டாய விதிகள்:
-- புதிய வினாக்களை உருவாக்க வேண்டாம். கீழே ஒட்டப்பட்ட உரையிலிருந்து வினாக்களை அப்படியே பிரித்தெடுக்கவும்.
-- "correct option" சரியாக "A", "B", "C", அல்லது "D" மட்டுமே இருக்க வேண்டும்.
-- JSON array மட்டுமே திரும்ப அனுப்பவும் — மார்க்டவுன் (no \`\`\`json blocks) அல்லது கூடுதல் உரை இல்லாமல்.
-
----
-ஒட்டப்பட்ட தமிழ் வினாத்தாள் உரை:
-[இங்கே உங்கள் வினாத்தாள் உரையை ஒட்டவும்]`;
-
-                                const prompts: Record<string, string> = { "en-ta": enTaPrompt, "en": enPrompt, "formula": formulaPrompt, "ta": taPrompt };
-                                const currentPrompt = prompts[selectedPromptType] || enTaPrompt;
-                                const promptTypes = [
-                                  { key: "en-ta", icon: "🇮🇳", label: "English + Tamil", desc: "Bilingual — TNPSC / UPSC" },
-                                  { key: "en", icon: "🇬🇧", label: "English Only", desc: "Standard MCQ paper" },
-                                  { key: "formula", icon: "🔬", label: "Maths / Science", desc: "Formula-based paper" },
-                                  { key: "ta", icon: "📖", label: "Tamil Only", desc: "Tamil medium paper" }
-                                ];
-                                return (
-                                  <View style={{ backgroundColor: darkMode ? "#111a11" : "#f1f8e9", borderRadius: 10, padding: 14, marginBottom: 15, borderWidth: 1, borderColor: darkMode ? "#2d4a2d" : "#c8e6c9" }}>
-                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32", marginBottom: 8 }}>INSTRUCTIONS:</Text>
-                                    <Text style={{ fontSize: 10, color: darkMode ? "#aaa" : "#555", marginBottom: 12, lineHeight: 14 }}>
-                                      1. Select the question paper type below.\n
-                                      2. Copy the prompt template.\n
-                                      3. Paste the prompt template followed by your actual question paper text into ChatGPT/Gemini/Claude/Groq/DeepSeek/Perplexity.\n
-                                      4. Copy the structured JSON response, paste it below, and parse it.
-                                    </Text>
-                                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-                                      {promptTypes.map(pt => (
-                                        <TouchableOpacity
-                                          key={pt.key}
-                                          onPress={() => setSelectedPromptType(pt.key)}
-                                          style={{ flex: 1, minWidth: 110, padding: 10, borderRadius: 8, borderWidth: 2, borderColor: selectedPromptType === pt.key ? "#2e7d32" : (darkMode ? "#333" : "#e0e0e0"), backgroundColor: selectedPromptType === pt.key ? (darkMode ? "#1b3a1b" : "#e8f5e9") : (darkMode ? "#1a1a1a" : "#ffffff"), alignItems: "center" }}
-                                        >
-                                          <Text style={{ fontSize: 16 }}>{pt.icon}</Text>
-                                          <Text style={{ fontWeight: "bold", fontSize: 10, color: selectedPromptType === pt.key ? "#2e7d32" : (darkMode ? "#aaa" : "#555"), marginTop: 2 }}>{pt.label}</Text>
-                                          <Text style={{ fontSize: 9, color: darkMode ? "#777" : "#888" }}>{pt.desc}</Text>
-                                        </TouchableOpacity>
-                                      ))}
-                                    </View>
-                                    <View style={{ backgroundColor: darkMode ? "#0a130a" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a3a2a" : "#dcedc8", padding: 10, marginBottom: 10, maxHeight: 220 }}>
-                                      <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
-                                        <Text selectable style={{ fontFamily: "monospace", fontSize: 10, color: darkMode ? "#b2dfdb" : "#212121", lineHeight: 16 }}>{currentPrompt}</Text>
-                                      </ScrollView>
-                                    </View>
-                                    <TouchableOpacity
-                                      onPress={() => {
-                                        if (Platform.OS === "web") {
-                                          try {
-                                            (navigator as any).clipboard.writeText(currentPrompt).then(() => {
-                                              Alert.alert("✅ Copied!", "Prompt copied! Paste it into ChatGPT / Gemini / Claude / Groq / DeepSeek / Perplexity. Get the JSON response, then paste it in the 'Paste Questions JSON Array' box below.");
-                                            });
-                                          } catch { Alert.alert("Tip", "Long-press and select all text in the box above to copy manually."); }
-                                        } else {
-                                          Alert.alert("Prompt Ready", "Long-press the prompt text above to select and copy it.");
-                                        }
-                                      }}
-                                      style={{ backgroundColor: "#2e7d32", borderRadius: 8, paddingVertical: 11, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 10 }}
-                                    >
-                                      <Ionicons name="copy-outline" size={16} color="#fff" />
-                                      <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>Copy Prompt to Clipboard</Text>
-                                    </TouchableOpacity>
-                                    <View style={{ backgroundColor: darkMode ? "#1b2a1b" : "#e8f5e9", borderRadius: 6, padding: 8, flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
-                                      <Text style={{ fontSize: 14 }}>💡</Text>
-                                      <Text style={{ fontSize: 10, color: darkMode ? "#a5d6a7" : "#388e3c", flex: 1, lineHeight: 15 }}>
-                                        Step 1: Select paper type below → Step 2: Copy prompt → Step 3: Paste in ChatGPT/Gemini/Claude/Groq/DeepSeek/Perplexity → Step 4: Copy the JSON response → Step 5: Paste below and click "Parse & Load JSON Questions"
-                                      </Text>
-                                    </View>
-                                  </View>
-                                );
+                                     <TouchableOpacity
+                                       onPress={() => {
+                                         if (Platform.OS === "web") {
+                                           try {
+                                             (navigator as any).clipboard.writeText(currentPrompt).then(() => {
+                                               Alert.alert("✅ Copied!", "Prompt copied! Paste it into ChatGPT / Gemini / Claude / Groq / DeepSeek / Perplexity along with your question paper text. Copy the JSON array output and paste it below.");
+                                             });
+                                           } catch { Alert.alert("Tip", "Select and copy the prompt text above manually."); }
+                                         } else {
+                                           Alert.alert("Prompt Ready", "Long-press the prompt text above to select and copy it.");
+                                         }
+                                       }}
+                                       style={{ backgroundColor: "#2e7d32", borderRadius: 8, paddingVertical: 11, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 8 }}
+                                     >
+                                       <Ionicons name="copy-outline" size={16} color="#fff" />
+                                       <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 13 }}>Copy Prompt with Active Target Languages</Text>
+                                     </TouchableOpacity>
+                                   </View>
+                                 );
                               })()}
 
                               <Text style={[styles.label, darkMode && styles.labelDark]}>Paste Questions JSON Array *:</Text>
@@ -15902,7 +16527,6 @@ PASTED QUESTION PAPER TEXT:
                                 </Text>
                               </TouchableOpacity>
 
-                              <Text style={[styles.label, darkMode && styles.labelDark]}>Upload Answer Key File (.docx or .csv) (Optional):</Text>
                               <TouchableOpacity
                                 onPress={() => {
                                   if (Platform.OS === "web") {
@@ -15933,51 +16557,7 @@ PASTED QUESTION PAPER TEXT:
                                 </Text>
                               </TouchableOpacity>
                             </View>
-                          ) : (
-                            <View style={{ marginBottom: 10 }}>
-                              <Text style={[styles.label, darkMode && styles.labelDark]}>Paste Question Paper Text (Any number of lines):</Text>
-                              <TextInput
-                                style={[styles.input, darkMode && styles.inputDark, { minHeight: 220, maxHeight: 400, textAlignVertical: "top", padding: 12 }]}
-                                placeholder="Paste question paper content here (no limit on number of lines)..."
-                                placeholderTextColor="#999"
-                                multiline
-                                scrollEnabled={true}
-                                value={pdfExtractText}
-                                onChangeText={setPdfExtractText}
-                              />
-
-                              <Text style={[styles.label, darkMode && styles.labelDark]}>Upload Answer Key File (.docx or .csv) (Optional):</Text>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  if (Platform.OS === "web") {
-                                    document.getElementById("ak-pdf-input")?.click();
-                                  } else {
-                                    pickWordDocument("ak");
-                                  }
-                                }}
-                                style={{
-                                  borderWidth: 2,
-                                  borderStyle: "dashed",
-                                  borderColor: "#2e7d32",
-                                  backgroundColor: darkMode ? "#1e2a1e" : "#f4f9f4",
-                                  borderRadius: 12,
-                                  padding: 20,
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: 8,
-                                  marginBottom: 15
-                                }}
-                              >
-                                <Ionicons name="key-outline" size={32} color="#2e7d32" />
-                                <Text style={{ fontWeight: "bold", color: "#2e7d32", fontSize: 13 }}>
-                                  {akFilename ? "Replace Answer Key File (.docx or .csv)" : "Choose Answer Key File (.docx or .csv) (Optional)"}
-                                </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", textAlign: "center" }}>
-                                  {akFilename ? `Selected: ${akFilename}` : "Extracts correct choices (A, B, C, D) automatically"}
-                                </Text>
-                              </TouchableOpacity>
-                            </View>
-                          )}
+                          ) : null}
 
                           {/* Schedule Fields - visible before extraction */}
                           <View style={{ backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5", padding: 12, borderRadius: 10, marginBottom: 12, borderLeftWidth: 3, borderLeftColor: "#1565c0" }}>
@@ -16002,8 +16582,8 @@ PASTED QUESTION PAPER TEXT:
                             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                               {[
                                 { label: "All Users", value: "all" },
-                                { label: "Paid (All)", value: "paid" },
-                                { label: "Paid (Batch)", value: "batch" },
+                                { label: "Enrolled (All)", value: "paid" },
+                                { label: "Enrolled (Batch)", value: "batch" },
                                 { label: "Free (Guest)", value: "free" }
                               ].map((aud) => (
                                 <TouchableOpacity
@@ -16029,7 +16609,7 @@ PASTED QUESTION PAPER TEXT:
 
                             {(newPdfTest.targetAudience === "batch") && (
                               <View style={{ marginTop: 8 }}>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#444", marginBottom: 4 }}>Select Batch:</Text>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#444", marginBottom: 4 }}>Select Target Batch(es):</Text>
                                 <TouchableOpacity
                                   onPress={() => setShowTestBatchDropdown(!showTestBatchDropdown)}
                                   style={{
@@ -16043,8 +16623,14 @@ PASTED QUESTION PAPER TEXT:
                                     backgroundColor: darkMode ? "#222" : "#fff"
                                   }}
                                 >
-                                  <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>
-                                    {newPdfTest.targetBatch || "Choose a Batch..."}
+                                  <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12, fontWeight: "bold" }}>
+                                    {(() => {
+                                      const raw = newPdfTest.targetBatch || "";
+                                      const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                                      if (list.length === 0) return "Choose Target Batches...";
+                                      if (list.length === 1) return list[0];
+                                      return `${list.length} Batches Selected`;
+                                    })()}
                                   </Text>
                                   <Ionicons name={showTestBatchDropdown ? "chevron-up" : "chevron-down"} size={14} color="#757575" />
                                 </TouchableOpacity>
@@ -16055,26 +16641,50 @@ PASTED QUESTION PAPER TEXT:
                                     borderRadius: 8,
                                     marginTop: 4,
                                     backgroundColor: darkMode ? "#222" : "#fff",
-                                    maxHeight: 150,
+                                    maxHeight: 180,
                                     overflow: "hidden"
                                   }}>
                                     <ScrollView nestedScrollEnabled>
-                                      {batches.map((b) => (
-                                        <TouchableOpacity
-                                          key={b.id}
-                                          onPress={() => {
-                                            setNewPdfTest({ ...newPdfTest, targetBatch: b.batchName });
-                                            setShowTestBatchDropdown(false);
-                                          }}
-                                          style={{
-                                            padding: 10,
-                                            borderBottomWidth: 1,
-                                            borderBottomColor: darkMode ? "#333" : "#f0f0f0"
-                                          }}
-                                        >
-                                          <Text style={{ color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>{b.batchName} ({b.course})</Text>
-                                        </TouchableOpacity>
-                                      ))}
+                                      {batches.map((b: any) => {
+                                        const raw = newPdfTest.targetBatch || "";
+                                        const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                                        const isSelected = list.includes(b.batchName);
+
+                                        const toggleBatch = () => {
+                                          let newList: string[];
+                                          if (isSelected) {
+                                            newList = list.filter((item: string) => item !== b.batchName);
+                                          } else {
+                                            newList = [...list, b.batchName];
+                                          }
+                                          setNewPdfTest({ ...newPdfTest, targetBatch: newList.join(", ") });
+                                        };
+
+                                        return (
+                                          <TouchableOpacity
+                                            key={b.id}
+                                            onPress={toggleBatch}
+                                            style={{
+                                              padding: 10,
+                                              flexDirection: "row",
+                                              alignItems: "center",
+                                              gap: 8,
+                                              borderBottomWidth: 1,
+                                              borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                              backgroundColor: isSelected ? (darkMode ? "#3a1c1c" : "#ffebee") : "transparent"
+                                            }}
+                                          >
+                                            <Ionicons
+                                              name={isSelected ? "checkbox" : "square-outline"}
+                                              size={16}
+                                              color={isSelected ? "#c62828" : (darkMode ? "#aaa" : "#757575")}
+                                            />
+                                            <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#212121"), fontSize: 12, fontWeight: isSelected ? "bold" : "normal" }}>
+                                              {b.batchName} ({b.course})
+                                            </Text>
+                                          </TouchableOpacity>
+                                        );
+                                      })}
                                       {batches.length === 0 && (
                                         <Text style={{ padding: 10, color: "#888", fontSize: 12, textAlign: "center" }}>No batches found</Text>
                                       )}
@@ -16084,7 +16694,6 @@ PASTED QUESTION PAPER TEXT:
                               </View>
                             )}
                           </View>
-
                           {/* Offline Student Settings */}
                           {newPdfTest.targetAudience === "batch" && (
                             <View style={{ backgroundColor: darkMode ? "#1a2a2a" : "#e8f5e9", padding: 12, borderRadius: 10, marginBottom: 15, borderLeftWidth: 3, borderLeftColor: "#2e7d32", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -16146,9 +16755,7 @@ PASTED QUESTION PAPER TEXT:
                                     ? "Parse & Load JSON Questions"
                                     : extractMode === "local"
                                       ? "Extract Questions (Local Regex)"
-                                      : extractMode === "ai"
-                                        ? "Extract Questions (Gemini AI)"
-                                        : "Extract Questions (Auto Mode)"}
+                                      : "Extract Questions (Gemini AI)"}
                               </Text>
                             </TouchableOpacity>
                             {isExtracting && (
@@ -16454,6 +17061,10 @@ PASTED QUESTION PAPER TEXT:
                                     </View>
 
                                     <Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121", fontSize: 12 }}>{q.questionEn || q.question}</Text>
+                                    {q.questionTa && <Text style={{ color: darkMode ? "#aaa" : "#555", fontSize: 11, marginTop: 2, fontStyle: "italic" }}>{q.questionTa}</Text>}
+                                    {q.questionMl && <Text style={{ color: darkMode ? "#80deea" : "#00838f", fontSize: 11, marginTop: 2, fontStyle: "italic" }}>[Malayalam] {q.questionMl}</Text>}
+                                    {q.questionTe && <Text style={{ color: darkMode ? "#ffe082" : "#f57f17", fontSize: 11, marginTop: 2, fontStyle: "italic" }}>[Telugu] {q.questionTe}</Text>}
+                                    {q.formula && <Text style={{ color: darkMode ? "#b39ddb" : "#512da8", fontSize: 11, marginTop: 4, fontWeight: "bold" }}>Formula: {q.formula}</Text>}
                                     {q.questionTa && <Text style={{ color: darkMode ? "#aaa" : "#555", fontSize: 11, marginTop: 2, fontStyle: "italic" }}>{q.questionTa}</Text>}
 
                                     {/* Question Image Attachment Preview & Actions */}
@@ -17153,36 +17764,30 @@ PASTED QUESTION PAPER TEXT:
                   >
                     {isAdmin ? (
                       <>
-                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>DIRECTORY</Text> : null}
-                        {renderSidebarItem("students", erpSub, "Students", "people-outline", () => changeErpSub("students"), "erp-students", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("staff", erpSub, "Admin", "shield-checkmark-outline", () => changeErpSub("staff"), "erp-staff", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("batch", erpSub, "Batches", "layers-outline", () => changeErpSub("batch"), "erp-batch", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("id-card", erpSub, "ID Cards", "card-outline", () => changeErpSub("id-card"), "erp-id-card", undefined, erpSidebarCollapsed && !isMobile)}
-
-                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>SECURITY & RULES</Text> : null}
-                        {(user.role === "super_admin" || user.role === "developer") && (
-                          <>
-                            {renderSidebarItem("permissions", erpSub, "Permissions", "key-outline", () => changeErpSub("permissions"), "erp-permissions", undefined, erpSidebarCollapsed && !isMobile)}
-                            {renderSidebarItem("approvals", erpSub, "Approvals Queue", "checkmark-circle-outline", () => { changeErpSub("approvals"); loadPendingApprovals(); }, "erp-approvals", pendingApprovals.length, erpSidebarCollapsed && !isMobile)}
-                          </>
-                        )}
+                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>PERMISSIONS & REQUESTS</Text> : null}
                         {renderSidebarItem("profile-requests", erpSub, "Profile Requests", "person-add-outline", () => { changeErpSub("profile-requests"); loadProfileRequests(); }, undefined, profileRequests.filter((r: any) => r.status === "pending").length, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("edit-permissions", erpSub, "Profile Edit Permissions", "shield-checkmark-outline", () => { changeErpSub("edit-permissions"); loadStudents(); }, "erp-edit-permissions", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("sacs", erpSub, "Access Control (SACS)", "shield-half-outline", () => { changeErpSub("sacs"); loadSacsRequests(); }, "erp-sacs", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("qr-permissions", erpSub, "QR Code Permissions", "qr-code-outline", () => changeErpSub("qr-permissions"), "erp-qr-permissions", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("edit-permissions", erpSub, "Profile Edit Permissions", "shield-checkmark-outline", () => { changeErpSub("edit-permissions"); loadStudents(); }, "erp-edit-permissions", undefined, erpSidebarCollapsed && !isMobile)}
 
-                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>OPERATIONS</Text> : null}
+                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ACADEMICS & DIRECTORY</Text> : null}
+                        {renderSidebarItem("students", erpSub, "Students", "people-outline", () => changeErpSub("students"), "erp-students", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("announcements", erpSub, "Notices", "megaphone-outline", () => changeErpSub("announcements"), "erp-announcements", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("analytics", erpSub, "Analytics", "analytics-outline", () => changeErpSub("analytics"), "erp-analytics", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("fees", erpSub, "Fees", "cash-outline", () => changeErpSub("fees"), "erp-fees", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("marks", erpSub, "Marks Ledger", "checkbox-outline", () => { changeErpSub("marks"); if (tests.length > 0) { setSelectedErpTestId(tests[0].id); loadErpTestResults(tests[0].id); } }, "erp-marks", undefined, erpSidebarCollapsed && !isMobile)}
                         {renderSidebarItem("offline-attendance", erpSub, "Offline Attendance", "clipboard-outline", () => { changeErpSub("offline-attendance"); loadStudents(); loadBatches(); }, "erp-offline-attendance", undefined, erpSidebarCollapsed && !isMobile)}
 
-                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>SYSTEM</Text> : null}
+                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMINISTRATION & GROUPS</Text> : null}
+                        {renderSidebarItem("staff", erpSub, "Admin", "shield-checkmark-outline", () => changeErpSub("staff"), "erp-staff", undefined, erpSidebarCollapsed && !isMobile)}
                         {(user.role === "super_admin" || user.role === "developer") && (
-                          <>
-                            {renderSidebarItem("drive", erpSub, "Drive & Storage", "cloud-upload-outline", () => { changeErpSub("drive"); loadDriveConfig(); }, "erp-drive", undefined, erpSidebarCollapsed && !isMobile)}
-                          </>
+                          renderSidebarItem("approvals", erpSub, "Approvals Queue", "checkmark-circle-outline", () => { changeErpSub("approvals"); loadPendingApprovals(); }, "erp-approvals", pendingApprovals.length, erpSidebarCollapsed && !isMobile)
+                        )}
+                        {renderSidebarItem("id-card", erpSub, "ID Cards", "card-outline", () => changeErpSub("id-card"), "erp-id-card", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("batch", erpSub, "Batches", "layers-outline", () => changeErpSub("batch"), "erp-batch", undefined, erpSidebarCollapsed && !isMobile)}
+
+                        {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>REPORTS & STORAGE</Text> : null}
+                        {renderSidebarItem("analytics", erpSub, "Analytics", "analytics-outline", () => changeErpSub("analytics"), "erp-analytics", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("marks", erpSub, "Marks Ledger", "checkbox-outline", () => { changeErpSub("marks"); if (tests.length > 0) { setSelectedErpTestId(tests[0].id); loadErpTestResults(tests[0].id); } }, "erp-marks", undefined, erpSidebarCollapsed && !isMobile)}
+                        {(user.role === "super_admin" || user.role === "developer") && (
+                          renderSidebarItem("drive", erpSub, "Drive and Storage", "cloud-upload-outline", () => { changeErpSub("drive"); loadDriveConfig(); }, "erp-drive", undefined, erpSidebarCollapsed && !isMobile)
                         )}
                       </>
                     ) : (
@@ -17420,8 +18025,9 @@ PASTED QUESTION PAPER TEXT:
                             ) : (
                               <>
                                 {/* Account Credentials */}
-                                <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, fontSize: 13 }}>Login Credentials</Text>
-                                <TextInput style={styles.input} placeholder="Username / Roll Number *" placeholderTextColor="#999" value={newStudent.loginUsername} onChangeText={u => setNewStudent({ ...newStudent, loginUsername: u })} autoCapitalize="none" />
+                                 <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, fontSize: 13 }}>Student Details & Login Credentials</Text>
+                                 <TextInput style={styles.input} placeholder="Student Full Name *" placeholderTextColor="#999" value={newStudent.firstName} onChangeText={n => setNewStudent({ ...newStudent, firstName: n, name: n })} />
+                                 <TextInput style={styles.input} placeholder="Username / Roll Number *" placeholderTextColor="#999" value={newStudent.loginUsername} onChangeText={u => setNewStudent({ ...newStudent, loginUsername: u })} autoCapitalize="none" />
                                 <View style={[styles.input, { justifyContent: "center", backgroundColor: "#fafafa", borderColor: "#e0e0e0", minHeight: 40, marginBottom: 12 }]}>
                                    <Text style={{ color: "#757575", fontSize: 13 }}>
                                      🔑 Password: {newStudent.loginUsername && newStudent.phone ? (newStudent.loginUsername.trim() + newStudent.phone.trim().slice(-4)) : "(Generated from Username + Last 4 digits of Phone)"}
@@ -17849,6 +18455,9 @@ PASTED QUESTION PAPER TEXT:
                                                 </View>
                                               )}
                                             </View>
+                                            <Text style={{ fontSize: 11, color: "#2e7d32", marginTop: 2, fontWeight: "600" }}>
+                                              👤 Created By Admin: <Text style={{ fontWeight: "bold" }}>{s.createdBy || s.createdByAdmin || "Super Admin"}</Text>
+                                            </Text>
                                             <Text style={{ fontSize: 11, color: "#757575", marginTop: 2 }}>
                                               Roll: {s.rollNumber || s.loginUsername || "N/A"} | {(() => {
                                                 const bList = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
@@ -17998,6 +18607,7 @@ PASTED QUESTION PAPER TEXT:
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Constituency:</Text> {s.constituency || "N/A"}</Text>
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Address:</Text> {s.address || "N/A"}</Text>
                                             <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#555" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Approved Date:</Text> {s.approvedAt ? new Date(s.approvedAt).toLocaleString() : "Pending"}</Text>
+                                             <Text style={{ fontSize: 13, color: darkMode ? "#81c784" : "#2e7d32", fontWeight: "bold" }}><Text style={{ fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>Created By Admin:</Text> {s.createdBy || s.createdByAdmin || "Super Admin"}</Text>
                                           </View>
 
                                           {/* Media Attachments */}
@@ -18039,7 +18649,98 @@ PASTED QUESTION PAPER TEXT:
                                           </View>
 
                                           {/* Action Buttons */}
-                                          <View style={{ flexDirection: "row", gap: 10, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
+                                          <View style={{ flexDirection: "row", gap: 8, marginTop: 15, borderTopWidth: 1, borderTopColor: darkMode ? "#444" : "#eeeeee", paddingTop: 10 }}>
+                                            <TouchableOpacity
+                                              onPress={() => {
+                                                const sName = getStudentName(s);
+                                                const bList = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
+                                                const batchesStr = bList.length > 0 ? bList.map(bName => {
+                                                  const modes = (s.batchModes || {})[bName] || [];
+                                                  const modesStr = modes.length > 0 ? modes.map(m => String(m).toUpperCase()).join("/") : (s.type || "offline").toUpperCase();
+                                                  return `${bName} (${modesStr})`;
+                                                }).join(", ") : "N/A";
+
+                                                const pdfHtml = `
+                                                  <!DOCTYPE html>
+                                                  <html>
+                                                    <head>
+                                                      <meta charset="utf-8" />
+                                                      <title>Student Profile - ${sName}</title>
+                                                      <style>
+                                                        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 30px; color: #212121; background: #fff; }
+                                                        .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #c62828; padding-bottom: 15px; margin-bottom: 20px; }
+                                                        .title { font-size: 24px; font-weight: bold; color: #c62828; }
+                                                        .subtitle { font-size: 13px; color: #666; margin-top: 4px; }
+                                                        .profile-container { display: flex; gap: 20px; margin-bottom: 20px; }
+                                                        .photo-box { width: 120px; height: 120px; border-radius: 8px; border: 2px solid #e0e0e0; object-fit: cover; }
+                                                        .info-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; font-size: 13px; }
+                                                        .info-item { border-bottom: 1px solid #f0f0f0; padding-bottom: 6px; }
+                                                        .label { font-weight: bold; color: #555; display: inline-block; width: 130px; }
+                                                        .value { color: #111; }
+                                                        .full-width { grid-column: span 2; }
+                                                        .footer { margin-top: 30px; border-top: 1px solid #ccc; pt: 10px; text-align: center; font-size: 11px; color: #888; }
+                                                      </style>
+                                                    </head>
+                                                    <body>
+                                                      <div class="header">
+                                                        <div>
+                                                          <div class="title">NERMAI IAS ACADEMY</div>
+                                                          <div class="subtitle">Official Candidate Student Profile Record</div>
+                                                        </div>
+                                                        <div style="text-align: right; font-size: 12px; color: #444;">
+                                                          Date: ${new Date().toLocaleDateString()}<br/>
+                                                          Roll No: <strong>${s.rollNumber || s.loginUsername || "N/A"}</strong>
+                                                        </div>
+                                                      </div>
+
+                                                      <div class="profile-container">
+                                                        ${hasPhoto && photoUri ? `<img src="${photoUri}" class="photo-box" />` : '<div class="photo-box" style="display:flex;align-items:center;justify-content:center;background:#eee;color:#888;">No Photo</div>'}
+                                                        <div style="flex:1;">
+                                                          <h2 style="margin:0 0 8px 0; color:#111;">${sName}</h2>
+                                                          <p style="margin:0; font-size:13px; color:#c62828; font-weight:bold;">Batches: ${batchesStr}</p>
+                                                          <p style="margin:4px 0 0 0; font-size:12px; color:#666;">Status: ${(s.status || "active").toUpperCase()} | Joined: ${s.joiningDate || "N/A"}</p>
+                                                        </div>
+                                                      </div>
+
+                                                      <div class="info-grid">
+                                                        <div class="info-item"><span class="label">Roll Number:</span><span class="value">${s.rollNumber || s.loginUsername || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Initial:</span><span class="value">${s.initial || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Username:</span><span class="value">${s.loginUsername || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Password:</span><span class="value">${s.loginPassword || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Course:</span><span class="value">${s.course || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Phone:</span><span class="value">${s.phone || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Alt Phone:</span><span class="value">${s.altPhone || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Email:</span><span class="value">${s.email || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Date of Birth:</span><span class="value">${formatDobForDisplay(s.dateOfBirth || s.dob)}</span></div>
+                                                        <div class="info-item"><span class="label">Blood Group:</span><span class="value">${s.bloodGroup || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Gender:</span><span class="value">${s.gender || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Community:</span><span class="value">${s.community || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Father's Name:</span><span class="value">${s.fatherName || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Father Occupation:</span><span class="value">${s.occupation || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Student Occupation:</span><span class="value">${s.studentOccupation || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Qualification:</span><span class="value">${s.qualification || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">College:</span><span class="value">${s.college || "N/A"}</span></div>
+                                                        <div class="info-item"><span class="label">Special Category:</span><span class="value">${s.horizontalReservation || "None"}</span></div>
+                                                        <div class="info-item"><span class="label">Constituency:</span><span class="value">${s.constituency || "N/A"}</span></div>
+                                                        <div class="info-item full-width"><span class="label">Address:</span><span class="value">${s.address || "N/A"}</span></div>
+                                                         <div class="info-item full-width"><span class="label">Created By Admin:</span><span class="value" style="color:#2e7d32; font-weight:bold;">${s.createdBy || s.createdByAdmin || "Super Admin"}</span></div>
+                                                        <div class="info-item"><span class="label">Total Fees:</span><span class="value">₹${s.totalFees || 0}</span></div>
+                                                        <div class="info-item"><span class="label">Fees Paid:</span><span class="value">₹${s.feesPaid || 0}</span></div>
+                                                      </div>
+
+                                                      <div class="footer">
+                                                        Confidential Record — Generated from NERMAI IAS Academy ERP System
+                                                      </div>
+                                                    </body>
+                                                  </html>
+                                                `;
+                                                downloadPdfDocument(pdfHtml, `Student_Profile_${s.rollNumber || s.loginUsername || 'Record'}.pdf`);
+                                              }}
+                                              style={{ flex: 1.2, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#2e7d32", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
+                                            >
+                                              <Ionicons name="download-outline" size={14} color="#ffffff" />
+                                              <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Download PDF</Text>
+                                            </TouchableOpacity>
                                             <TouchableOpacity
                                               onPress={() => {
                                                 setSelectedDirectoryStudent(null);
@@ -18175,7 +18876,7 @@ PASTED QUESTION PAPER TEXT:
                                 {[
                                   { key: "all", label: "All Users" },
                                   { key: "free", label: "Guest Users Only" },
-                                  { key: "paid", label: "Paid Users Only" },
+                                  { key: "paid", label: "Enrolled Users Only" },
                                   { key: "batch", label: "Specific Batch" },
                                   { key: "all_admins", label: "All Admins" },
                                   { key: "super_admin", label: "Super Admin Only" },
@@ -18210,7 +18911,7 @@ PASTED QUESTION PAPER TEXT:
                                   {[
                                     { key: "all", label: "All Users" },
                                     { key: "free", label: "Guest Users Only" },
-                                    { key: "paid", label: "Paid Users Only" },
+                                    { key: "paid", label: "Enrolled Users Only" },
                                     { key: "batch", label: "Specific Batch" },
                                     { key: "all_admins", label: "All Admins" },
                                     { key: "super_admin", label: "Super Admin Only" },
@@ -18255,7 +18956,7 @@ PASTED QUESTION PAPER TEXT:
                           {/* Batch selector if targetGroup ==="batch"*/}
                           {((editingNoticeId ? editingNotice.targetDashboard : newNotice.targetDashboard) === "batch") && (
                             <View style={{ zIndex: 900, position: "relative", marginBottom: 12 }}>
-                              <Text style={styles.label}>Select Target Batch:</Text>
+                              <Text style={styles.label}>Select Target Batch(es):</Text>
                               <TouchableOpacity
                                 onPress={() => {
                                   setShowBatchDropdown(!showBatchDropdown);
@@ -18273,8 +18974,14 @@ PASTED QUESTION PAPER TEXT:
                                   marginTop: 4
                                 }}
                               >
-                                <Text style={{ color: "#212121" }}>
-                                  {(editingNoticeId ? editingNotice.targetBatch : newNotice.targetBatch) || "Select Batch"}
+                                <Text style={{ color: "#212121", fontWeight: "bold" }}>
+                                  {(() => {
+                                    const raw = (editingNoticeId ? editingNotice.targetBatch : newNotice.targetBatch) || "";
+                                    const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                                    if (list.length === 0) return "Choose Target Batches...";
+                                    if (list.length === 1) return list[0];
+                                    return `${list.length} Batches Selected (${list.join(", ")})`;
+                                  })()}
                                 </Text>
                                 <Ionicons name={showBatchDropdown ? "chevron-up" : "chevron-down"} size={16} color="#757575" />
                               </TouchableOpacity>
@@ -18291,7 +18998,7 @@ PASTED QUESTION PAPER TEXT:
                                   marginTop: 4,
                                   overflow: "hidden",
                                   zIndex: 901,
-                                  maxHeight: 200,
+                                  maxHeight: 220,
                                   shadowColor: "#000",
                                   shadowOffset: { width: 0, height: 2 },
                                   shadowOpacity: 0.1,
@@ -18300,35 +19007,57 @@ PASTED QUESTION PAPER TEXT:
                                 }}>
                                   <ScrollView nestedScrollEnabled={true}>
                                     {batches.map((b: any) => {
-                                      const currentBatch = editingNoticeId ? editingNotice.targetBatch : newNotice.targetBatch;
-                                      const isSelected = currentBatch === b.batchName;
+                                      const raw = (editingNoticeId ? editingNotice.targetBatch : newNotice.targetBatch) || "";
+                                      const list = raw.split(",").map((s: string) => s.trim()).filter(Boolean);
+                                      const isSelected = list.includes(b.batchName);
+
+                                      const toggleBatch = () => {
+                                        let newList: string[];
+                                        if (isSelected) {
+                                          newList = list.filter((item: string) => item !== b.batchName);
+                                        } else {
+                                          newList = [...list, b.batchName];
+                                        }
+                                        const updatedStr = newList.join(", ");
+                                        if (editingNoticeId) {
+                                          setEditingNotice({ ...editingNotice, targetBatch: updatedStr });
+                                        } else {
+                                          setNewNotice({ ...newNotice, targetBatch: updatedStr });
+                                        }
+                                      };
+
                                       return (
                                         <TouchableOpacity
                                           key={b.id}
-                                          onPress={() => {
-                                            if (editingNoticeId) {
-                                              setEditingNotice({ ...editingNotice, targetBatch: b.batchName });
-                                            } else {
-                                              setNewNotice({ ...newNotice, targetBatch: b.batchName });
-                                            }
-                                            setShowBatchDropdown(false);
-                                          }}
+                                          onPress={toggleBatch}
                                           style={{
                                             padding: 12,
+                                            flexDirection: "row",
+                                            alignItems: "center",
+                                            gap: 10,
                                             borderBottomWidth: 1,
                                             borderBottomColor: "#f0f0f0",
-                                            backgroundColor: isSelected ? "#e3f2fd" : "#ffffff"
+                                            backgroundColor: isSelected ? "#ffebee" : "#ffffff"
                                           }}
                                         >
+                                          <Ionicons
+                                            name={isSelected ? "checkbox" : "square-outline"}
+                                            size={18}
+                                            color={isSelected ? "#c62828" : "#757575"}
+                                          />
                                           <Text style={{
-                                            color: isSelected ? "#1976d2" : "#212121",
-                                            fontWeight: isSelected ? "bold" : "normal"
+                                            color: isSelected ? "#c62828" : "#212121",
+                                            fontWeight: isSelected ? "bold" : "normal",
+                                            fontSize: 13
                                           }}>
-                                            {b.batchName}
+                                            {b.batchName} ({b.course})
                                           </Text>
                                         </TouchableOpacity>
                                       );
                                     })}
+                                    {batches.length === 0 && (
+                                      <Text style={{ padding: 12, color: "#888", textAlign: "center", fontSize: 12 }}>No batches created yet</Text>
+                                    )}
                                   </ScrollView>
                                 </View>
                               )}
@@ -18883,15 +19612,25 @@ PASTED QUESTION PAPER TEXT:
                                     <Text style={{ color: "#1976d2", fontSize: 12, marginTop: 2 }}>Course: {b.course}</Text>
                                     {b.description ? <Text style={{ color: "#757575", fontSize: 12, marginTop: 2 }}>{b.description}</Text> : null}
 
-                                    {isSpec && Array.isArray(b.subBatches) && b.subBatches.length > 0 && (
-                                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                                        <Text style={{ fontSize: 11, color: "#616161", fontWeight: "bold" }}>Includes Batches:</Text>
-                                        {b.subBatches.map((sbName: string) => (
-                                          <View key={sbName} style={{ backgroundColor: "#eeeeee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                            <Text style={{ fontSize: 10, color: "#424242", fontWeight: "500" }}>{sbName}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
+                                     {isSpec && (
+                                       <View style={{ marginTop: 6, gap: 4 }}>
+                                         {Array.isArray(b.subBatches) && b.subBatches.length > 0 && (
+                                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                             <Text style={{ fontSize: 11, color: "#616161", fontWeight: "bold" }}>Includes Batches:</Text>
+                                             {b.subBatches.map((sbName: string) => (
+                                               <View key={sbName} style={{ backgroundColor: "#eeeeee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                                 <Text style={{ fontSize: 10, color: "#424242", fontWeight: "500" }}>{sbName}</Text>
+                                               </View>
+                                             ))}
+                                           </View>
+                                         )}
+                                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                           <Text style={{ fontSize: 10, fontWeight: "bold", color: b.enableSpecialRollNo ? "#7b1fa2" : "#757575" }}>
+                                             🔢 Special Roll Numbers: {b.enableSpecialRollNo ? "ENABLED (Auto-generated 6-digit roll numbers)" : "DISABLED (Same as general batches)"}
+                                           </Text>
+                                         </View>
+                                       </View>
+                                     )}
                                     )}
                                   </View>
 
@@ -20401,6 +21140,218 @@ PASTED QUESTION PAPER TEXT:
                             </View>
                           </ScrollView>
                         </View>
+
+                        {/* SECTION 2: Role Permissions Manager */}
+                        {(user.role === "super_admin" || user.role === "developer") && (() => {
+                          const roles = [
+                            { key: "super_admin", label: "Super Admin" },
+                            { key: "admin", label: "Admin" },
+                            { key: "editor", label: "Editor" },
+                            { key: "contributor", label: "Contributor" },
+                            ...customRoles.map(r => ({ key: r, label: r.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) }))
+                          ];
+
+                          const permissionOptions = [
+                            { key: "none", label: "Disabled (No Access)", color: "#c62828" },
+                            { key: "view", label: "View Only (Read-Only)", color: "#1565c0" },
+                            { key: "edit_direct", label: "Direct Edit (Full CRUD)", color: "#2e7d32" },
+                            { key: "edit_on_approval", label: "Edit on Approval (Requires Super Admin Review)", color: "#f57f17" }
+                          ];
+
+                          const saveRolePermissions = async () => {
+                            setIsSavingPermissions(true);
+                            try {
+                              const currentPerms = rolePermissions?.[activePermissionRole] || {};
+                              await api.put(`/developer/role-permissions/${activePermissionRole}`, currentPerms);
+                              Alert.alert("Success", "Permissions saved successfully!");
+                              loadRolePermissions();
+                            } catch (e: any) {
+                              Alert.alert("Error", e.message || "Failed to save permissions.");
+                            } finally {
+                              setIsSavingPermissions(false);
+                            }
+                          };
+
+                          const updateFeaturePermission = (featureKey: string, optionKey: string) => {
+                            setRolePermissions((prev: any) => ({
+                              ...prev,
+                              [activePermissionRole]: {
+                                ...(prev?.[activePermissionRole] || {}),
+                                [featureKey]: optionKey
+                              }
+                            }));
+                          };
+
+                          const currentRolePermissions = rolePermissions?.[activePermissionRole] || {};
+
+                          return (
+                            <View style={{ gap: 15, marginTop: 25, paddingTop: 25, borderTopWidth: 2, borderTopColor: "#e0e0e0" }}>
+                              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                                <Text style={styles.sectionTitle}>Role Permissions Manager</Text>
+                                <TouchableOpacity
+                                  disabled={isSavingPermissions}
+                                  onPress={saveRolePermissions}
+                                  style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center", backgroundColor: "#2e7d32" }]}
+                                >
+                                  <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
+                                    {isSavingPermissions ? "Saving..." : "Save Changes"}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+
+                              {/* Role Selector Tabs */}
+                              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                                {roles.map(r => {
+                                  const isSelected = activePermissionRole === r.key;
+                                  return (
+                                    <TouchableOpacity
+                                      key={r.key}
+                                      onPress={() => setActivePermissionRole(r.key)}
+                                      style={{
+                                        paddingHorizontal: 16,
+                                        paddingVertical: 8,
+                                        borderRadius: 8,
+                                        borderWidth: 1.5,
+                                        borderColor: isSelected ? "#c62828" : "#e0e0e0",
+                                        backgroundColor: isSelected ? "#ffebee" : "#ffffff",
+                                        alignItems: "center"
+                                      }}
+                                    >
+                                      <Text style={{ color: isSelected ? "#c62828" : "#616161", fontWeight: "bold", fontSize: 12 }}>{r.label}</Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+
+                              {/* Module Category Filter Dropdown */}
+                              <View style={{ position: "relative", zIndex: 999, marginHorizontal: 2 }}>
+                                <Text style={{ fontSize: 12, fontWeight: "bold", color: "#555", marginBottom: 6 }}>Filter by Module Category</Text>
+                                <TouchableOpacity
+                                  onPress={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                                  style={{
+                                    flexDirection: "row",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    borderWidth: 1.5,
+                                    borderColor: "#e0e0e0",
+                                    borderRadius: 8,
+                                    padding: 12,
+                                    backgroundColor: "#ffffff"
+                                  }}
+                                >
+                                  <Text style={{ color: "#212121", fontWeight: "bold", fontSize: 13 }}>
+                                    {selectedPermissionCategory === "All" ? "Show All Modules" : `Only ${selectedPermissionCategory} Modules`}
+                                  </Text>
+                                  <Ionicons name={showCategoryDropdown ? "chevron-up" : "chevron-down"} size={18} color="#757575" />
+                                </TouchableOpacity>
+                                {showCategoryDropdown && (
+                                  <View style={{
+                                    position: "absolute",
+                                    top: "100%",
+                                    left: 0,
+                                    right: 0,
+                                    borderWidth: 1.5,
+                                    borderColor: "#e0e0e0",
+                                    borderRadius: 8,
+                                    backgroundColor: "#ffffff",
+                                    marginTop: 4,
+                                    overflow: "hidden",
+                                    zIndex: 1000,
+                                    shadowColor: "#000",
+                                    shadowOffset: { width: 0, height: 2 },
+                                    shadowOpacity: 0.1,
+                                    shadowRadius: 2,
+                                    elevation: 3
+                                  }}>
+                                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }}>
+                                      {["All", "ERP", "LMS", "CRM", "TEST", "DEVELOPER"].map(cat => {
+                                        const isSelected = selectedPermissionCategory === cat;
+                                        return (
+                                          <TouchableOpacity
+                                            key={cat}
+                                            onPress={() => {
+                                              setSelectedPermissionCategory(cat);
+                                              setShowCategoryDropdown(false);
+                                            }}
+                                            style={{
+                                              padding: 12,
+                                              borderBottomWidth: 1,
+                                              borderBottomColor: "#f0f0f0",
+                                              backgroundColor: isSelected ? "#ffebee" : "#ffffff"
+                                            }}
+                                          >
+                                            <Text style={{ fontSize: 13, color: isSelected ? "#c62828" : "#212121", fontWeight: isSelected ? "bold" : "normal" }}>
+                                              {cat === "All" ? "Show All Modules" : `${cat} Modules`}
+                                            </Text>
+                                          </TouchableOpacity>
+                                        );
+                                      })}
+                                    </ScrollView>
+                                  </View>
+                                )}
+                              </View>
+
+                              {/* Features List */}
+                              <View style={styles.card}>
+                                <Text style={[styles.sectionTitle, { fontSize: 14, marginBottom: 12 }]}>Configure Access for: {roles.find(r => r.key === activePermissionRole)?.label}</Text>
+
+                                <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
+                                  <View style={{ gap: 16 }}>
+                                    {ALL_SYSTEM_FEATURES.filter(f => selectedPermissionCategory === "All" || f.category === selectedPermissionCategory).map(f => {
+                                      const rawVal = currentRolePermissions[f.key];
+                                      const activeVal = rawVal === "none" ? "none" : rawVal === "view" || rawVal === "CRU only" || rawVal === "CR only" || rawVal === "U only" ? "view" : rawVal === "edit_direct" || rawVal === "CRUD" ? "edit_direct" : "edit_on_approval";
+                                      return (
+                                        <View key={f.key} style={{ paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: "#eeeeee" }}>
+                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                            <Ionicons name={f.icon as any} size={16} color="#c62828" />
+                                            <Text style={{ fontSize: 13, fontWeight: "bold", color: "#212121" }}>{f.label}</Text>
+                                          </View>
+
+                                          <View style={{ gap: 6 }}>
+                                            {permissionOptions.map(opt => {
+                                              const isSelected = activeVal === opt.key;
+                                              return (
+                                                <TouchableOpacity
+                                                  key={opt.key}
+                                                  onPress={() => updateFeaturePermission(f.key, opt.key)}
+                                                  style={{
+                                                    flexDirection: "row",
+                                                    alignItems: "center",
+                                                    padding: 10,
+                                                    borderRadius: 6,
+                                                    borderWidth: 1.5,
+                                                    borderColor: isSelected ? opt.color : "#e0e0e0",
+                                                    backgroundColor: isSelected ? `${opt.color}15` : "#f9f9f9"
+                                                  }}
+                                                >
+                                                  <View style={{
+                                                    width: 16,
+                                                    height: 16,
+                                                    borderRadius: 8,
+                                                    borderWidth: 2,
+                                                    borderColor: isSelected ? opt.color : "#9e9e9e",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    marginRight: 10
+                                                  }}>
+                                                    {isSelected && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: opt.color }} />}
+                                                  </View>
+                                                  <Text style={{ fontSize: 11, color: isSelected ? opt.color : "#616161", fontWeight: isSelected ? "bold" : "normal" }}>
+                                                    {opt.label}
+                                                  </Text>
+                                                </TouchableOpacity>
+                                              );
+                                            })}
+                                          </View>
+                                        </View>
+                                      );
+                                    })}
+                                  </View>
+                                </ScrollView>
+                              </View>
+                            </View>
+                          );
+                        })()}
                       </View>
                     )
                   )}
@@ -20526,28 +21477,30 @@ PASTED QUESTION PAPER TEXT:
                               shadowRadius: 2,
                               elevation: 3
                             }}>
-                              {["All", "ERP", "LMS", "CRM", "Test Portal", "System"].map(cat => {
-                                const isSelected = selectedPermissionCategory === cat;
-                                return (
-                                  <TouchableOpacity
-                                    key={cat}
-                                    onPress={() => {
-                                      setSelectedPermissionCategory(cat);
-                                      setShowCategoryDropdown(false);
-                                    }}
-                                    style={{
-                                      padding: 12,
-                                      borderBottomWidth: 1,
-                                      borderBottomColor: "#f0f0f0",
-                                      backgroundColor: isSelected ? "#ffebee" : "#ffffff"
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 13, color: isSelected ? "#c62828" : "#212121", fontWeight: isSelected ? "bold" : "normal" }}>
-                                      {cat === "All" ? "All Modules" : `${cat} Modules`}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
+                              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }}>
+                                {["All", "ERP", "LMS", "CRM", "TEST", "DEVELOPER"].map(cat => {
+                                  const isSelected = selectedPermissionCategory === cat;
+                                  return (
+                                    <TouchableOpacity
+                                      key={cat}
+                                      onPress={() => {
+                                        setSelectedPermissionCategory(cat);
+                                        setShowCategoryDropdown(false);
+                                      }}
+                                      style={{
+                                        padding: 12,
+                                        borderBottomWidth: 1,
+                                        borderBottomColor: "#f0f0f0",
+                                        backgroundColor: isSelected ? "#ffebee" : "#ffffff"
+                                      }}
+                                    >
+                                      <Text style={{ fontSize: 13, color: isSelected ? "#c62828" : "#212121", fontWeight: isSelected ? "bold" : "normal" }}>
+                                        {cat === "All" ? "Show All Modules" : `${cat} Modules`}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </ScrollView>
                             </View>
                           )}
                         </View>
@@ -20590,10 +21543,10 @@ PASTED QUESTION PAPER TEXT:
                                               height: 16,
                                               borderRadius: 8,
                                               borderWidth: 2,
-                                              borderColor: isSelected ? opt.color : "#bdbdbd",
+                                              borderColor: isSelected ? opt.color : "#9e9e9e",
                                               alignItems: "center",
                                               justifyContent: "center",
-                                              marginRight: 8
+                                              marginRight: 10
                                             }}>
                                               {isSelected && (
                                                 <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: opt.color }} />
@@ -21221,8 +22174,8 @@ PASTED QUESTION PAPER TEXT:
 
                               <View style={{ flexDirection: "row", gap: 8, marginBottom: 15 }}>
                                 {[
-                                  { key: "all", label: "All Users\n(Guest & Paid)" },
-                                  { key: "paid", label: "Paid Students\nOnly" },
+                                  { key: "all", label: "All Users\n(Guest & Enrolled)" },
+                                  { key: "paid", label: "Enrolled Students\nOnly" },
                                   { key: "free", label: "Free (Guest)\nUsers Only" }
                                 ].map(t => {
                                   const isSel = bulkTargetGroup === t.key;
@@ -24097,11 +25050,11 @@ PASTED QUESTION PAPER TEXT:
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile)}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile)}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-checkmark-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile)}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile)}
                     {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile)}
 
-                    {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>ACCESS & AI</Text>}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>AI STUDIO</Text>}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-chatbot", lmsSub, "NERMAI AI Studio", "chatbubbles-outline", () => changeLmsSub("lms-chatbot"), "lms-admin-chatbot", undefined, lmsTabsCollapsed && !isMobile)}
                   </ScrollView>
                 </View>
@@ -24746,7 +25699,7 @@ PASTED QUESTION PAPER TEXT:
                           if (!batchName) {
                             if (session.accessLevel === "free") batchName = "All Students";
                             else if (session.accessLevel === "batch") batchName = "Specific Batch";
-                            else batchName = "All Paid Students";
+                            else batchName = "All Enrolled Students";
                           }
 
                           return (
@@ -25737,8 +26690,8 @@ PASTED QUESTION PAPER TEXT:
                                   outline: 'none'
                                 }}
                               >
-                                <option value="all">All Students (Free & Paid)</option>
-                                <option value="paid">All Paid Students</option>
+                                <option value="all">All Students (Free & Enrolled)</option>
+                                <option value="paid">All Enrolled Students</option>
                                 <option value="batch">Specific Batch</option>
                               </select>
                             ) : (
@@ -26368,15 +27321,15 @@ PASTED QUESTION PAPER TEXT:
                     contentContainerStyle={{ alignItems: crmSidebarCollapsed && !isMobile ? "center" : "stretch", gap: 6, paddingBottom: 60 }}
                     showsVerticalScrollIndicator={false}
                   >
-                    {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS</Text> : null}
-                    {renderSidebarItem("guest-posters", crmSub, "Guest Posters", "images-outline", () => { changeCrmSub("guest-posters"); loadAdminGuestPosters(); }, "crm-guest-posters", undefined, lmsTabsCollapsed && !isMobile)}
-                    {renderSidebarItem("admissions", crmSub, "Admissions application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile)}
+                    {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS & LEADS</Text> : null}
+                    {renderSidebarItem("admissions", crmSub, "Admission Application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile)}
                     {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile)}
                     {renderSidebarItem("inquiries", crmSub, "Inquiries", "chatbubble-ellipses-outline", () => changeCrmSub("inquiries"), "crm-inquiries", undefined, crmSidebarCollapsed && !isMobile)}
 
-                    {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ENGAGEMENT & CAMPAIGNS</Text> : null}
+                    {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>CAMPAIGNS & ENGAGEMENT</Text> : null}
                     {renderSidebarItem("campaigns", crmSub, "Campaigns", "megaphone-outline", () => changeCrmSub("campaigns"), "crm-campaigns", undefined, crmSidebarCollapsed && !isMobile)}
-                    {renderSidebarItem("feedback", crmSub, "Feedbacks", "star-outline", () => changeCrmSub("feedback"), "crm-feedback", undefined, crmSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("guest-posters", crmSub, "Guest Posters", "images-outline", () => { changeCrmSub("guest-posters"); loadAdminGuestPosters(); }, "crm-guest-posters", undefined, crmSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("feedback", crmSub, "Feedback", "star-outline", () => changeCrmSub("feedback"), "crm-feedback", undefined, crmSidebarCollapsed && !isMobile)}
                   </ScrollView>
                 </View>
               )}
@@ -26839,7 +27792,7 @@ PASTED QUESTION PAPER TEXT:
                           {[
                             { label: "All Users", value: "all" },
                             { label: "Free Users Only", value: "free" },
-                            { label: "Paid Students Only", value: "paid" }
+                            { label: "Enrolled Students Only", value: "paid" }
                           ].map(seg => (
                             <TouchableOpacity
                               key={seg.value}

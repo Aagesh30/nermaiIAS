@@ -52,7 +52,8 @@ router.delete("/permission-requests/clear-all", requireRole(adminRoles), Offline
 router.patch("/permission-requests/:id", requireRole(adminRoles), OfflineTestRequestController.updateStatus);
 
 /** Admin deletes a specific request */
-router.delete("/permission-requests/:id", requireRole(adminRoles), OfflineTestRequestController.deleteRequest);
+router.delete("/permission-requests/by-test/:testId", OfflineTestRequestController.deleteByTest);
+router.delete("/permission-requests/:id", OfflineTestRequestController.deleteRequest);
 
 // ─────────────────────────────────────────────────────────────────────────────
 

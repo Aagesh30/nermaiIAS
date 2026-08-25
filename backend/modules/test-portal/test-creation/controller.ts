@@ -1002,6 +1002,13 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 deletedAt: admin.firestore.FieldValue.serverTimestamp(),
                 deletedBy: req.body.deletedBy || "system"
             });
+            // Also delete all permission requests for this test
+            try {
+                const reqSnap = await db.collection(OFFLINE_REQUESTS_COLLECTION).where("testId", "==", id).get();
+                const batch = db.batch();
+                reqSnap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+            } catch (e) {}
             return res.status(200).json({ success: true, message: "Test deleted successfully" });
         } catch (error: any) {
             return res.status(500).json({ success: false, message: error.message });
@@ -1432,9 +1439,84 @@ export class OfflineTestRequestController {
                 requests = snapshot.docs.map((doc: any) => doc.data());
             } else {
                 // Admin: fetch all
-                const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
-                    .get();
+                const snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION).get();
                 requests = snapshot.docs.map((doc: any) => doc.data());
+            }
+
+            // Auto-cleanup: Fetch tests, test_attempts, and results to purge invalid / expired / completed test requests from DB
+            try {
+                const testsSnap = await db.collection(COLLECTION).get();
+                const invalidOrOverTestIds = new Set<string>();
+                const existingTestIds = new Set<string>();
+
+                testsSnap.docs.forEach((doc: any) => {
+                    const data = doc.data();
+                    const testId = doc.id;
+                    if (data.isDeleted) {
+                        invalidOrOverTestIds.add(testId);
+                    } else {
+                        existingTestIds.add(testId);
+                        if (data.endTime) {
+                            const endTimeMs = typeof data.endTime?.toDate === "function"
+                                ? data.endTime.toDate().getTime()
+                                : new Date(data.endTime).getTime();
+                            if (!isNaN(endTimeMs) && Date.now() > endTimeMs) {
+                                // Test has ended / is OVER!
+                                invalidOrOverTestIds.add(testId);
+                            }
+                        }
+                    }
+                });
+
+                const completedAttemptKeys = new Set<string>();
+
+                const attemptsSnap = await db.collection("student_attempts").get();
+                attemptsSnap.docs.forEach((doc: any) => {
+                    const data = doc.data();
+                    if (data.status === "submitted" || data.status === "evaluated" || data.submittedAt || data.isSubmitted) {
+                        if (data.testId) {
+                            if (data.studentId) completedAttemptKeys.add(`${data.testId}_${data.studentId}`);
+                            if (data.username) completedAttemptKeys.add(`${data.testId}_${data.username}`);
+                            if (data.rollNumber) completedAttemptKeys.add(`${data.testId}_${data.rollNumber}`);
+                            if (data.studentName) completedAttemptKeys.add(`${data.testId}_${data.studentName}`);
+                        }
+                    }
+                });
+
+                const resultsSnap = await db.collection("results").where("isDeleted", "==", false).get();
+                resultsSnap.docs.forEach((doc: any) => {
+                    const data = doc.data();
+                    if (data.testId) {
+                        if (data.studentId) completedAttemptKeys.add(`${data.testId}_${data.studentId}`);
+                        if (data.username) completedAttemptKeys.add(`${data.testId}_${data.username}`);
+                        if (data.rollNumber) completedAttemptKeys.add(`${data.testId}_${data.rollNumber}`);
+                        if (data.studentName) completedAttemptKeys.add(`${data.testId}_${data.studentName}`);
+                    }
+                });
+
+                const activeReqs = [];
+                for (const r of requests) {
+                    const reqTestId = String(r.testId || '');
+                    const isTestOverOrDeleted = (reqTestId && !existingTestIds.has(reqTestId)) || invalidOrOverTestIds.has(reqTestId);
+
+                    const k1 = `${r.testId}_${r.studentId}`;
+                    const k2 = `${r.testId}_${r.username}`;
+                    const k3 = `${r.testId}_${r.rollNumber}`;
+                    const k4 = `${r.testId}_${r.studentName}`;
+                    const isAttemptCompleted = completedAttemptKeys.has(k1) || completedAttemptKeys.has(k2) || completedAttemptKeys.has(k3) || completedAttemptKeys.has(k4);
+
+                    if (isTestOverOrDeleted || isAttemptCompleted) {
+                        // Purge request from DB asynchronously
+                        if (r.id) {
+                            db.collection(OFFLINE_REQUESTS_COLLECTION).doc(r.id).delete().catch(() => {});
+                        }
+                    } else {
+                        activeReqs.push(r);
+                    }
+                }
+                requests = activeReqs;
+            } catch (cleanErr) {
+                console.log("Note auto-cleaning permission requests:", cleanErr);
             }
             
             // Sort in-memory desc by requestedAt to avoid requiring a composite index in Firestore
@@ -1484,6 +1566,44 @@ export class OfflineTestRequestController {
             return res.status(200).json({ success: true, message: "Request deleted" });
         } catch (error: any) {
             console.error("[OfflineTestRequest] delete error:", error);
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * DELETE /api/test-portal/permission-requests/by-test/:testId
+     * Deletes permission requests by testId and optional studentId
+     */
+    static async deleteByTest(req: Request, res: Response) {
+        try {
+            const { testId } = req.params;
+            const { studentId, username, rollNumber } = req.query;
+            let snapshot;
+            if (studentId || username || rollNumber) {
+                const sId = String(studentId || "");
+                const uName = String(username || "");
+                const rNum = String(rollNumber || "");
+                const snap = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("testId", "==", testId)
+                    .get();
+                const toDelete = snap.docs.filter(doc => {
+                    const data = doc.data();
+                    return (sId && data.studentId === sId) || (uName && data.username === uName) || (rNum && data.rollNumber === rNum);
+                });
+                const batch = db.batch();
+                toDelete.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+            } else {
+                snapshot = await db.collection(OFFLINE_REQUESTS_COLLECTION)
+                    .where("testId", "==", testId)
+                    .get();
+                const batch = db.batch();
+                snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+            }
+            return res.status(200).json({ success: true, message: "Requests deleted by test" });
+        } catch (error: any) {
+            console.error("[OfflineTestRequest] deleteByTest error:", error);
             return res.status(500).json({ success: false, message: error.message });
         }
     }
