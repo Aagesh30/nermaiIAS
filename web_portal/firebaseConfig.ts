@@ -61,40 +61,31 @@ export const auth = (() => {
 })();
 
 export const handleFirebaseGoogleSignIn = async (fallbackName?: string, fallbackPhone?: string) => {
+  console.log("[DEBUG] handleFirebaseGoogleSignIn initiated", { fallbackName, fallbackPhone });
   if (Platform.OS === "web") {
     const provider = new GoogleAuthProvider();
     provider.addScope("email");
     provider.addScope("profile");
     provider.setCustomParameters({ prompt: 'select_account' });
     
-    const isMobileBrowser = typeof navigator !== "undefined" && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    console.log("[DEBUG] Platform is web. Triggering signInWithPopup");
     
     try {
-      if (isMobileBrowser) {
-        if (typeof localStorage !== "undefined") {
-          localStorage.setItem("nermai_pending_guest_name", fallbackName || "");
-          localStorage.setItem("nermai_pending_guest_phone", fallbackPhone || "");
-        }
-        await signInWithRedirect(auth, provider);
-        return new Promise(() => {});
-      } else {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        return {
-          email: user.email,
-          name: user.displayName || user.email?.split("@")[0] || "Guest Learner",
-          photoURL: user.photoURL,
-          uid: user.uid
-        };
-      }
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      console.log("[DEBUG] signInWithPopup returned user:", user?.email);
+      return {
+        email: user.email,
+        name: user.displayName || user.email?.split("@")[0] || "Guest Learner",
+        photoURL: user.photoURL,
+        uid: user.uid
+      };
     } catch (error: any) {
-      console.error("Firebase Google Sign-In error:", error);
+      console.error("[DEBUG] Firebase Google Sign-In error:", error);
       throw error;
     }
   } else {
-    // Native Mobile (Expo Go / Android / iOS)
-    // signInWithPopup is a web-only method not supported natively in React Native.
-    // Provide a mobile guest authentication fallback using user-entered name and phone.
+    console.log("[DEBUG] Platform is native mobile. Using guest fallback.");
     const cleanName = (fallbackName || "Guest").trim();
     const cleanPhone = (fallbackPhone || "0000000000").trim();
     const sanitizedEmail = `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "")}_${cleanPhone.slice(-4)}@guest.nermaiias.com`;

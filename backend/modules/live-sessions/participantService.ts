@@ -230,17 +230,7 @@ export class ParticipantService {
    * Heartbeat to keep connection status active
    */
   static async updateHeartbeat(sessionId: string, studentId: string): Promise<void> {
-    const now = new Date().toISOString();
-    const partRef = db
-      .collection(LIVE_SESSIONS_COL)
-      .doc(sessionId)
-      .collection(PARTICIPANTS_SUBCOL)
-      .doc(studentId);
-
-    await partRef.update({
-      lastHeartbeat: now,
-      presenceStatus: 'JOINED',
-    });
+    // Presence heartbeat database writes disabled to prevent billing spikes.
   }
 
   /**

@@ -35,6 +35,9 @@ router.use(requireAuth);
 // Role permissions reading is allowed for all admin/staff roles so their frontend can configure views
 router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff', 'developer']), DeveloperController.getRolePermissions);
 
+// Custom Role Permissions Management (Writes) - super_admin and developer only
+router.put("/role-permissions/:role", requireRole(['super_admin', 'developer']), DeveloperController.updateRolePermissions);
+
 // Allow admin/staff roles to submit approval request notifications
 router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff', 'developer']), (req, res, next) => {
   req.params.name = "notifications";
@@ -57,9 +60,6 @@ router.delete("/collection/:name/:docId", DeveloperController.deleteDocument);
 
 // Raw Firestore query
 router.post("/query/:name", DeveloperController.rawQuery);
-
-// Custom Role Permissions Management (Writes)
-router.put("/role-permissions/:role", DeveloperController.updateRolePermissions);
 
 // Global Page Lock Management
 router.put("/page-locks", DeveloperController.updatePageLocks);

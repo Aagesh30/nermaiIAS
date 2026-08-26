@@ -5,6 +5,8 @@ import { logger } from '../logger';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
 
+import { SessionService } from '../security/sessions/SessionService';
+
 export const requireAuth = async (
   req: Request,
   res: Response,
@@ -28,6 +30,16 @@ export const requireAuth = async (
 
       if (decodedCustom && (decodedCustom.userId || decodedCustom.user_id || decodedCustom.sub || decodedCustom.id)) {
         const uid = decodedCustom.userId || decodedCustom.user_id || decodedCustom.sub || decodedCustom.id;
+
+        // Verify session is still active
+        if (decodedCustom.sessionId) {
+          const isValid = await SessionService.isValid(decodedCustom.sessionId);
+          if (!isValid) {
+            logger.warn(`Auth failed: Session ${decodedCustom.sessionId} has been revoked for UID ${uid}`);
+            return next(new AppError('Session revoked', 401));
+          }
+        }
+
         req.user = {
           userId: uid,
           tenantId: decodedCustom.tenantId || 'default_tenant',

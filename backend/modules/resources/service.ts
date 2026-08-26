@@ -13,6 +13,7 @@ import { FirebaseStorageProvider } from './providers/FirebaseStorageProvider';
 import { GoogleDriveProvider } from './providers/GoogleDriveProvider';
 import { IResourceProvider } from './providers/IResourceProvider';
 import { uploadFileToGoogleDrive } from '../../services/google_drive';
+import { generalCache } from '../../shared/utils/cache';
 
 export class ResourceService {
   private repo = new ResourceRepository();
@@ -152,7 +153,9 @@ export class ResourceService {
     // Clean undefined fields for Firestore
     Object.keys(resourceData).forEach(key => (resourceData as any)[key] === undefined && delete (resourceData as any)[key]);
 
-    return await this.repo.create(resourceData, userId);
+    const createdResource = await this.repo.create(resourceData, userId);
+    generalCache.invalidatePrefix('resources_list_');
+    return createdResource;
   }
 
   async getResource(id: string) {
@@ -164,7 +167,11 @@ export class ResourceService {
     return resource;
   }
 
-  async listResources(filters: any) {
+  async listResources(filters: any): Promise<any[]> {
+    const cacheKey = `resources_list_${JSON.stringify(filters)}`;
+    const cached = generalCache.get<any>(cacheKey);
+    if (cached) return cached;
+
     const list = await this.repo.list(filters);
     
     // Lazy load repositories to avoid circular dependency
@@ -229,6 +236,7 @@ export class ResourceService {
       return finalRes;
     }));
 
+    generalCache.set(cacheKey, populatedList, 600); // Cache for 10 minutes
     return populatedList;
   }
 
@@ -249,6 +257,7 @@ export class ResourceService {
     }
 
     await this.repo.delete(id);
+    generalCache.invalidatePrefix('resources_list_');
   }
 
   async getResourceAccess(resourceId: string, user: any, protocol?: string, host?: string) {
@@ -595,6 +604,7 @@ YES
     Object.keys(updateData).forEach(key => updateData[key as keyof IResource] === undefined && delete updateData[key as keyof IResource]);
 
     await this.repo.update(resourceId, updateData, userId);
+    generalCache.invalidatePrefix('resources_list_');
     return { ...existing, ...updateData };
   }
 
@@ -653,6 +663,7 @@ YES
     };
 
     await this.repo.update(resourceId, updateData, userId);
+    generalCache.invalidatePrefix('resources_list_');
     
     // Attempt to delete old file only if it was in Firebase Storage
     if (existing.provider === 'firebase_storage') {

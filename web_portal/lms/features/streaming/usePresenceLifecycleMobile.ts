@@ -27,20 +27,8 @@ export function usePresenceLifecycleMobile(sessionId: string | undefined, isLive
   }, []);
 
   const startHeartbeat = useCallback(() => {
-    if (intervalRef.current) return;
-    
-    const sendHeartbeat = async () => {
-      if (isPausedRef.current || !sessionId) return;
-      try {
-        await getApiClient().post(`/live-sessions/${sessionId}/participants/heartbeat`);
-      } catch {
-        // Swallow silently
-      }
-    };
-
-    sendHeartbeat();
-    intervalRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-  }, [sessionId]);
+    // Presence heartbeat disabled to save costs.
+  }, []);
 
   const stopHeartbeat = useCallback(() => {
     if (intervalRef.current) {

@@ -7,6 +7,76 @@ import bcrypt from 'bcrypt';
 import { SessionService, DeviceInfo } from '../../core/security/sessions/SessionService';
 import { logger } from '../../core/logger';
 
+// ─── New Device Alert Helper ───────────────────────────────────────────────────
+/**
+ * Fire-and-forget: checks if the current login is from a new/unknown device.
+ * If so, writes a device_alerts record to Firestore for admin visibility in ERP.
+ * Never throws — login must not be impacted.
+ */
+async function checkAndAlertNewDevice(
+  userId: string,
+  userName: string,
+  userRole: string,
+  currentDevice: DeviceInfo,
+  currentSessionId: string
+): Promise<void> {
+  try {
+    // Fetch existing active sessions for this user
+    const priorSessions = await SessionService.listActiveSessions(userId);
+
+    // Filter out the current session we just created
+    const activeOldSessions = priorSessions.filter(s => s.sessionId !== currentSessionId);
+
+    // Determine a fingerprint for the current login
+    const currentIp = currentDevice.ip || '';
+    const currentDeviceId = currentDevice.deviceId || '';
+    const currentUa = currentDevice.userAgent || '';
+
+    // Only check if the user has other active sessions
+    if (activeOldSessions.length === 0) return;
+
+    // Check if ANY of the other active sessions matches this device (by deviceId or IP)
+    const isKnownDevice = activeOldSessions.some(s => {
+      if (currentDeviceId && s.deviceId && s.deviceId === currentDeviceId) return true;
+      if (currentIp && s.ip && s.ip === currentIp) return true;
+      return false;
+    });
+
+    if (isKnownDevice) return; // Already known — no alert needed
+
+    // New device detected — write alert to Firestore
+    await db.collection('device_alerts').add({
+      userId,
+      userName,
+      userRole,
+      alertTime: new Date().toISOString(),
+      loginIp: currentIp,
+      loginPlatform: currentDevice.platform || 'unknown',
+      loginOs: currentDevice.os || '',
+      loginBrowser: currentDevice.browser || '',
+      loginUserAgent: currentUa,
+      loginDeviceId: currentDeviceId,
+      knownDeviceCount: activeOldSessions.length,
+      acknowledged: false,
+      acknowledgedBy: null,
+      acknowledgedByName: null,
+      acknowledgedAt: null,
+    });
+
+    // Revoke all previous active sessions to force logout on other devices
+    for (const oldSession of activeOldSessions) {
+      await SessionService.revoke(oldSession.sessionId, 'NEW_DEVICE_LOGIN');
+    }
+
+    logger.warn(
+      `[DeviceAlert] New device login detected for user ${userId} (${userName}) from IP ${currentIp}. Revoked ${activeOldSessions.length} older sessions.`
+    );
+  } catch (err) {
+    // Non-fatal — never let this block the login response
+    logger.error('[DeviceAlert] Failed to process device check (non-fatal):', err);
+  }
+}
+
 // ─── Validation Schemas ────────────────────────────────────────────────────────
 
 const loginSchema = z.object({
@@ -202,6 +272,15 @@ export const loginStudent = async (req: Request, res: Response, next: NextFuncti
       // Issue access token (short-lived) + create session (for refresh token)
       const session = await SessionService.create(adminDoc.id, tenantId, role, device);
 
+      // Fire-and-forget: check if this is a login from a new/unknown device
+      checkAndAlertNewDevice(
+        adminDoc.id,
+        adminData.name || adminData.username || 'Admin',
+        role,
+        device,
+        session.sessionId
+      );
+
       const token = issueAccessToken({
         userId: adminDoc.id,
         email: adminData.email || '',
@@ -285,6 +364,15 @@ export const loginStudent = async (req: Request, res: Response, next: NextFuncti
       const role = userData.role || 'student';
       const tenantId = userData.tenantId || 'default_tenant';
       const session = await SessionService.create(userDoc.id, tenantId, role, device);
+
+      // Fire-and-forget: check if this is a login from a new/unknown device
+      checkAndAlertNewDevice(
+        userDoc.id,
+        userData.name || userData.username || 'User',
+        role,
+        device,
+        session.sessionId
+      );
 
       const token = issueAccessToken({
         userId: userDoc.id,
@@ -377,6 +465,12 @@ export const loginStudent = async (req: Request, res: Response, next: NextFuncti
       const batchName = studentData.batch || '';
       const tenantId = 'default_tenant';
       const session = await SessionService.create(studentDoc.id, tenantId, 'student', device);
+
+      // Fire-and-forget: check if this is a login from a new/unknown device
+      const studentName = studentData.firstName && studentData.lastName
+        ? `${studentData.firstName} ${studentData.lastName}`
+        : studentData.loginUsername || studentData.rollNumber || 'Student';
+      checkAndAlertNewDevice(studentDoc.id, studentName, 'student', device, session.sessionId);
 
       const name = studentData.firstName && studentData.lastName
         ? `${studentData.firstName} ${studentData.lastName}`

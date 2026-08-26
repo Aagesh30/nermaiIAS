@@ -12,6 +12,7 @@ import dailyQuizRouter from "../modules/lms/daily_quiz";
 import dailyContentRouter from "../modules/lms/daily_content";
 import batchRouter from "../modules/erp/batch";
 import profileRequestRouter from "../modules/erp/profile-request";
+import deviceAlertsRouter from "../modules/erp/device-alerts";
 import admissionRouter from "../modules/crm/admission";
 import alumniFeedbackRouter from "../modules/crm/alumni-feedback";
 import campaignsRouter from "../modules/crm/campaigns";
@@ -71,6 +72,7 @@ router.use("/erp/id-card", idCardRouter);
 router.use("/erp/analytics", analyticsRouter);
 router.use("/erp/batch", batchRouter);
 router.use("/erp/profile-request", profileRequestRouter);
+router.use("/erp/device-alerts", deviceAlertsRouter);
 
 // LMS Daily Quiz Routes
 router.use("/lms/daily-quiz", dailyQuizRouter);

@@ -3,10 +3,17 @@ import { db } from '../../infrastructure/firebase';
 import { AppError } from '../../core/errors/AppError';
 import { Policies } from '../../core/permissions/policies';
 import { deriveClassStatus } from '../courses/service';
+import { generalCache } from '../../shared/utils/cache';
 
 export const getStudentDashboardOverview = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, tenantId } = req.user!;
+
+    const cacheKey = `dashboard_${tenantId}_${userId}`;
+    const cachedData = generalCache.get<any>(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(cachedData);
+    }
     
     // Fetch latest student profile to get programMemberships
     const studentDoc = await db.collection('student_profiles').doc(userId).get();
@@ -231,7 +238,7 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
       attendancePercentage = 85; // Fallback
     }
 
-    res.status(200).json({
+    const responsePayload = {
       status: 'success',
       serverTime: new Date().toISOString(),
       serverTimestamp: Date.now(),
@@ -249,7 +256,10 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
           streak: 0
         }
       }
-    });
+    };
+
+    generalCache.set(cacheKey, responsePayload, 300); // Cache for 5 minutes
+    res.status(200).json(responsePayload);
 
   } catch (error: any) {
     console.error('Dashboard Error:', error.message);

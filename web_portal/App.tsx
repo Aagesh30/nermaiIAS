@@ -1849,8 +1849,13 @@ function MainApp() {
     onPress: () => void,
     lockKey?: string,
     badgeCount?: number,
-    collapsed?: boolean
+    collapsed?: boolean,
+    featureKey?: string
   ) => {
+    if (featureKey) {
+      const access = getFeatureAccess(featureKey);
+      if (access === "none") return null;
+    }
     const isActive = activeSub === itemKey;
     const isLocked = lockKey ? lockedPages[lockKey]?.locked : false;
 
@@ -1984,6 +1989,8 @@ function MainApp() {
   const [students, setStudents] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [profileRequests, setProfileRequests] = useState<any[]>([]);
+  const [deviceAlerts, setDeviceAlerts] = useState<any[]>([]);
+  const [deviceAlertsLoading, setDeviceAlertsLoading] = useState(false);
   const [myProfileRequest, setMyProfileRequest] = useState<any | null>(null);
   const [viewingProfileReqId, setViewingProfileReqId] = useState<string | null>(null);
   const [staff, setStaff] = useState<any[]>([]);
@@ -2723,11 +2730,13 @@ function MainApp() {
   const [pendingGoogleUser, setPendingGoogleUser] = useState<any | null>(null);
 
   const handleGoogleAuthSignIn = async (passedName?: string, passedPhone?: string, existingGoogleObj?: any) => {
+    console.log("[DEBUG] handleGoogleAuthSignIn called", { passedName, passedPhone, existingGoogleObj });
     try {
       let googleUser = existingGoogleObj;
       if (!googleUser) {
         googleUser = await handleFirebaseGoogleSignIn(passedName || guestNameInput, passedPhone || guestPhoneInput);
       }
+      console.log("[DEBUG] googleUser obtained:", googleUser);
       const email = googleUser?.email;
       if (!email) {
         Alert.alert("Google Auth Error", "No email returned from Google account.");
@@ -2736,6 +2745,7 @@ function MainApp() {
 
       const reqName = (passedName !== undefined ? passedName : guestNameInput).trim();
       const reqPhone = (passedPhone !== undefined ? passedPhone : guestPhoneInput).trim();
+      console.log("[DEBUG] Requesting backend guest-login for:", { email, reqName, reqPhone });
 
       const res = await api.post("/crm/leads/guest-login", {
         email: email.toLowerCase(),
@@ -2743,14 +2753,16 @@ function MainApp() {
         phone: reqPhone || undefined
       });
       const data = res.data || res;
+      console.log("[DEBUG] Backend guest-login response:", data);
 
       // Check if user has incomplete profile (name is email prefix or phone is empty)
       const emailPrefix = email.toLowerCase().split("@")[0];
       const isNameIncomplete = !data.name || data.name.toLowerCase() === emailPrefix;
       const isPhoneIncomplete = !data.phone || data.phone.trim() === "";
+      console.log("[DEBUG] Profile check:", { isNameIncomplete, isPhoneIncomplete, dataName: data.name, dataPhone: data.phone });
 
       if ((data.isNew || isNameIncomplete || isPhoneIncomplete) && (!reqName || !reqPhone)) {
-        // First time / missing details -> Save Google auth object & prompt user to enter Name & Phone
+        console.log("[DEBUG] Profile incomplete. Switching to step 2 register form.");
         setPendingGoogleUser({
           ...googleUser,
           email: email.toLowerCase(),
@@ -2774,6 +2786,7 @@ function MainApp() {
         authProvider: "google",
         photoURL: googleUser.photoURL || ""
       };
+      console.log("[DEBUG] Successfully logged in guest. Setting user state:", guestUser);
       clearExamState(); // Clear any in-progress exam from a previous session
       setUser(guestUser);
       setGuestEmailUnlocked(true);
@@ -2792,7 +2805,7 @@ function MainApp() {
       await guestStorage.save(email.toLowerCase());
       await userStorage.save(guestUser);
     } catch (e: any) {
-      console.error("Google sign in error:", e);
+      console.error("[DEBUG] Google sign in error in App.tsx:", e);
       Alert.alert(
         "Google Authentication Error",
         e.message || "Google Authentication encountered an issue. Please try signing in again."
@@ -3594,6 +3607,16 @@ function MainApp() {
       if (u?.role) headers["user-role"] = u.role;
       return headers;
     },
+    handleResponse(res: Response, data: any) {
+      if (!res.ok) {
+        if (res.status === 401 && (data.message === "Session revoked" || String(data.message).toLowerCase().includes("session revoked"))) {
+          performLogout();
+          showToast("Logged out: Your ID was logged in on a new device.", "error");
+        }
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+      return data.data !== undefined ? data.data : data;
+    },
     async get(path: string, headers?: any) {
       const baseUrl = getBaseUrl();
       const controller = new AbortController();
@@ -3605,8 +3628,7 @@ function MainApp() {
         });
         clearTimeout(id);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-        return data.data !== undefined ? data.data : data;
+        return this.handleResponse(res, data);
       } catch (e: any) {
         clearTimeout(id);
         if (e.name === "AbortError" || e.message === "aborted" || String(e.message).toLowerCase().includes("aborted")) {
@@ -3628,8 +3650,7 @@ function MainApp() {
         });
         clearTimeout(id);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-        return data.data !== undefined ? data.data : data;
+        return this.handleResponse(res, data);
       } catch (e: any) {
         clearTimeout(id);
         if (e.name === "AbortError" || e.message === "aborted" || String(e.message).toLowerCase().includes("aborted")) {
@@ -3651,8 +3672,7 @@ function MainApp() {
         });
         clearTimeout(id);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-        return data.data !== undefined ? data.data : data;
+        return this.handleResponse(res, data);
       } catch (e: any) {
         clearTimeout(id);
         if (e.name === "AbortError" || e.message === "aborted" || String(e.message).toLowerCase().includes("aborted")) {
@@ -3674,8 +3694,7 @@ function MainApp() {
         });
         clearTimeout(id);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-        return data.data !== undefined ? data.data : data;
+        return this.handleResponse(res, data);
       } catch (e: any) {
         clearTimeout(id);
         if (e.name === "AbortError" || e.message === "aborted" || String(e.message).toLowerCase().includes("aborted")) {
@@ -3696,8 +3715,7 @@ function MainApp() {
         });
         clearTimeout(id);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
-        return data.data !== undefined ? data.data : data;
+        return this.handleResponse(res, data);
       } catch (e: any) {
         clearTimeout(id);
         if (e.name === "AbortError" || e.message === "aborted" || String(e.message).toLowerCase().includes("aborted")) {
@@ -3850,6 +3868,27 @@ function MainApp() {
         false
       );
     }
+  };
+
+  const renderPermissionWrappedContent = (
+    featureKey: string,
+    content: React.ReactNode
+  ) => {
+    const access = getFeatureAccess(featureKey);
+    if (access === "none") {
+      return (
+        <View style={{ flex: 1, padding: 40, alignItems: "center", justifyContent: "center", minHeight: 300 }}>
+          <Ionicons name="lock-closed-outline" size={48} color="#c62828" style={{ marginBottom: 15 }} />
+          <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", marginBottom: 5 }}>
+            Access Restricted
+          </Text>
+          <Text style={{ fontSize: 13, color: "#757575", textAlign: "center" }}>
+            Your account role does not have permission to access this module.
+          </Text>
+        </View>
+      );
+    }
+    return content;
   };
 
   // Legacy Permissions Helpers
@@ -4399,13 +4438,41 @@ function MainApp() {
 
               const res = await api.post("/crm/leads/guest-login", {
                 email: email.toLowerCase(),
-                name: savedGuestName.trim() || googleUser.displayName,
-                phone: savedGuestPhone.trim()
+                name: savedGuestName.trim() || undefined,
+                phone: savedGuestPhone.trim() || undefined
               });
               const data = res.data || res;
+
+              // Check if user has incomplete profile (name is email prefix or phone is empty)
+              const emailPrefix = email.toLowerCase().split("@")[0];
+              const isNameIncomplete = !data.name || data.name.toLowerCase() === emailPrefix;
+              const isPhoneIncomplete = !data.phone || data.phone.trim() === "";
+
+              if ((data.isNew || isNameIncomplete || isPhoneIncomplete) && (!savedGuestName.trim() || !savedGuestPhone.trim())) {
+                // First time / missing details -> Save Google auth object & prompt user to enter Name & Phone
+                setPendingGoogleUser({
+                  email: email.toLowerCase(),
+                  displayName: googleUser.displayName,
+                  photoURL: googleUser.photoURL,
+                  uid: googleUser.uid,
+                  token: data.token,
+                  leadId: data.leadId
+                });
+                if (data.name && data.name.toLowerCase() !== emailPrefix) setGuestNameInput(data.name);
+                if (data.phone) setGuestPhoneInput(data.phone);
+                
+                // Clear the temporary redirect state
+                localStorage.removeItem("nermai_pending_guest_name");
+                localStorage.removeItem("nermai_pending_guest_phone");
+                
+                setSplashDone(true);
+                setOnboardDone(true);
+                return;
+              }
+
               const guestUser = {
                 role: "guest",
-                name: savedGuestName.trim() || googleUser.displayName || data.name || email.split("@")[0],
+                name: savedGuestName.trim() || data.name || googleUser.displayName || email.split("@")[0],
                 phone: savedGuestPhone.trim() || data.phone || "",
                 email: email.toLowerCase(),
                 leadId: data.leadId,
@@ -4418,6 +4485,8 @@ function MainApp() {
               setUser(guestUser);
               setGuestEmailUnlocked(true);
               setAdmissionSubmitted(data.hasApplied || false);
+              setSplashDone(true);
+              setOnboardDone(true);
               
               await guestStorage.save(email.toLowerCase());
               await userStorage.save(guestUser);
@@ -4668,6 +4737,8 @@ function MainApp() {
       loadLmsCourses();
     } else if (erpSub === "profile-requests") {
       loadProfileRequests();
+    } else if (erpSub === "device-alerts") {
+      loadDeviceAlerts();
     } else if (erpSub === "staff") {
       loadStaff();
     } else if (erpSub === "fees") {
@@ -4891,6 +4962,38 @@ function MainApp() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [activeAttempt]);
 
+  // Periodic background sync of answers from LocalStorage to Server (every 30s) to minimize DB write spikes
+  useEffect(() => {
+    if (!activeAttempt) return;
+    const attemptId = activeAttempt.attemptId;
+
+    const syncAnswers = async () => {
+      try {
+        const draft = examLocalStorage.getDraft(attemptId);
+        if (!draft || !draft.answers) return;
+
+        const formattedBatch = Object.entries(draft.answers).map(([qId, val]) => ({
+          questionId: qId,
+          answer: val
+        }));
+
+        if (formattedBatch.length > 0) {
+          await api.post(`/test-portal/examination/autosave/${attemptId}`, { answers: formattedBatch }, { "user-id": user?.userId || "" });
+          console.log("Automatically synchronized answers to cloud:", formattedBatch.length);
+        }
+      } catch (e) {
+        console.log("Background exam sync warning:", e);
+      }
+    };
+
+    const intervalId = setInterval(syncAnswers, 30000);
+    return () => {
+      clearInterval(intervalId);
+      // Run a final sync on cleanup/exit
+      syncAnswers().catch(() => {});
+    };
+  }, [activeAttempt]);
+
   // Auto-sync student profile, ID Card, Hall Ticket, and Edit Permissions without requiring re-login
   useEffect(() => {
     if (!user || user.role !== "student") return;
@@ -5088,6 +5191,19 @@ function MainApp() {
     } catch (e) {
       console.log("Failed loading profile requests:", e);
       setProfileRequests([]);
+    }
+  };
+
+  const loadDeviceAlerts = async () => {
+    setDeviceAlertsLoading(true);
+    try {
+      const res = await api.get("/erp/device-alerts");
+      setDeviceAlerts(res?.data || res || []);
+    } catch (e) {
+      console.log("Failed loading device alerts:", e);
+      setDeviceAlerts([]);
+    } finally {
+      setDeviceAlertsLoading(false);
     }
   };
 
@@ -8293,15 +8409,6 @@ function MainApp() {
       questions: attemptQuestions,
       answers: newAnswers
     });
-
-    try {
-      await api.post(`/test-portal/examination/answer/${activeAttempt.attemptId}`, {
-        questionId: activeQ.id,
-        answer: ans
-      }, { "user-id": user.userId });
-    } catch (e) {
-      console.log("Network sync warning: answer saved locally to browser storage:", e);
-    }
   };
 
   const submitTestAttempt = async (isTimeoutArg: any = false) => {
@@ -15679,17 +15786,17 @@ function MainApp() {
                     showsVerticalScrollIndicator={false}
                   >
                     {!testSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>EXAMS</Text> : null}
-                    {renderSidebarItem("available", testSub, "Available Exams", "document-text-outline", () => changeTestSub("available"), "test-available", undefined, testSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("available", testSub, "Available Exams", "document-text-outline", () => changeTestSub("available"), "test-available", undefined, testSidebarCollapsed && !isMobile, "examinations")}
 
                     {isAdmin && (
                       <>
-                        {renderSidebarItem("pdf-create", testSub, "AI Create", "sparkles-outline", () => changeTestSub("pdf-create"), "test-pdf-create", undefined, testSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("feedback", testSub, "Exams Feedback", "chatbubbles-outline", () => changeTestSub("feedback"), "test-feedback", undefined, testSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("pdf-create", testSub, "AI Create", "sparkles-outline", () => changeTestSub("pdf-create"), "test-pdf-create", undefined, testSidebarCollapsed && !isMobile, "test_creation")}
+                        {renderSidebarItem("feedback", testSub, "Exams Feedback", "chatbubbles-outline", () => changeTestSub("feedback"), "test-feedback", undefined, testSidebarCollapsed && !isMobile, "test_review")}
                       </>
                     )}
 
                     {!testSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>PERFORMANCE</Text> : null}
-                    {renderSidebarItem("results", testSub, "Results Log", "trophy-outline", () => changeTestSub("results"), "test-results", undefined, testSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("results", testSub, "Results Log", "trophy-outline", () => changeTestSub("results"), "test-results", undefined, testSidebarCollapsed && !isMobile, "test_results")}
                   </ScrollView>
                 </View>
               )}
@@ -17765,27 +17872,30 @@ function MainApp() {
                     {isAdmin ? (
                       <>
                         {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>PERMISSIONS & REQUESTS</Text> : null}
-                        {renderSidebarItem("profile-requests", erpSub, "Profile Requests", "person-add-outline", () => { changeErpSub("profile-requests"); loadProfileRequests(); }, undefined, profileRequests.filter((r: any) => r.status === "pending").length, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("qr-permissions", erpSub, "QR Code Permissions", "qr-code-outline", () => changeErpSub("qr-permissions"), "erp-qr-permissions", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("edit-permissions", erpSub, "Profile Edit Permissions", "shield-checkmark-outline", () => { changeErpSub("edit-permissions"); loadStudents(); }, "erp-edit-permissions", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("profile-requests", erpSub, "Profile Requests", "person-add-outline", () => { changeErpSub("profile-requests"); loadProfileRequests(); }, undefined, profileRequests.filter((r: any) => r.status === "pending").length, erpSidebarCollapsed && !isMobile, "profile_requests")}
+                        {renderSidebarItem("qr-permissions", erpSub, "QR Code Permissions", "qr-code-outline", () => changeErpSub("qr-permissions"), "erp-qr-permissions", undefined, erpSidebarCollapsed && !isMobile, "id_card")}
+                        {renderSidebarItem("edit-permissions", erpSub, "Profile Edit Permissions", "shield-checkmark-outline", () => { changeErpSub("edit-permissions"); loadStudents(); }, "erp-edit-permissions", undefined, erpSidebarCollapsed && !isMobile, "profile_requests")}
+                        {(user.role === "super_admin" || user.role === "developer" || user.role === "admin") && (
+                          renderSidebarItem("device-alerts", erpSub, "Security Alerts", "alert-circle-outline", () => { changeErpSub("device-alerts"); loadDeviceAlerts(); }, undefined, deviceAlerts.filter((a: any) => !a.acknowledged).length || undefined, erpSidebarCollapsed && !isMobile)
+                        )}
 
                         {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ACADEMICS & DIRECTORY</Text> : null}
-                        {renderSidebarItem("students", erpSub, "Students", "people-outline", () => changeErpSub("students"), "erp-students", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("announcements", erpSub, "Notices", "megaphone-outline", () => changeErpSub("announcements"), "erp-announcements", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("fees", erpSub, "Fees", "cash-outline", () => changeErpSub("fees"), "erp-fees", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("offline-attendance", erpSub, "Offline Attendance", "clipboard-outline", () => { changeErpSub("offline-attendance"); loadStudents(); loadBatches(); }, "erp-offline-attendance", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("students", erpSub, "Students", "people-outline", () => changeErpSub("students"), "erp-students", undefined, erpSidebarCollapsed && !isMobile, "student_management")}
+                        {renderSidebarItem("announcements", erpSub, "Notices", "megaphone-outline", () => changeErpSub("announcements"), "erp-announcements", undefined, erpSidebarCollapsed && !isMobile, "notices_announcements")}
+                        {renderSidebarItem("fees", erpSub, "Fees", "cash-outline", () => changeErpSub("fees"), "erp-fees", undefined, erpSidebarCollapsed && !isMobile, "fees_management")}
+                        {renderSidebarItem("offline-attendance", erpSub, "Offline Attendance", "clipboard-outline", () => { changeErpSub("offline-attendance"); loadStudents(); loadBatches(); }, "erp-offline-attendance", undefined, erpSidebarCollapsed && !isMobile, "offline_attendance")}
 
                         {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMINISTRATION & GROUPS</Text> : null}
-                        {renderSidebarItem("staff", erpSub, "Admin", "shield-checkmark-outline", () => changeErpSub("staff"), "erp-staff", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("staff", erpSub, "Admin", "shield-checkmark-outline", () => changeErpSub("staff"), "erp-staff", undefined, erpSidebarCollapsed && !isMobile, "staff_management")}
                         {(user.role === "super_admin" || user.role === "developer") && (
                           renderSidebarItem("approvals", erpSub, "Approvals Queue", "checkmark-circle-outline", () => { changeErpSub("approvals"); loadPendingApprovals(); }, "erp-approvals", pendingApprovals.length, erpSidebarCollapsed && !isMobile)
                         )}
-                        {renderSidebarItem("id-card", erpSub, "ID Cards", "card-outline", () => changeErpSub("id-card"), "erp-id-card", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("batch", erpSub, "Batches", "layers-outline", () => changeErpSub("batch"), "erp-batch", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("id-card", erpSub, "ID Cards", "card-outline", () => changeErpSub("id-card"), "erp-id-card", undefined, erpSidebarCollapsed && !isMobile, "id_card")}
+                        {renderSidebarItem("batch", erpSub, "Batches", "layers-outline", () => changeErpSub("batch"), "erp-batch", undefined, erpSidebarCollapsed && !isMobile, "batch_management")}
 
                         {!erpSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>REPORTS & STORAGE</Text> : null}
-                        {renderSidebarItem("analytics", erpSub, "Analytics", "analytics-outline", () => changeErpSub("analytics"), "erp-analytics", undefined, erpSidebarCollapsed && !isMobile)}
-                        {renderSidebarItem("marks", erpSub, "Marks Ledger", "checkbox-outline", () => { changeErpSub("marks"); if (tests.length > 0) { setSelectedErpTestId(tests[0].id); loadErpTestResults(tests[0].id); } }, "erp-marks", undefined, erpSidebarCollapsed && !isMobile)}
+                        {renderSidebarItem("analytics", erpSub, "Analytics", "analytics-outline", () => changeErpSub("analytics"), "erp-analytics", undefined, erpSidebarCollapsed && !isMobile, "analytics")}
+                        {renderSidebarItem("marks", erpSub, "Marks Ledger", "checkbox-outline", () => { changeErpSub("marks"); if (tests.length > 0) { setSelectedErpTestId(tests[0].id); loadErpTestResults(tests[0].id); } }, "erp-marks", undefined, erpSidebarCollapsed && !isMobile, "marks_management")}
                         {(user.role === "super_admin" || user.role === "developer") && (
                           renderSidebarItem("drive", erpSub, "Drive and Storage", "cloud-upload-outline", () => { changeErpSub("drive"); loadDriveConfig(); }, "erp-drive", undefined, erpSidebarCollapsed && !isMobile)
                         )}
@@ -24527,6 +24637,240 @@ function MainApp() {
                     );
                   })()}
 
+                  {erpSub === "device-alerts" && (user.role === "super_admin" || user.role === "developer" || user.role === "admin") && (() => {
+                    const unreadCount = deviceAlerts.filter((a: any) => !a.acknowledged).length;
+                    const formatAlertTime = (iso: string) => {
+                      if (!iso) return "";
+                      const d = new Date(iso);
+                      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) + " at " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+                    };
+                    const platformIcon: Record<string, any> = {
+                      web: "globe-outline",
+                      ios: "logo-apple",
+                      android: "logo-android",
+                      unknown: "phone-portrait-outline"
+                    };
+                    const handleAcknowledge = async (alertId: string) => {
+                      try {
+                        await api.put(`/erp/device-alerts/${alertId}/acknowledge`, {});
+                        setDeviceAlerts(prev => prev.map((a: any) => a.id === alertId ? { ...a, acknowledged: true } : a));
+                        showToast("Alert acknowledged", "success");
+                      } catch (e: any) {
+                        Alert.alert("Error", e.message || "Failed to acknowledge alert.");
+                      }
+                    };
+                    const handleDeleteAlert = async (alertId: string) => {
+                      confirmAction(
+                        "Delete Alert",
+                        "Are you sure you want to permanently delete this security alert?",
+                        async () => {
+                          try {
+                            await api.delete(`/erp/device-alerts/${alertId}`);
+                            setDeviceAlerts(prev => prev.filter((a: any) => a.id !== alertId));
+                            showToast("Alert deleted", "success");
+                          } catch (e: any) {
+                            Alert.alert("Error", e.message || "Failed to delete alert.");
+                          }
+                        },
+                        "Delete",
+                        false
+                      );
+                    };
+                    return (
+                      <View style={{ gap: 16, paddingHorizontal: 4 }}>
+                        {/* Header Banner */}
+                        <View style={{
+                          backgroundColor: darkMode ? "#3e150030" : "#fff3e0",
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#bf360c40" : "#ffcc80",
+                          borderRadius: 12,
+                          padding: 16,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12
+                        }}>
+                          <View style={{
+                            width: 44, height: 44, borderRadius: 22,
+                            backgroundColor: unreadCount > 0 ? "#e64a19" : "#78909c",
+                            alignItems: "center", justifyContent: "center"
+                          }}>
+                            <Ionicons name="shield-half-outline" size={24} color="#fff" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#bf360c" }}>Security Alerts</Text>
+                            <Text style={{ fontSize: 12, color: darkMode ? "#ffab91" : "#e64a19", marginTop: 2 }}>
+                              {unreadCount > 0 ? `${unreadCount} new device login${unreadCount > 1 ? "s" : ""} detected` : "No unacknowledged alerts"}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={loadDeviceAlerts}
+                            style={{ padding: 8, borderRadius: 8, backgroundColor: darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }}
+                          >
+                            <Ionicons name="refresh-outline" size={20} color={darkMode ? "#ccc" : "#555"} />
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Info Card */}
+                        <View style={[styles.card, darkMode && styles.cardDark, { padding: 14, flexDirection: "row", alignItems: "flex-start", gap: 10 }]}>
+                          <Ionicons name="information-circle-outline" size={18} color="#1976d2" style={{ marginTop: 1 }} />
+                          <Text style={{ fontSize: 12, color: darkMode ? "#90caf9" : "#1565c0", flex: 1, lineHeight: 18 }}>
+                            A "New Device Alert" is triggered when an account signs in from an IP address or device that doesn't match any previously known session. The first-ever login for any account will NOT trigger an alert.
+                          </Text>
+                        </View>
+
+                        {/* Loading State */}
+                        {deviceAlertsLoading && (
+                          <View style={{ alignItems: "center", paddingVertical: 40 }}>
+                            <ActivityIndicator size="large" color="#e64a19" />
+                            <Text style={{ marginTop: 12, color: darkMode ? "#aaa" : "#777", fontSize: 13 }}>Loading security alerts...</Text>
+                          </View>
+                        )}
+
+                        {/* Empty State */}
+                        {!deviceAlertsLoading && deviceAlerts.length === 0 && (
+                          <View style={{ alignItems: "center", paddingVertical: 50 }}>
+                            <Ionicons name="shield-checkmark-outline" size={56} color={darkMode ? "#388e3c" : "#43a047"} />
+                            <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32", marginTop: 14 }}>All Clear!</Text>
+                            <Text style={{ fontSize: 13, color: darkMode ? "#aaa" : "#666", marginTop: 6, textAlign: "center", maxWidth: 300 }}>No new device alerts have been recorded. All logins appear to be from known devices.</Text>
+                          </View>
+                        )}
+
+                        {/* Alert Cards */}
+                        {!deviceAlertsLoading && deviceAlerts.map((alert: any) => {
+                          const isUnread = !alert.acknowledged;
+                          const platIcon = platformIcon[alert.loginPlatform] || "phone-portrait-outline";
+                          return (
+                            <View
+                              key={alert.id}
+                              style={[styles.card, darkMode && styles.cardDark, {
+                                padding: 0,
+                                overflow: "hidden",
+                                borderWidth: 1,
+                                borderColor: isUnread ? (darkMode ? "#bf360c80" : "#ffab91") : (darkMode ? "#333" : "#e0e0e0"),
+                              }]}
+                            >
+                              {/* Alert Header Row */}
+                              <View style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 10,
+                                padding: 14,
+                                backgroundColor: isUnread ? (darkMode ? "rgba(191,54,12,0.12)" : "#fff8f5") : (darkMode ? "rgba(255,255,255,0.03)" : "#fafafa"),
+                                borderBottomWidth: 1,
+                                borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0"
+                              }}>
+                                <View style={{
+                                  width: 38, height: 38, borderRadius: 19,
+                                  backgroundColor: isUnread ? "#e64a19" : (darkMode ? "#455a64" : "#90a4ae"),
+                                  alignItems: "center", justifyContent: "center"
+                                }}>
+                                  <Ionicons name={platIcon} size={20} color="#fff" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{alert.userName || "Unknown User"}</Text>
+                                    <View style={{
+                                      paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+                                      backgroundColor: isUnread ? "#e64a19" : (darkMode ? "#37474f" : "#eceff1")
+                                    }}>
+                                      <Text style={{ fontSize: 9, fontWeight: "bold", color: isUnread ? "#fff" : (darkMode ? "#ccc" : "#546e7a"), textTransform: "uppercase" }}>
+                                        {isUnread ? "NEW" : "SEEN"}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 1 }}>
+                                    Role: {alert.userRole} • {formatAlertTime(alert.alertTime)}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              {/* Device Info Grid */}
+                              <View style={{ padding: 14, gap: 8 }}>
+                                {[
+                                  { icon: "location-outline", label: "IP Address", value: alert.loginIp || "Unknown" },
+                                  { icon: "phone-portrait-outline", label: "Platform", value: alert.loginPlatform || "unknown" },
+                                  { icon: "hardware-chip-outline", label: "OS", value: alert.loginOs || "—" },
+                                  { icon: "compass-outline", label: "Browser", value: alert.loginBrowser || "—" },
+                                  { icon: "layers-outline", label: "Prior Sessions", value: String(alert.knownDeviceCount || 0) + " known device(s) on record" },
+                                ].map((row, ri) => (
+                                  <View key={ri} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                    <Ionicons name={row.icon as any} size={14} color={darkMode ? "#9e9e9e" : "#757575"} />
+                                    <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", width: 90 }}>{row.label}:</Text>
+                                    <Text style={{ fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121", flex: 1 }} numberOfLines={1}>{row.value}</Text>
+                                  </View>
+                                ))}
+
+                                {alert.acknowledged && alert.acknowledgedByName && (
+                                  <View style={{ marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: darkMode ? "rgba(46,125,50,0.1)" : "#e8f5e9", padding: 8, borderRadius: 6 }}>
+                                    <Ionicons name="checkmark-circle" size={14} color="#43a047" />
+                                    <Text style={{ fontSize: 11, color: darkMode ? "#81c784" : "#2e7d32", flex: 1 }}>
+                                      Acknowledged by {alert.acknowledgedByName}{alert.acknowledgedAt ? " on " + formatAlertTime(alert.acknowledgedAt) : ""}
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+
+                              {/* Action Buttons */}
+                              <View style={{
+                                flexDirection: "row", gap: 8, padding: 12, paddingTop: 0
+                              }}>
+                                {isUnread && (
+                                  <TouchableOpacity
+                                    onPress={() => handleAcknowledge(alert.id)}
+                                    style={{
+                                      flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+                                      gap: 6, paddingVertical: 9, borderRadius: 8,
+                                      backgroundColor: darkMode ? "#1b5e20" : "#e8f5e9",
+                                      borderWidth: 1, borderColor: darkMode ? "#2e7d32" : "#a5d6a7"
+                                    }}
+                                  >
+                                    <Ionicons name="checkmark-circle-outline" size={15} color="#43a047" />
+                                    <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32" }}>Acknowledge</Text>
+                                  </TouchableOpacity>
+                                )}
+                                <TouchableOpacity
+                                  onPress={() => handleDeleteAlert(alert.id)}
+                                  style={{
+                                    flex: isUnread ? 0 : 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+                                    gap: 6, paddingVertical: 9, paddingHorizontal: isUnread ? 14 : undefined, borderRadius: 8,
+                                    backgroundColor: darkMode ? "rgba(183,28,28,0.15)" : "#fce4ec",
+                                    borderWidth: 1, borderColor: darkMode ? "#b71c1c40" : "#ef9a9a"
+                                  }}
+                                >
+                                  <Ionicons name="trash-outline" size={15} color="#e53935" />
+                                  {!isUnread && <Text style={{ fontSize: 12, fontWeight: "bold", color: "#c62828" }}>Delete</Text>}
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          );
+                        })}
+
+                        {/* Acknowledge All Button (if multiple unread) */}
+                        {unreadCount > 1 && (
+                          <TouchableOpacity
+                            onPress={async () => {
+                              const unread = deviceAlerts.filter((a: any) => !a.acknowledged);
+                              for (const a of unread) {
+                                try { await api.put(`/erp/device-alerts/${a.id}/acknowledge`, {}); } catch (_) {}
+                              }
+                              setDeviceAlerts(prev => prev.map((a: any) => ({ ...a, acknowledged: true })));
+                              showToast(`${unreadCount} alerts acknowledged`, "success");
+                            }}
+                            style={{
+                              flexDirection: "row", alignItems: "center", justifyContent: "center",
+                              gap: 8, paddingVertical: 13, borderRadius: 10,
+                              backgroundColor: darkMode ? "#1b5e20" : "#e8f5e9",
+                              borderWidth: 1.5, borderColor: darkMode ? "#2e7d32" : "#66bb6a"
+                            }}
+                          >
+                            <Ionicons name="checkmark-done-outline" size={18} color="#43a047" />
+                            <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#81c784" : "#2e7d32" }}>Acknowledge All ({unreadCount})</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })()}
+
                   {erpSub === "drive" && (user.role === "super_admin" || user.role === "developer") && (() => {
                     return (
                       <View style={{ gap: 18, paddingHorizontal: 4 }}>
@@ -25026,36 +25370,39 @@ function MainApp() {
                     contentContainerStyle={{ alignItems: lmsTabsCollapsed && !isMobile ? "center" : "stretch", gap: 6, paddingBottom: 60 }}
                     showsVerticalScrollIndicator={false}
                   >
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-checkmark-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile, "access_rules")}
+
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>LEARNING</Text> : null}
-                    {renderSidebarItem("quiz", (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "quiz" : lmsSub, "Quiz", "help-circle-outline", () => changeLmsSub("quiz"), "lms-quiz", undefined, lmsTabsCollapsed && !isMobile)}
-                    {renderSidebarItem("daily-content", lmsSub, "Daily Content", "calendar-outline", () => changeLmsSub("daily-content"), "lms-daily-content", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile)}
-                    {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile, "live_classes")}
+                    {renderSidebarItem("daily-content", lmsSub, "Daily Content", "calendar-outline", () => changeLmsSub("daily-content"), "lms-daily-content", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
+                    {renderSidebarItem("quiz", (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "quiz" : lmsSub, "Quiz", "help-circle-outline", () => changeLmsSub("quiz"), "lms-quiz", undefined, lmsTabsCollapsed && !isMobile, "quiz_posting")}
+                    {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile, "video_content")}
                     {/* Student: My Courses & Live page */}
                     {!isAdmin && renderSidebarItem("my-courses", lmsSub, "My Courses", "school-outline", () => changeLmsSub("my-courses"), "lms-my-courses", undefined, lmsTabsCollapsed && !isMobile)}
                     {!isAdmin && renderSidebarItem("my-live", lmsSub, "Live Classes", "radio-outline", () => changeLmsSub("my-live"), "lms-my-live", undefined, lmsTabsCollapsed && !isMobile)}
 
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>MATERIALS</Text> : null}
-                    {renderSidebarItem("resources", lmsSub, "Resources", "folder-outline", () => changeLmsSub("resources"), "lms-resources", undefined, lmsTabsCollapsed && !isMobile)}
+                    {renderSidebarItem("resources", lmsSub, "Resources", "folder-outline", () => changeLmsSub("resources"), "lms-resources", undefined, lmsTabsCollapsed && !isMobile, "course_materials")}
 
                     {/* Admin-only: Full LMS Management */}
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>LMS MANAGEMENT</Text>}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-teachers", lmsSub, "Teachers", "people-outline", () => changeLmsSub("lms-teachers"), "lms-admin-teachers", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-courses", lmsSub, "Courses", "library-outline", () => changeLmsSub("lms-courses"), "lms-admin-courses", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subjects", lmsSub, "Subjects", "layers-outline", () => changeLmsSub("lms-subjects"), "lms-admin-subjects", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-topics", lmsSub, "Topics", "list-outline", () => changeLmsSub("lms-topics"), "lms-admin-topics", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subtopics", lmsSub, "Subtopics", "git-commit-outline", () => changeLmsSub("lms-subtopics"), "lms-admin-subtopics", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-classes", lmsSub, "Classes", "play-outline", () => changeLmsSub("lms-classes"), "lms-admin-classes", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-resources", lmsSub, "Resources Mgmt", "documents-outline", () => changeLmsSub("lms-resources"), "lms-admin-resources", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-checkmark-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile)}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile)}
-                    {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-courses", lmsSub, "Courses", "library-outline", () => changeLmsSub("lms-courses"), "lms-admin-courses", undefined, lmsTabsCollapsed && !isMobile, "courses_management")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subjects", lmsSub, "Subjects", "layers-outline", () => changeLmsSub("lms-subjects"), "lms-admin-subjects", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-topics", lmsSub, "Topics", "list-outline", () => changeLmsSub("lms-topics"), "lms-admin-topics", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subtopics", lmsSub, "Subtopics", "git-commit-outline", () => changeLmsSub("lms-subtopics"), "lms-admin-subtopics", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-classes", lmsSub, "Classes", "play-outline", () => changeLmsSub("lms-classes"), "lms-admin-classes", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-teachers", lmsSub, "Teachers", "people-outline", () => changeLmsSub("lms-teachers"), "lms-admin-teachers", undefined, lmsTabsCollapsed && !isMobile, "staff_management")}
+                    {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
+
+                    {/* Remaining LMS management items at the bottom */}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-resources", lmsSub, "Resources Mgmt", "documents-outline", () => changeLmsSub("lms-resources"), "lms-admin-resources", undefined, lmsTabsCollapsed && !isMobile, "course_materials")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile, "video_content")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile, "live_sessions_mgmt")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile, "provider_accounts")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile, "provider_accounts")}
 
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>AI STUDIO</Text>}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-chatbot", lmsSub, "NERMAI AI Studio", "chatbubbles-outline", () => changeLmsSub("lms-chatbot"), "lms-admin-chatbot", undefined, lmsTabsCollapsed && !isMobile)}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-chatbot", lmsSub, "NERMAI AI Studio", "chatbubbles-outline", () => changeLmsSub("lms-chatbot"), "lms-admin-chatbot", undefined, lmsTabsCollapsed && !isMobile, "knowledge_base")}
                   </ScrollView>
                 </View>
               )}
@@ -27322,14 +27669,14 @@ function MainApp() {
                     showsVerticalScrollIndicator={false}
                   >
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS & LEADS</Text> : null}
-                    {renderSidebarItem("admissions", crmSub, "Admission Application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile)}
-                    {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile)}
-                    {renderSidebarItem("inquiries", crmSub, "Inquiries", "chatbubble-ellipses-outline", () => changeCrmSub("inquiries"), "crm-inquiries", undefined, crmSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("admissions", crmSub, "Admission Application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile, "admissions")}
+                    {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
+                    {renderSidebarItem("inquiries", crmSub, "Inquiries", "chatbubble-ellipses-outline", () => changeCrmSub("inquiries"), "crm-inquiries", undefined, crmSidebarCollapsed && !isMobile, "admissions")}
 
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>CAMPAIGNS & ENGAGEMENT</Text> : null}
-                    {renderSidebarItem("campaigns", crmSub, "Campaigns", "megaphone-outline", () => changeCrmSub("campaigns"), "crm-campaigns", undefined, crmSidebarCollapsed && !isMobile)}
-                    {renderSidebarItem("guest-posters", crmSub, "Guest Posters", "images-outline", () => { changeCrmSub("guest-posters"); loadAdminGuestPosters(); }, "crm-guest-posters", undefined, crmSidebarCollapsed && !isMobile)}
-                    {renderSidebarItem("feedback", crmSub, "Feedback", "star-outline", () => changeCrmSub("feedback"), "crm-feedback", undefined, crmSidebarCollapsed && !isMobile)}
+                    {renderSidebarItem("campaigns", crmSub, "Campaigns", "megaphone-outline", () => changeCrmSub("campaigns"), "crm-campaigns", undefined, crmSidebarCollapsed && !isMobile, "campaigns")}
+                    {renderSidebarItem("guest-posters", crmSub, "Guest Posters", "images-outline", () => { changeCrmSub("guest-posters"); loadAdminGuestPosters(); }, "crm-guest-posters", undefined, crmSidebarCollapsed && !isMobile, "campaigns")}
+                    {renderSidebarItem("feedback", crmSub, "Feedback", "star-outline", () => changeCrmSub("feedback"), "crm-feedback", undefined, crmSidebarCollapsed && !isMobile, "alumni_feedback")}
                   </ScrollView>
                 </View>
               )}
@@ -29752,10 +30099,28 @@ function MainApp() {
 }
 
 export default function App() {
-  const [splashDone, setSplashDone] = useState(false);
+  const [splashDone, setSplashDone] = useState(() => {
+    // On web, skip the splash screen if the user is already logged in
+    // or if we are returning from a Google redirect (pending guest data in localStorage)
+    if (Platform.OS === "web" && typeof localStorage !== "undefined") {
+      try {
+        const hasSession = !!localStorage.getItem("nermai_guest_email") ||
+                           !!localStorage.getItem("nermai_auth_user");
+        const isRedirectReturn = localStorage.getItem("nermai_pending_guest_name") !== null ||
+                                 localStorage.getItem("nermai_pending_guest_phone") !== null;
+        return hasSession || isRedirectReturn;
+      } catch (e) {}
+    }
+    return false;
+  });
   const [onboardDone, setOnboardDone] = useState(() => {
     try {
       if (Platform.OS === "web") {
+        // Skip onboarding if returning from Google redirect so getRedirectResult can run
+        const isRedirectReturn = localStorage.getItem("nermai_pending_guest_name") !== null ||
+                                 localStorage.getItem("nermai_pending_guest_phone") !== null;
+        if (isRedirectReturn) return true;
+
         const isRegisteredGuest = !!localStorage.getItem("nermai_guest_email");
         const isLoggedInStudent = !!localStorage.getItem("nermai_auth_user");
         
@@ -29773,6 +30138,7 @@ export default function App() {
     } catch (e) {
       return false;
     }
+
   });
 
   useEffect(() => {
