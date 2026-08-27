@@ -5484,7 +5484,7 @@ function MainApp() {
         try {
           const res = await api.get("/erp/student/profile/me");
           const meData = res?.data || res || {};
-          studentList = [meData];
+          studentList = Array.isArray(meData) ? meData : [meData];
           setStudents(studentList);
         } catch (e) {
           console.log("Failed loading student profile in loadNotifications:", e);
@@ -5492,7 +5492,8 @@ function MainApp() {
       }
       const myStudent = getLoggedInStudent(user, studentList);
       const batch = myStudent?.batch || "";
-      const res = await api.get(`/notification?role=${role}&batch=${batch}&studentId=${myStudent?.id || ""}`);
+      const studentId = myStudent?.id || user?.studentId || user?.userId || "";
+      const res = await api.get(`/notification?role=${role}&batch=${batch}&studentId=${studentId}`);
       let notifs = res?.data || res || [];
       if (role === "student") {
         const myStudentName = myStudent ? getStudentName(myStudent) : "";
