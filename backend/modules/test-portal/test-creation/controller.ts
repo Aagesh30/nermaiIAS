@@ -695,6 +695,15 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
             let questionPaperDriveUrl: string | null = null;
             let answerKeyDriveUrl: string | null = null;
 
+            // Generate structured folder path: 'Test Portal/[Test Title] - [Date]'
+            const today = new Date();
+            const dd = String(today.getDate()).padStart(2, '0');
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const yyyy = today.getFullYear();
+            const dateStr = `${dd}-${mm}-${yyyy}`;
+            const folderTitle = (title || "Test").trim().replace(/[\/\\?%*:|"<>\s]+/g, "_");
+            const baseSubPath = `Test Portal/${folderTitle}_${dateStr}`;
+
             if (questionPaperBase64) {
               try {
                 const qpBuffer = Buffer.from(
@@ -706,7 +715,7 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                   fileName: qpFilename,
                   mimeType: "application/pdf",
                   buffer: qpBuffer,
-                  subPath: "Test Portal/Question Papers"
+                  subPath: `${baseSubPath}/Question Papers`
                 });
                 if (driveResult?.previewUrl) {
                   questionPaperDriveUrl = driveResult.previewUrl;
@@ -728,7 +737,7 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                   fileName: akFilename,
                   mimeType: "application/pdf",
                   buffer: akBuffer,
-                  subPath: "Test Portal/Answer Keys"
+                  subPath: `${baseSubPath}/Answer Keys`
                 });
                 if (driveResult?.previewUrl) {
                   answerKeyDriveUrl = driveResult.previewUrl;
@@ -1075,6 +1084,75 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
             return res.status(200).json({ success: true, data: list });
         } catch (error: any) {
             return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    /**
+     * UPLOAD QUESTION IMAGE TO GOOGLE DRIVE
+     * POST /api/test-portal/test-creation/upload-question-image
+     * Body: { base64: string, fileName?: string }
+     * Returns: { imageUrl: string } — Google Drive thumbnail URL
+     */
+    static async uploadQuestionImage(req: Request, res: Response) {
+        try {
+            const { base64, fileName, testTitle } = req.body;
+            if (!base64) {
+                return res.status(400).json({ success: false, message: "base64 image data is required" });
+            }
+
+            // Strip data URL prefix if present (e.g. "data:image/jpeg;base64,...")
+            const rawBase64 = base64.startsWith("data:") ? base64.split(",")[1] : base64;
+            if (!rawBase64) {
+                return res.status(400).json({ success: false, message: "Invalid base64 image data" });
+            }
+
+            const buffer = Buffer.from(rawBase64, "base64");
+
+            // Detect MIME type from original data URL prefix, default to jpeg
+            let mimeType = "image/jpeg";
+            if (base64.startsWith("data:")) {
+                const mimeMatch = base64.match(/^data:([^;]+);base64,/);
+                if (mimeMatch) mimeType = mimeMatch[1];
+            }
+
+            const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+            const safeName = (fileName || `question-image-${Date.now()}`).replace(/[^a-zA-Z0-9._-]/g, "_");
+            const driveFileName = safeName.includes(".") ? safeName : `${safeName}.${ext}`;
+
+            // Create structured folder path: 'Test Portal/[Test Title] - [Date]/Question Images'
+            const today = new Date();
+            const dd = String(today.getDate()).padStart(2, '0');
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const yyyy = today.getFullYear();
+            const dateStr = `${dd}-${mm}-${yyyy}`;
+            const folderTitle = (testTitle || "Test").trim().replace(/[\/\\?%*:|"<>\s]+/g, "_");
+            const subPath = `Test Portal/${folderTitle}_${dateStr}/Question Images`;
+
+            const driveResult = await uploadFileToGoogleDrive({
+                fileName: driveFileName,
+                mimeType,
+                buffer,
+                subPath
+            });
+
+            if (!driveResult?.previewUrl) {
+                return res.status(500).json({ success: false, message: "Failed to upload image to Google Drive. Please check Drive configuration." });
+            }
+
+            // Return the sharable Drive thumbnail URL (displays inline in img tags)
+            const driveId = driveResult.fileId;
+            const thumbnailUrl = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
+
+            return res.status(200).json({
+                success: true,
+                imageUrl: thumbnailUrl,
+                previewUrl: driveResult.previewUrl,
+                webViewLink: driveResult.webViewLink,
+                fileId: driveId
+            });
+        } catch (error: any) {
+            console.error("[TestCreation] uploadQuestionImage error:", error);
+            return res.status(500).json({ success: false, message: error.message || "Failed to upload question image" });
         }
     }
 }

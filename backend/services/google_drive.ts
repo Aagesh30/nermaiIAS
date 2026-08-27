@@ -122,12 +122,13 @@ export async function uploadFileToGoogleDrive(options: {
         payload.subPath = options.subPath.trim().replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
       }
 
-      const response = await axios.post(appsScriptUrl, payload, {
+      const response = await fetch(appsScriptUrl, {
+        method: "POST",
         headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
+        body: JSON.stringify(payload)
       });
 
-      const resData = response.data;
+      const resData = await response.json().catch(() => null);
 
       if (resData && (resData.success || resData.status === 'success') && resData.fileId) {
         const fileId = resData.fileId;
@@ -139,7 +140,7 @@ export async function uploadFileToGoogleDrive(options: {
           webViewLink: resData.webViewLink || `https://drive.google.com/file/d/${fileId}/view`
         };
       } else {
-        console.error('❌ [Drive] Apps Script upload failed:', resData?.error || resData);
+        console.error('❌ [Drive] Apps Script upload failed:', resData?.error || resData || 'Non-JSON/Empty response');
         // Fall through to service-account path
       }
     }
@@ -233,19 +234,22 @@ export async function deleteFileFromGoogleDrive(fileId: string): Promise<boolean
     const appsScriptUrl = driveConfig.appsScriptUrl || process.env.DRIVE_APPS_SCRIPT_URL;
     if (!appsScriptUrl || !fileId) return false;
 
-    const response = await axios.post(appsScriptUrl, {
-      action: 'delete',
-      fileId
-    }, {
+    const response = await fetch(appsScriptUrl, {
+      method: "POST",
       headers: { 'Content-Type': 'application/json' },
-      timeout: 30000
+      body: JSON.stringify({
+        action: 'delete',
+        fileId
+      })
     });
 
-    if (response.data && (response.data.success || response.data.status === 'success')) {
+    const resData = await response.json().catch(() => null);
+
+    if (resData && (resData.success || resData.status === 'success')) {
       console.log(`✅ [Drive] File deleted: ${fileId}`);
       return true;
     } else {
-      console.warn(`⚠️ [Drive] Delete failed for ${fileId}:`, response.data?.error);
+      console.warn(`⚠️ [Drive] Delete failed for ${fileId}:`, resData?.error || resData || 'Non-JSON/Empty response');
       return false;
     }
   } catch (error: any) {

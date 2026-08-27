@@ -207,6 +207,28 @@ export class DailyContentController {
     static async getDailyContent(req: Request, res: Response) {
         try {
             const { date, batch, isPaid } = req.query;
+            let finalBatch = batch;
+            let finalIsPaid = isPaid;
+
+            if (req.user && req.user.role === "student") {
+                const userDoc = await db.collection("users").doc(req.user.userId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    if (userData?.studentId) {
+                        const studentDoc = await db.collection("students").doc(userData.studentId).get();
+                        if (studentDoc.exists) {
+                            const studentData = studentDoc.data();
+                            if (!finalBatch && studentData?.batch) {
+                                finalBatch = studentData.batch;
+                            }
+                            if (finalIsPaid === undefined) {
+                                finalIsPaid = studentData?.isPaid ? "true" : "false";
+                            }
+                        }
+                    }
+                }
+            }
+
             let query: admin.firestore.Query = db.collection(CONTENT_COLLECTION)
                 .where("isDeleted", "==", false);
 
@@ -241,17 +263,18 @@ export class DailyContentController {
                 contentList = contentList.filter(c => c.status !== "pending");
             }
 
-            // If batch/isPaid query params are supplied, filter accordingly
-            if (batch || isPaid !== undefined) {
-                const isPaidBool = String(isPaid) === "true";
-                const batchStr = typeof batch === "string" ? batch.trim().toLowerCase() : "";
+            // If batch/isPaid query params or resolved student attributes are supplied, filter accordingly
+            if (finalBatch || finalIsPaid !== undefined) {
+                const isPaidBool = String(finalIsPaid) === "true";
+                const batchStr = typeof finalBatch === "string" ? finalBatch.trim().toLowerCase() : "";
                 contentList = contentList.filter(c => {
                     const aud = c.targetAudience || "all";
                     if (aud === "all") return true;
                     if (aud === "paid") return isPaidBool;
                     if (aud === "batch") {
                         if (!c.targetBatch) return true;
-                        return batchStr && c.targetBatch.trim().toLowerCase() === batchStr;
+                        const targetBatches = c.targetBatch.split(",").map((b: string) => b.trim().toLowerCase());
+                        return batchStr && targetBatches.includes(batchStr);
                     }
                     return true;
                 });

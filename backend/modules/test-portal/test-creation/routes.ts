@@ -55,6 +55,9 @@ router.patch("/permission-requests/:id", requireRole(adminRoles), OfflineTestReq
 router.delete("/permission-requests/by-test/:testId", OfflineTestRequestController.deleteByTest);
 router.delete("/permission-requests/:id", OfflineTestRequestController.deleteRequest);
 
+/** UPLOAD QUESTION IMAGE TO GOOGLE DRIVE (admin only) */
+router.post("/upload-question-image", requireRole(adminRoles), TestCreationController.uploadQuestionImage);
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** GET SINGLE TEST — students and admins */

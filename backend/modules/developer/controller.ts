@@ -655,15 +655,16 @@ export class DeveloperController {
                 return res.status(400).json({ success: false, message: "Apps Script URL is not configured." });
             }
 
-            const response = await axios.post(url, {
-                test: true,
-                rootFolderId: folderId
-            }, {
+            const response = await fetch(url, {
+                method: "POST",
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 15000
+                body: JSON.stringify({
+                    test: true,
+                    rootFolderId: folderId
+                })
             });
 
-            const resData = response.data;
+            const resData = await response.json().catch(() => null);
             if (resData && (resData.status === 'success' || resData.success)) {
                 return res.status(200).json({
                     success: true,
@@ -681,10 +682,9 @@ export class DeveloperController {
                 });
             }
         } catch (error: any) {
-            const status = error?.response?.status;
             return res.status(200).json({
                 success: false,
-                message: `Connection failed: ${error.message || 'Unknown error'}${status ? ` (HTTP ${status})` : ''}`
+                message: `Connection failed: ${error.message || 'Unknown error'}`
             });
         }
     }

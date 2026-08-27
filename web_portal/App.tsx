@@ -441,10 +441,38 @@ function DateTimePickerSelect({
     onChange(formatDateTimeLocal(newDate));
   };
 
-  const handleTimeChange = (type: "hour" | "minute", val: number) => {
+  const get12Hour = (h: number) => {
+    const val = h % 12;
+    return val === 0 ? 12 : val;
+  };
+
+  const getAmPm = (h: number) => {
+    return h >= 12 ? "PM" : "AM";
+  };
+
+  const handleTimeChange = (type: "hour" | "minute" | "ampm", val: any) => {
     const newDate = new Date(date);
-    if (type === "hour") newDate.setHours(val);
-    if (type === "minute") newDate.setMinutes(val);
+    let currentH = date.getHours();
+
+    if (type === "minute") {
+      newDate.setMinutes(Number(val));
+    } else {
+      let isPm = currentH >= 12;
+      let hr12 = currentH % 12;
+      if (hr12 === 0) hr12 = 12;
+
+      if (type === "hour") {
+        hr12 = Number(val);
+      } else if (type === "ampm") {
+        isPm = val === "PM";
+      }
+
+      let newH = hr12 % 12;
+      if (isPm) {
+        newH += 12;
+      }
+      newDate.setHours(newH);
+    }
     onChange(formatDateTimeLocal(newDate));
   };
 
@@ -465,12 +493,14 @@ function DateTimePickerSelect({
     );
   };
 
-  // Formatted display string e.g. "Aug 25, 2026 at 10:30"
+  // Formatted display string in 12-hour format e.g. "Aug 25, 2026 at 10:30 AM"
+  const displayHour = get12Hour(date.getHours());
+  const displayAmPm = getAmPm(date.getHours());
   const displayFormatted = date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric"
-  }) + " at " + String(date.getHours()).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0");
+  }) + " at " + String(displayHour).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0") + " " + displayAmPm;
 
   return (
     <View style={{ marginBottom: 14 }}>
@@ -695,7 +725,7 @@ function DateTimePickerSelect({
                     {/* Hour Select */}
                     <View style={{ borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 6, backgroundColor: darkMode ? "#222" : "#f9f9f9", overflow: "hidden" }}>
                       <select
-                        value={date.getHours()}
+                        value={get12Hour(date.getHours())}
                         onChange={(e) => handleTimeChange("hour", Number(e.target.value))}
                         style={{
                           padding: "6px 10px",
@@ -708,9 +738,9 @@ function DateTimePickerSelect({
                           outline: "none"
                         }}
                       >
-                        {Array.from({ length: 24 }, (_, i) => (
-                          <option key={i} value={i} style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>
-                            {String(i).padStart(2, "0")} hr
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+                          <option key={h} value={h} style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>
+                            {String(h).padStart(2, "0")}
                           </option>
                         ))}
                       </select>
@@ -736,9 +766,30 @@ function DateTimePickerSelect({
                       >
                         {Array.from({ length: 12 }, (_, i) => i * 5).map((m) => (
                           <option key={m} value={m} style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>
-                            {String(m).padStart(2, "0")} min
+                            {String(m).padStart(2, "0")}
                           </option>
                         ))}
+                      </select>
+                    </View>
+
+                    {/* AM/PM Select */}
+                    <View style={{ borderWidth: 1, borderColor: darkMode ? "#444" : "#ccc", borderRadius: 6, backgroundColor: darkMode ? "#222" : "#f9f9f9", overflow: "hidden", marginLeft: 4 }}>
+                      <select
+                        value={getAmPm(date.getHours())}
+                        onChange={(e) => handleTimeChange("ampm", e.target.value)}
+                        style={{
+                          padding: "6px 10px",
+                          fontSize: "13px",
+                          fontWeight: "bold",
+                          border: "none",
+                          backgroundColor: "transparent",
+                          color: darkMode ? "#fff" : "#111",
+                          cursor: "pointer",
+                          outline: "none"
+                        }}
+                      >
+                        <option value="AM" style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>AM</option>
+                        <option value="PM" style={{ backgroundColor: darkMode ? "#222" : "#fff", color: darkMode ? "#fff" : "#111" }}>PM</option>
                       </select>
                     </View>
                   </View>
@@ -2067,13 +2118,15 @@ function MainApp() {
     // Handle Touch Gestures
     const handleTouchStart = (e: React.TouchEvent) => {
       if (e.touches.length === 2) {
+        isDragging.current = false; // Disable dragging while pinching
+        lastTapTime.current = 0; // Prevent pinch gestures from triggering double-tap zoom
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         initialPinchDist.current = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
         initialScale.current = scale;
       } else if (e.touches.length === 1) {
         const now = Date.now();
-        if (now - lastTapTime.current < 300) {
+        if (lastTapTime.current > 0 && now - lastTapTime.current < 300) {
           if (scale > 1) {
             resetZoom();
           } else {
@@ -2107,12 +2160,23 @@ function MainApp() {
       } else if (e.touches.length === 1 && isDragging.current && scale > 1) {
         const deltaX = e.touches[0].clientX - startX.current;
         const deltaY = e.touches[0].clientY - startY.current;
+        if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+          lastTapTime.current = 0; // Panning/dragging is not a tap, prevent accidental double-tap on release
+        }
         setTranslateX(initialTranslateX.current + deltaX);
         setTranslateY(initialTranslateY.current + deltaY);
       }
     };
 
     const handleTouchEnd = (e: React.TouchEvent) => {
+      if (e.touches.length === 1) {
+        // Transition from 2 fingers to 1 finger: set dragging start point to the remaining finger to prevent jumps
+        isDragging.current = true;
+        startX.current = e.touches[0].clientX;
+        startY.current = e.touches[0].clientY;
+        initialTranslateX.current = translateX;
+        initialTranslateY.current = translateY;
+      }
       if (e.touches.length < 2) {
         initialPinchDist.current = 0;
       }
@@ -2295,12 +2359,14 @@ function MainApp() {
 
         container.addEventListener('touchstart', function(e) {
           if (e.touches.length === 2) {
+            isDragging = false;
+            lastTapTime = 0; // Prevent pinch gestures from triggering double-tap zoom
             var t1 = e.touches[0], t2 = e.touches[1];
             initialPinchDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
             initialScale = scale;
           } else if (e.touches.length === 1) {
             var now = Date.now();
-            if (now - lastTapTime < 300) {
+            if (lastTapTime > 0 && now - lastTapTime < 300) {
               if (scale > 1) { resetZoom(); } else { scale = 2.5; updateTransform(); }
               lastTapTime = 0;
               return;
@@ -2327,6 +2393,9 @@ function MainApp() {
             e.preventDefault();
             var dx = e.touches[0].clientX - startX;
             var dy = e.touches[0].clientY - startY;
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+              lastTapTime = 0; // Panning/dragging is not a tap, prevent accidental double-tap on release
+            }
             translateX = initialTx + dx;
             translateY = initialTy + dy;
             updateTransform();
@@ -2334,6 +2403,13 @@ function MainApp() {
         }, { passive: false });
 
         container.addEventListener('touchend', function(e) {
+          if (e.touches.length === 1) {
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            initialTx = translateX;
+            initialTy = translateY;
+          }
           if (e.touches.length < 2) initialPinchDist = 0;
           if (e.touches.length === 0) isDragging = false;
         });
@@ -3352,11 +3428,7 @@ function MainApp() {
     if (isRequestForCompletedTest(req)) return true;
 
     // 2. Is test deleted, non-existent, or past its endTime (test is OVER)?
-    const allTestsList = [
-      ...(Array.isArray(tests) ? tests : []),
-      ...(Array.isArray(liveTests) ? liveTests : []),
-      ...(Array.isArray(pastTests) ? pastTests : [])
-    ];
+    const allTestsList = Array.isArray(tests) ? tests : [];
     if (req.testId && allTestsList.length > 0) {
       const reqTestId = String(req.testId).trim();
       const matchingTest = allTestsList.find((t: any) => String(t.id || t._id).trim() === reqTestId);
@@ -3814,6 +3886,7 @@ function MainApp() {
   const getFeatureAccess = (featureKey: string): "none" | "view" | "edit_direct" | "edit_on_approval" => {
     if (!user) return "none";
     if (user.role === "developer" || user.role === "super_admin") return "edit_direct";
+    if (user.role === "student" || user.role === "guest") return "edit_direct";
     
     // Check JIT (One-Time Upload) Permission
     if ((oneTimePermissions[featureKey] || 0) > 0) {
@@ -4559,6 +4632,178 @@ function MainApp() {
       console.log("Failed loading test results for ERP:", e);
       setErpTestResults([]);
     }
+  };
+
+  useEffect(() => {
+    if (erpSub !== "marks" || !tests || tests.length === 0) return;
+
+    const filtered = tests.filter((t: any) => {
+      let tType = t.testType || t.category || "";
+      if (!tType && t.title) {
+        const titleLower = t.title.toLowerCase();
+        if (titleLower.includes("daily")) tType = "daily";
+        else if (titleLower.includes("weekly")) tType = "weekly";
+        else tType = "mock";
+      }
+      if (!tType) tType = "mock";
+
+      if (ledgerTestTypeFilter && tType !== ledgerTestTypeFilter) return false;
+      if (ledgerTestNameFilter.trim() !== "") {
+        const query = ledgerTestNameFilter.toLowerCase().trim();
+        const title = (t.title || "").toLowerCase();
+        if (!title.includes(query)) return false;
+      }
+      return true;
+    });
+
+    const isCurrentValid = filtered.some((t: any) => t.id === selectedErpTestId);
+    if (!isCurrentValid) {
+      if (filtered.length > 0) {
+        setSelectedErpTestId(filtered[0].id);
+        loadErpTestResults(filtered[0].id);
+      } else {
+        setSelectedErpTestId("");
+        setErpTestResults([]);
+      }
+    }
+  }, [ledgerTestTypeFilter, ledgerTestNameFilter, tests, erpSub, selectedErpTestId]);
+
+  const renderUniversalImagePreviewModal = () => {
+    if (previewImageUri === null) return null;
+
+    const getDriveId = (urlStr: string) => {
+      if (!urlStr) return null;
+      const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      const m3 = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      return m1 ? m1[1] : m2 ? m2[1] : m3 ? m3[1] : null;
+    };
+    const driveId = getDriveId(previewImageUri);
+    const isDrive = !!driveId || previewImageUri.includes("drive.google.com");
+
+    // ── WEB: Use a position:fixed HTML div so it always floats on top
+    //         regardless of where it's rendered in the component tree.
+    //         React Native Modal uses a portal mechanism that can fail in
+    //         early-return exam screens on web.
+    if (Platform.OS === 'web') {
+      const overlayStyle: React.CSSProperties = {
+        position: 'fixed',
+        top: 0, left: 0, right: 0, bottom: 0,
+        width: '100vw', height: '100vh',
+        backgroundColor: 'rgba(0,0,0,0.88)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 999999,
+      };
+      const cardStyle: React.CSSProperties = {
+        width: '92%',
+        maxWidth: 860,
+        maxHeight: '92vh',
+        backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+        borderRadius: 14,
+        overflow: 'hidden',
+        padding: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+      };
+      const headerStyle: React.CSSProperties = {
+        display: 'flex',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 14,
+      };
+
+      let content: React.ReactNode;
+      if (isDrive) {
+        const directThumbnailUrl = driveId
+          ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`
+          : previewImageUri;
+        const iframeUrl = driveId
+          ? `https://drive.google.com/file/d/${driveId}/preview`
+          : previewImageUri.replace(/\/view.*$/, "/preview").replace(/\/edit.*$/, "/preview");
+        content = (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+            <img
+              id="preview-main-img"
+              src={directThumbnailUrl}
+              alt={previewImageTitle || "Preview"}
+              style={{ maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: 8 }}
+              onError={() => {
+                const img = document.getElementById('preview-main-img') as HTMLImageElement;
+                const fallback = document.getElementById('preview-iframe-fallback');
+                if (img) img.style.display = 'none';
+                if (fallback) fallback.style.display = 'block';
+              }}
+            />
+            <div id="preview-iframe-fallback" style={{ display: 'none', width: '100%', height: '65vh', borderRadius: 8, overflow: 'hidden' }}>
+              <iframe src={iframeUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={previewImageTitle || "Preview"} />
+            </div>
+            <a href={previewImageUri} target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: '#1976d2', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+              Open in Google Drive ↗
+            </a>
+          </div>
+        );
+      } else {
+        content = (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+            <img
+              src={previewImageUri}
+              alt={previewImageTitle || "Preview"}
+              style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }}
+            />
+            <a href={previewImageUri} target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: '#1976d2', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
+              Open image in new tab ↗
+            </a>
+          </div>
+        );
+      }
+
+      return (
+        <div style={overlayStyle} onClick={() => setPreviewImageUri(null)}>
+          <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
+            <div style={headerStyle}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: darkMode ? '#e0e0e0' : '#212121', flex: 1, marginRight: 12 }}>{previewImageTitle}</span>
+              <button
+                onClick={() => setPreviewImageUri(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}
+                aria-label="Close preview"
+              >
+                <span style={{ fontSize: 26, color: '#c62828', lineHeight: 1 }}>✕</span>
+              </button>
+            </div>
+            {content}
+          </div>
+        </div>
+      );
+    }
+
+    // ── NATIVE (iOS / Android): Use React Native Modal ──
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setPreviewImageUri(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center" }}>
+          <View style={{ width: "90%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, overflow: "hidden", padding: 16 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", flex: 1 }}>{previewImageTitle}</Text>
+              <TouchableOpacity onPress={() => setPreviewImageUri(null)}>
+                <Ionicons name="close-circle" size={26} color="#c62828" />
+              </TouchableOpacity>
+            </View>
+            <Image
+              source={{ uri: previewImageUri }}
+              style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
+            />
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
 
@@ -6108,9 +6353,23 @@ function MainApp() {
     return trimmed;
   };
 
+  const toggleDailyContentBatchSelection = (batchName: string) => {
+    let current = dailyContentForm.targetBatch ? dailyContentForm.targetBatch.split(",").map(s => s.trim()).filter(Boolean) : [];
+    if (current.includes(batchName)) {
+      current = current.filter(b => b !== batchName);
+    } else {
+      current.push(batchName);
+    }
+    setDailyContentForm({ ...dailyContentForm, targetBatch: current.join(",") });
+  };
+
   const createDailyContent = async () => {
     if (!dailyContentForm.title.trim()) {
       alert("Please enter a title for the daily study material.");
+      return;
+    }
+    if (dailyContentForm.targetAudience === "batch" && !dailyContentForm.targetBatch.trim()) {
+      alert("Please select at least one target batch.");
       return;
     }
     if (dailyContentForm.source === "file" && !dailyContentForm.fileBase64) {
@@ -7289,7 +7548,7 @@ function MainApp() {
     );
   };
 
-  // Upload & Attach Image to Extracted Question
+  // Upload & Attach Image to Extracted Question (uploads to Google Drive)
   const handleUploadQuestionImage = (qIdx: number) => {
     if (typeof document === "undefined") return;
     const fileInput = document.createElement("input");
@@ -7297,21 +7556,46 @@ function MainApp() {
     fileInput.accept = "image/*";
     fileInput.onchange = async (e: any) => {
       const file = e.target?.files?.[0];
-      if (file) {
+      if (!file) return;
+      try {
+        // First compress locally (keeps bandwidth reasonable)
+        const compressedBase64 = await compressFileImage(file, 1200, 1200, 0.85);
+
+        // Try uploading to Google Drive via backend
+        let finalImageUrl: string = compressedBase64;
+        let uploadedToDrive = false;
         try {
-          const compressedBase64 = await compressFileImage(file, 800, 800, 0.75);
-          setExtractedQuestions(prev => {
-            const updated = [...prev];
-            updated[qIdx] = { ...updated[qIdx], imageUrl: compressedBase64 };
-            return updated;
+          const driveRes = await api.current.post("/test-portal/test-creation/upload-question-image", {
+            base64: compressedBase64,
+            fileName: `q${qIdx + 1}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
+            testTitle: newPdfTest.title || "Test"
           });
-          if (editingQIdx === qIdx && editingQData) {
-            setEditingQData((prev: any) => prev ? { ...prev, imageUrl: compressedBase64 } : null);
+          if (driveRes?.imageUrl) {
+            finalImageUrl = driveRes.imageUrl;
+            uploadedToDrive = true;
           }
-          Alert.alert("Image Attached!", `Image uploaded and attached to Question #${qIdx + 1}.`);
-        } catch (err: any) {
-          Alert.alert("Upload Error", err.message || "Could not read image file.");
+        } catch (driveErr: any) {
+          console.warn("[Drive] Question image upload failed, falling back to base64:", driveErr?.message);
         }
+
+        // Update extractedQuestions and editingQData with the final URL (Drive URL or base64)
+        setExtractedQuestions(prev => {
+          const updated = [...prev];
+          updated[qIdx] = { ...updated[qIdx], imageUrl: finalImageUrl };
+          return updated;
+        });
+        if (editingQIdx === qIdx && editingQData) {
+          setEditingQData((prev: any) => prev ? { ...prev, imageUrl: finalImageUrl } : null);
+        }
+
+        Alert.alert(
+          "Image Attached!",
+          uploadedToDrive
+            ? `Image uploaded to Google Drive and attached to Question #${qIdx + 1}.`
+            : `Image attached to Question #${qIdx + 1} (stored locally — Drive upload unavailable).`
+        );
+      } catch (err: any) {
+        Alert.alert("Upload Error", err.message || "Could not read image file.");
       }
     };
     fileInput.click();
@@ -8916,6 +9200,8 @@ function MainApp() {
     setActiveAttempt(null);
     setExamEndTime(0);
     setReviewLoading(true);
+    setPreviewImageUri(null);
+    setPreviewImageTitle("");
 
     try {
       // 1. Flush local answers to server (best-effort)
@@ -14246,6 +14532,7 @@ function MainApp() {
                   <Image
                     source={{ uri: attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage }}
                     style={{ width: "100%", height: 220, borderRadius: 10, resizeMode: "contain", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e0e0e0" }}
+                    pointerEvents="none"
                   />
                   <Text style={{ fontSize: 11, color: "#1976d2", textAlign: "right", marginTop: 4, fontWeight: "600" }}>Tap image to view full screen</Text>
                 </TouchableOpacity>
@@ -14388,6 +14675,7 @@ function MainApp() {
             <Text style={{ color: "#757575" }}>Loading Exam Questions...</Text>
           </View>
         )}
+        {renderUniversalImagePreviewModal()}
       </SafeAreaView>
     );
   }
@@ -14497,6 +14785,7 @@ function MainApp() {
             })
           )}
         </ScrollView>
+        {renderUniversalImagePreviewModal()}
       </SafeAreaView>
     );
   }
@@ -14670,6 +14959,7 @@ function MainApp() {
           )}
         </ScrollView>
         {renderTestFeedbackModal()}
+        {renderUniversalImagePreviewModal()}
       </SafeAreaView>
     );
   }
@@ -15953,15 +16243,28 @@ function MainApp() {
                     {(() => {
                       if (!lmsDailyContent || lmsDailyContent.length === 0) return null;
                       const myStudent = getLoggedInStudent(user, students) || user;
-                      const myBatch = myStudent?.batch || myStudent?.batchName || user?.batch || user?.batchName || "";
                       const isPaid = (Number(myStudent?.feesPaid) > 0) || myStudent?.type === "paid" || user?.type === "paid" || (Number(myStudent?.totalFees) > 0 && Number(myStudent?.feesPaid) >= Number(myStudent?.totalFees));
 
-                      const matchBatch = (targetBatch: string, studentBatch: string) => {
+                      const studentBatchesList: string[] = [];
+                      if (myStudent?.batch) studentBatchesList.push(myStudent.batch);
+                      if (myStudent?.batchName) studentBatchesList.push(myStudent.batchName);
+                      if (user?.batch) studentBatchesList.push(user.batch);
+                      if (user?.batchName) studentBatchesList.push(user.batchName);
+                      const arrBatches = myStudent?.batches || user?.batches;
+                      if (Array.isArray(arrBatches)) {
+                        arrBatches.forEach((b: any) => {
+                          if (b) studentBatchesList.push(String(b));
+                        });
+                      }
+
+                      const matchBatch = (targetBatch: string, sList: string[]) => {
                         if (!targetBatch || targetBatch === "all") return true;
-                        if (!studentBatch) return true; // If student batch isn't set, allow batch content
-                        const t = String(targetBatch).trim().toLowerCase();
-                        const s = String(studentBatch).trim().toLowerCase();
-                        return t === s || t.startsWith(s) || s.startsWith(t) || t.includes(s) || s.includes(t);
+                        if (sList.length === 0) return true;
+                        const targets = targetBatch.split(",").map(b => b.trim().toLowerCase()).filter(Boolean);
+                        return sList.some(sb => {
+                          const s = sb.trim().toLowerCase();
+                          return targets.some(t => t === s || t.includes(s) || s.includes(t));
+                        });
                       };
 
                       const eligibleDailyContent = lmsDailyContent.filter((c: any) => {
@@ -15971,7 +16274,7 @@ function MainApp() {
                         if (aud === "paid") return isPaid;
                         if (aud === "batch") {
                           if (!c.targetBatch) return true;
-                          return matchBatch(c.targetBatch, myBatch);
+                          return matchBatch(c.targetBatch, studentBatchesList);
                         }
                         return true;
                       });
@@ -17812,7 +18115,21 @@ function MainApp() {
                     // Tests whose endTime has passed — automatically show in results
                     const closedTests = tests.filter((t: any) => {
                       const endMs = t.endTime ? new Date(t.endTime).getTime() : null;
-                      return endMs && now > endMs;
+                      const isClosed = endMs && now > endMs;
+                      if (!isClosed) return false;
+
+                      if (resultsCategoryFilter) {
+                        let tType = t.testType || t.category || "";
+                        if (!tType && t.title) {
+                          const titleLower = t.title.toLowerCase();
+                          if (titleLower.includes("daily")) tType = "daily";
+                          else if (titleLower.includes("weekly")) tType = "weekly";
+                          else tType = "mock";
+                        }
+                        if (!tType) tType = "mock";
+                        if (tType !== resultsCategoryFilter) return false;
+                      }
+                      return true;
                     });
                     const uniqueSubjects = [...new Set(allTestResults.filter((t: any) => t.subject).map((t: any) => String(t.subject)))] as string[];
                     const topicsForSubject = resultsSubjectFilter
@@ -24113,7 +24430,16 @@ function MainApp() {
                                   {selectedErpTestId === "" && <option value="">-- Select a Mock Exam --</option>}
                                   {tests
                                     .filter((t: any) => {
-                                      if (ledgerTestTypeFilter && (t.testType || "mock") !== ledgerTestTypeFilter) return false;
+                                      let tType = t.testType || t.category || "";
+                                      if (!tType && t.title) {
+                                        const titleLower = t.title.toLowerCase();
+                                        if (titleLower.includes("daily")) tType = "daily";
+                                        else if (titleLower.includes("weekly")) tType = "weekly";
+                                        else tType = "mock";
+                                      }
+                                      if (!tType) tType = "mock";
+
+                                      if (ledgerTestTypeFilter && tType !== ledgerTestTypeFilter) return false;
                                       if (ledgerTestNameFilter.trim() !== "") {
                                         const query = ledgerTestNameFilter.toLowerCase().trim();
                                         const title = (t.title || "").toLowerCase();
@@ -24123,7 +24449,7 @@ function MainApp() {
                                     })
                                     .map(t => (
                                       <option key={t.id} value={t.id}>
-                                        {t.title}
+                                        {t.title} {t.startTime ? `(${new Date(t.startTime).toLocaleDateString("en-IN")})` : `(${t.id.substring(0, 5)})`}
                                       </option>
                                     ))}
                                 </select>
@@ -24153,7 +24479,16 @@ function MainApp() {
                                     <ScrollView style={{ marginVertical: 10 }}>
                                       {tests
                                         .filter((t: any) => {
-                                          if (ledgerTestTypeFilter && (t.testType || "mock") !== ledgerTestTypeFilter) return false;
+                                          let tType = t.testType || t.category || "";
+                                          if (!tType && t.title) {
+                                            const titleLower = t.title.toLowerCase();
+                                            if (titleLower.includes("daily")) tType = "daily";
+                                            else if (titleLower.includes("weekly")) tType = "weekly";
+                                            else tType = "mock";
+                                          }
+                                          if (!tType) tType = "mock";
+
+                                          if (ledgerTestTypeFilter && tType !== ledgerTestTypeFilter) return false;
                                           if (ledgerTestNameFilter.trim() !== "") {
                                             const query = ledgerTestNameFilter.toLowerCase().trim();
                                             const title = (t.title || "").toLowerCase();
@@ -24182,7 +24517,9 @@ function MainApp() {
                                                 alignItems: "center"
                                               }}
                                             >
-                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{t.title}</Text>
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>
+                                                {t.title} {t.startTime ? `(${new Date(t.startTime).toLocaleDateString("en-IN")})` : `(${t.id.substring(0, 5)})`}
+                                              </Text>
                                               {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
                                             </TouchableOpacity>
                                           );
@@ -27525,44 +27862,51 @@ function MainApp() {
                         </View>
 
                         {/* Batch selector if targetAudience === 'batch' */}
-                        {dailyContentForm.targetAudience === "batch" && (
-                          <View>
-                            <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#555", marginBottom: 4 }}>
-                              Select Target Batch *
-                            </Text>
-                            {Platform.OS === 'web' ? (
-                              <select
-                                value={dailyContentForm.targetBatch}
-                                onChange={(e) => setDailyContentForm({ ...dailyContentForm, targetBatch: e.target.value })}
-                                style={{
-                                  width: '100%',
-                                  padding: '10px 12px',
-                                  borderRadius: 8,
-                                  border: `1px solid ${darkMode ? '#444' : '#e0e0e0'}`,
-                                  backgroundColor: darkMode ? '#1e1e2e' : '#ffffff',
-                                  color: darkMode ? '#ffffff' : '#212121',
-                                  fontSize: 13,
-                                  fontWeight: '500',
-                                  outline: 'none'
-                                }}
-                              >
-                                <option value="">-- Choose Batch --</option>
-                                {batches.map((b: any) => (
-                                  <option key={b.id || b.batchName} value={b.batchName}>
-                                    {b.batchName} ({b.course || 'General'})
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <TextInput
-                                style={styles.input}
-                                placeholder="Batch Name (e.g. Batch 43)"
-                                value={dailyContentForm.targetBatch}
-                                onChangeText={v => setDailyContentForm({ ...dailyContentForm, targetBatch: v })}
-                              />
-                            )}
-                          </View>
-                        )}
+                        {dailyContentForm.targetAudience === "batch" && (() => {
+                          const selectedBatches = dailyContentForm.targetBatch ? dailyContentForm.targetBatch.split(",").map(s => s.trim()).filter(Boolean) : [];
+                          return (
+                            <View>
+                              <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#ccc" : "#555", marginBottom: 4 }}>
+                                Select Target Batch(es) *
+                              </Text>
+                              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                                {batches.map((b: any) => {
+                                  const isSelected = selectedBatches.includes(b.batchName);
+                                  return (
+                                    <TouchableOpacity
+                                      key={b.id || b.batchName}
+                                      onPress={() => toggleDailyContentBatchSelection(b.batchName)}
+                                      style={{
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 8,
+                                        borderRadius: 20,
+                                        borderWidth: 1.5,
+                                        borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
+                                        backgroundColor: isSelected ? (darkMode ? "#3e1c1c" : "#ffebee") : (darkMode ? "#1e1e2e" : "#fafafa"),
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: 6
+                                      }}
+                                    >
+                                      <Ionicons 
+                                        name={isSelected ? "checkbox" : "square-outline"} 
+                                        size={16} 
+                                        color={isSelected ? "#c62828" : (darkMode ? "#aaa" : "#757575")} 
+                                      />
+                                      <Text style={{ 
+                                        fontSize: 12, 
+                                        fontWeight: isSelected ? "bold" : "normal", 
+                                        color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#212121") 
+                                      }}>
+                                        {b.batchName} ({b.course || 'General'})
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            </View>
+                          );
+                        })()}
 
                         {/* Upload Method / Source Switcher */}
                         <View>
@@ -27784,9 +28128,30 @@ function MainApp() {
 
                     {/* Filter by Audience if Admin */}
                     {(() => {
-                      const myStudent = getLoggedInStudent(user, students);
-                      const myBatch = myStudent?.batch || myStudent?.batchName || "";
-                      const isPaid = (Number(myStudent?.feesPaid) > 0) || myStudent?.type === "paid" || (Number(myStudent?.totalFees) > 0 && Number(myStudent?.feesPaid) >= Number(myStudent?.totalFees));
+                      const myStudent = getLoggedInStudent(user, students) || user;
+                      const isPaid = (Number(myStudent?.feesPaid) > 0) || myStudent?.type === "paid" || user?.type === "paid" || (Number(myStudent?.totalFees) > 0 && Number(myStudent?.feesPaid) >= Number(myStudent?.totalFees));
+
+                      const studentBatchesList: string[] = [];
+                      if (myStudent?.batch) studentBatchesList.push(myStudent.batch);
+                      if (myStudent?.batchName) studentBatchesList.push(myStudent.batchName);
+                      if (user?.batch) studentBatchesList.push(user.batch);
+                      if (user?.batchName) studentBatchesList.push(user.batchName);
+                      const arrBatches = myStudent?.batches || user?.batches;
+                      if (Array.isArray(arrBatches)) {
+                        arrBatches.forEach((b: any) => {
+                          if (b) studentBatchesList.push(String(b));
+                        });
+                      }
+
+                      const matchBatch = (targetBatch: string, sList: string[]) => {
+                        if (!targetBatch || targetBatch === "all") return true;
+                        if (sList.length === 0) return true;
+                        const targets = targetBatch.split(",").map(b => b.trim().toLowerCase()).filter(Boolean);
+                        return sList.some(sb => {
+                          const s = sb.trim().toLowerCase();
+                          return targets.some(t => t === s || t.includes(s) || s.includes(t));
+                        });
+                      };
 
                       const filteredContent = lmsDailyContent.filter((c: any) => {
                         if (isAdmin) return true;
@@ -27795,7 +28160,7 @@ function MainApp() {
                         if (aud === "paid") return isPaid;
                         if (aud === "batch") {
                           if (!c.targetBatch) return true;
-                          return myBatch && String(c.targetBatch).trim().toLowerCase() === String(myBatch).trim().toLowerCase();
+                          return matchBatch(c.targetBatch, studentBatchesList);
                         }
                         return true;
                       });
@@ -30189,79 +30554,7 @@ function MainApp() {
                 )}
 
       {/* Universal Image Preview Modal */}
-      {previewImageUri !== null && (
-        <Modal
-          visible={true}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setPreviewImageUri(null)}
-        >
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
-            <View style={{ width: "90%", maxWidth: 650, maxHeight: "85%", backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 12, overflow: "hidden", padding: 16 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121" }}>{previewImageTitle}</Text>
-                <TouchableOpacity onPress={() => setPreviewImageUri(null)}>
-                  <Ionicons name="close-circle" size={26} color="#c62828" />
-                </TouchableOpacity>
-              </View>
-              <View style={{ alignItems: "center", justifyContent: "center", minHeight: 350 }}>
-                {previewImageUri ? (
-                  (() => {
-                    const getDriveId = (urlStr: string) => {
-                      if (!urlStr) return null;
-                      const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-                      const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-                      const m3 = urlStr.match(/\/d\/([a-zA-Z0-9_-]+)/);
-                      return m1 ? m1[1] : m2 ? m2[1] : m3 ? m3[1] : null;
-                    };
-                    const driveId = getDriveId(previewImageUri);
-                    const isDrive = !!driveId || previewImageUri.includes("drive.google.com");
-
-                    if (Platform.OS === 'web' && isDrive) {
-                      const directThumbnailUrl = driveId
-                        ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`
-                        : `https://lh3.googleusercontent.com/d/${driveId}=w1600`;
-                      const iframeUrl = driveId
-                        ? `https://drive.google.com/file/d/${driveId}/preview`
-                        : previewImageUri.replace(/\/view.*$/, "/preview").replace(/\/edit.*$/, "/preview");
-
-                      return (
-                        <View style={{ width: "100%", minHeight: 350, alignItems: "center", justifyContent: "center" }}>
-                          <img
-                            src={directThumbnailUrl}
-                            alt={previewImageTitle || "Preview"}
-                            style={{ maxWidth: "100%", maxHeight: "420px", objectFit: "contain", borderRadius: "8px" }}
-                            onError={(e) => {
-                              const target = e.target as HTMLElement;
-                              target.style.display = 'none';
-                              const iframeParent = target.parentElement?.querySelector('.drive-iframe-fallback') as HTMLElement;
-                              if (iframeParent) iframeParent.style.display = 'block';
-                            }}
-                          />
-                          <div className="drive-iframe-fallback" style={{ display: 'none', width: '100%', height: '420px', borderRadius: '8px', overflow: 'hidden' }}>
-                            <iframe
-                              src={iframeUrl}
-                              style={{ width: '100%', height: '100%', border: 'none' }}
-                              title={previewImageTitle || "Document Preview"}
-                            />
-                          </div>
-                        </View>
-                      );
-                    }
-
-                    return (
-                      <Image
-                        source={{ uri: previewImageUri }}
-                        style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
-                      />
-                    );
-                  })()
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
+      {renderUniversalImagePreviewModal()}
 
       {/* Floating AI Assistant Button (Across Authenticated Pages) - Hidden from UI */}
       {false && user && (
