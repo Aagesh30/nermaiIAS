@@ -2421,6 +2421,9 @@ function MainApp() {
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
   const [rolePermissions, setRolePermissions] = useState<any>({});
   const [oneTimePermissions, setOneTimePermissions] = useState<Record<string, number>>({});
+  // Approval-workflow states: track which featureKeys are being submitted or are pending super admin approval
+  const [submittingFeatures, setSubmittingFeatures] = useState<Set<string>>(new Set());
+  const [pendingSubmissions, setPendingSubmissions] = useState<string[]>([]);
   const [showDrawer, setShowDrawer] = useState(false);
   const [todayQuiz, setTodayQuiz] = useState<any>(null);
   const [allQuizzes, setAllQuizzes] = useState<any[]>([]);
@@ -2818,13 +2821,7 @@ function MainApp() {
   const [noticeTab, setNoticeTab] = useState<"notices" | "notifications">("notices");
   const [searchNoticeQuery, setSearchNoticeQuery] = useState("");
   const [searchNoticeDate, setSearchNoticeDate] = useState("");
-  const [noticeTick, setNoticeTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNoticeTick(prev => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // noticeTick removed — countdown display is no longer shown on student notice board
 
   const calculateExpiry = (timerOption: any, customExpiresAt: any) => {
     if (!timerOption || timerOption === "none") return null;
@@ -3608,7 +3605,11 @@ function MainApp() {
       if (u?.role) headers["user-role"] = u.role;
       return headers;
     },
-    handleResponse(res: Response, data: any) {
+     handleResponse(res: Response, data: any) {
+      if (res.status === 202 && data && data.approvalRequired) {
+        Alert.alert("Submitted for Approval", data.message || "Your change proposal has been submitted to Super Admin for review.");
+        return data;
+      }
       if (!res.ok) {
         if (res.status === 401 && (data.message === "Session revoked" || String(data.message).toLowerCase().includes("session revoked"))) {
           performLogout();
@@ -3834,7 +3835,9 @@ function MainApp() {
       if (rawRole === "edit_direct" || rawRole === "CRUD") return "edit_direct";
       return "edit_on_approval";
     }
-    return "edit_on_approval";
+    // Default: no permission configured = no access (security-first approach)
+    // Super admin / developer are already handled above and always get edit_direct
+    return "none";
   };
 
   const canEditDaily = isAdmin && (
@@ -3879,7 +3882,14 @@ function MainApp() {
         "Super Admin Approval Required",
         `Your admin account requires Super Admin approval to ${actionType} items in this section. Submit proposal for Super Admin review?`,
         async () => {
+          // Mark feature as submitting — shows loading spinner on buttons
+          setSubmittingFeatures(prev => {
+            const next = new Set(prev);
+            next.add(featureKey);
+            return next;
+          });
           try {
+            const userId = user?.userId || user?.user_id || user?.sub || user?.id;
             await api.post("/developer/collection/notifications", {
               type: actionType === "delete" ? "delete_approval" : actionType === "create" ? "create_approval" : "edit_approval",
               feature: featureKey,
@@ -3887,12 +3897,26 @@ function MainApp() {
               docId: docId || proposedPayload?.id || proposedPayload?._id || "new_document",
               proposedPayload,
               requestedBy: user?.name || user?.username || "Admin",
+              requestedByUserId: userId || "",
               status: "pending",
               createdAt: new Date().toISOString()
             });
-            Alert.alert("Submitted for Approval", "Your change proposal has been submitted to Super Admin for review.");
+            // Add to pending submissions list so UI can show pending badge
+            setPendingSubmissions(prev => [...prev.filter(k => k !== featureKey), featureKey]);
+            loadPendingApprovals();
+            Alert.alert(
+              "✅ Submitted for Approval",
+              `Your ${actionType} request has been submitted. The page will update automatically once the Super Admin approves it.`
+            );
           } catch (e: any) {
             Alert.alert("Error", e.message || "Failed to submit request.");
+          } finally {
+            // Clear submitting state
+            setSubmittingFeatures(prev => {
+              const next = new Set(prev);
+              next.delete(featureKey);
+              return next;
+            });
           }
         },
         "Submit Request",
@@ -3900,6 +3924,14 @@ function MainApp() {
       );
     }
   };
+
+  /** Returns true while an edit_on_approval request is being submitted for a feature */
+  const isSubmittingApproval = (featureKey: string): boolean => submittingFeatures.has(featureKey);
+
+  /** Returns true if a pending approval request exists for a feature (submitted but not yet approved) */
+  const hasPendingApproval = (featureKey: string): boolean =>
+    pendingSubmissions.includes(featureKey) ||
+    pendingApprovals.some((p: any) => p.feature === featureKey && p.status === "pending");
 
   const renderPermissionWrappedContent = (
     featureKey: string,
@@ -4686,6 +4718,39 @@ function MainApp() {
 
       const savedUser = await userStorage.get();
       if (savedUser && savedUser.role) {
+        // ── Session validity check (single-device policy) ─────────────────────
+        // Only run for authenticated (non-guest) users that have a stored token.
+        // This fires ONCE on page load — no polling.
+        if (savedUser.token && savedUser.role !== "guest") {
+          try {
+            const baseUrl = getBaseUrl();
+            const validationRes = await fetch(`${baseUrl}/auth/debug`, {
+              headers: {
+                "Authorization": `Bearer ${savedUser.token}`,
+                "Content-Type": "application/json"
+              }
+            });
+            const validationData = await validationRes.json().catch(() => ({}));
+            if (!validationRes.ok) {
+              // Session revoked (another device logged in) — clear local data
+              await userStorage.clear();
+              setUser(null);
+              setGuestTab("home");
+              setIsInitialLoading(false);
+              if (
+                String(validationData?.message).toLowerCase().includes("revoked") ||
+                String(validationData?.message).toLowerCase().includes("session")
+              ) {
+                // Show toast after a short delay so the UI has settled
+                setTimeout(() => showToast("Logged out: Your account was signed in on another device.", "error"), 500);
+              }
+              return;
+            }
+          } catch (sessionCheckErr) {
+            // Network error — restore session optimistically (offline resilience)
+            console.log("[SessionCheck] Could not validate session (offline?), restoring locally:", sessionCheckErr);
+          }
+        }
         setUser(savedUser);
         return;
       }
@@ -4839,6 +4904,69 @@ function MainApp() {
     if (!user || user.role !== "student" || students.length === 0) return;
     loadTests();
   }, [students]);
+
+  // ── Real-time approval sync ──────────────────────────────────────────────────
+  // For non-super_admin staff: listen to the notifications collection for this
+  // user's own pending requests. When super admin approves or rejects one,
+  // auto-reload the relevant data collection and clear the pending badge —
+  // no manual page refresh needed.
+  useEffect(() => {
+    const userId = user?.userId || user?.user_id || user?.sub || user?.id;
+    if (!userId || !user || user.role === "student" || user.role === "super_admin" || user.role === "developer") return;
+
+    // Data-reload mapping: featureKey → loader function
+    const getFeatureReloaders = (): Record<string, () => void> => ({
+      student_management: loadStudents,
+      staff_management: loadStaff,
+      batch_management: loadBatches,
+      fees_management: loadStudents,
+      marks_management: loadStudents,
+      lms_daily_content: loadLmsDailyContent,
+      lms_quiz_posting: loadTodayQuiz,
+      lms_live_classes: loadLiveSessions,
+      lms_recorded_videos: loadRecordedClasses,
+      lms_resources: loadLmsResources,
+      lms_courses: loadLmsCourses,
+      admissions: loadAdmissions,
+      leads: loadLeads,
+      campaigns: loadCampaigns,
+      alumni_feedback: loadFeedback,
+      test_creation: loadTests,
+      question_bank: loadQuestions,
+      examinations: loadTests,
+      test_results: loadTests,
+    });
+
+    let unsub: (() => void) | undefined;
+    try {
+      // Listen to notifications that belong to this user
+      const notificationsRef = collection(db, "notifications");
+      unsub = onSnapshot(notificationsRef, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type !== "modified") return;
+          const data = change.doc.data();
+          // Only react to our own submissions that have just been resolved
+          if (data.requestedByUserId !== userId) return;
+          if (data.status !== "approved" && data.status !== "rejected") return;
+
+          // If approved → reload relevant collection so data appears immediately
+          if (data.status === "approved") {
+            const reloaders = getFeatureReloaders();
+            reloaders[data.feature]?.();
+          }
+
+          // Remove from pendingSubmissions regardless of outcome
+          setPendingSubmissions(prev => prev.filter(k => k !== data.feature));
+          // Refresh the pending approvals banner
+          loadPendingApprovals();
+        });
+      });
+    } catch (e) {
+      console.log("[ApprovalSync] Failed to attach real-time listener:", e);
+    }
+
+    return () => { if (unsub) unsub(); };
+  }, [user?.userId]);
 
   useEffect(() => {
     if (showFeedbackModal && user) {
@@ -5007,6 +5135,46 @@ function MainApp() {
     }, 60000); // 60 seconds
     return () => clearInterval(interval);
   }, [user, activeTab, testSub]);
+
+  // ── Session revocation check on tab visibility (single-device policy) ─────────
+  // Fires once each time the tab becomes visible again (event-driven, not polling).
+  // If the backend reports the session is revoked (another device logged in),
+  // the user is logged out immediately with an explanatory toast.
+  useEffect(() => {
+    if (!user || user.role === "guest" || !user.token || Platform.OS !== "web") return;
+
+    const checkSessionOnFocus = async () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      try {
+        const baseUrl = getBaseUrl();
+        const res = await fetch(`${baseUrl}/auth/debug`, {
+          headers: { "Authorization": `Bearer ${user.token}` }
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (
+            String(data?.message).toLowerCase().includes("revoked") ||
+            String(data?.message).toLowerCase().includes("session") ||
+            res.status === 401
+          ) {
+            await performLogout();
+            showToast("Logged out: Your account was signed in on another device.", "error");
+          }
+        }
+      } catch (_) {
+        // Network error — stay logged in (offline resilience)
+      }
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", checkSessionOnFocus);
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", checkSessionOnFocus);
+      }
+    };
+  }, [user]);
 
   // Waiting room countdown timer — ticks every second when a student is in the waiting room
   useEffect(() => {
@@ -5254,7 +5422,9 @@ function MainApp() {
           const isFeeAlert = (ann.title || "").includes("Fee Payment Alert") ||
             (ann.content || "").toLowerCase().includes("pay your pending") ||
             (ann.content || "").toLowerCase().includes("pending tuition fee");
-          if (!isFeeAlert) return true;
+          const isProfileAlert = (ann.title || "").toLowerCase().includes("complete your profile") ||
+            (ann.content || "").toLowerCase().includes("complete your profile");
+          if (!isFeeAlert && !isProfileAlert) return true;
           const lowerTitle = (ann.title || "").toLowerCase();
           const lowerContent = (ann.content || "").toLowerCase();
           const stdNameLower = myStudentName.toLowerCase().trim();
@@ -5488,6 +5658,30 @@ function MainApp() {
             status: "approved",
             updatedAt: new Date().toISOString()
           });
+
+          // ── Auto-reload the relevant collection so data is up-to-date immediately ──
+          const featureReloaders: Record<string, () => void> = {
+            student_management: loadStudents,
+            staff_management: loadStaff,
+            batch_management: loadBatches,
+            fees_management: loadStudents,
+            marks_management: loadStudents,
+            lms_daily_content: loadLmsDailyContent,
+            lms_quiz_posting: loadTodayQuiz,
+            lms_live_classes: loadLiveSessions,
+            lms_recorded_videos: loadRecordedClasses,
+            lms_resources: loadLmsResources,
+            lms_courses: loadLmsCourses,
+            admissions: loadAdmissions,
+            leads: loadLeads,
+            campaigns: loadCampaigns,
+            alumni_feedback: loadFeedback,
+            test_creation: loadTests,
+            question_bank: loadQuestions,
+            examinations: loadTests,
+            test_results: loadTests,
+          };
+          featureReloaders[item.feature]?.();
 
           Alert.alert("Approved & Applied", `Request approved and ${actionTitle.toLowerCase()} action applied successfully.`);
           loadPendingApprovals();
@@ -10942,44 +11136,29 @@ function MainApp() {
                   </View>
 
                   {/* Target Audience / Access Selector */}
-                  <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={{ gap: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Audience / Access</Text>
                       <select
                         value={liveClassForm.accessLevel}
-                        onChange={e => setLiveClassForm({ ...liveClassForm, accessLevel: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setLiveClassForm({
+                            ...liveClassForm,
+                            accessLevel: val,
+                            batchTargetType: val === "batch" ? "select" : "all"
+                          });
+                        }}
                         style={{
                           width: "100%", height: 38, borderRadius: 8, padding: 8,
                           backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="premium">All Enrolled Students</option>
-                        <option value="free">All Students (Free & Paid)</option>
-                        <option value="batch">Specific Batch</option>
+                        <option value="premium">All Enrolled Users</option>
+                        <option value="batch">Enrolled Users Batch Wise</option>
                       </select>
                     </View>
-
-                    {liveClassForm.accessLevel === "batch" && (
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Batch Type</Text>
-                        <select
-                          value={liveClassForm.batchTargetType || "all"}
-                          onChange={e => setLiveClassForm({ ...liveClassForm, batchTargetType: e.target.value })}
-                          style={{
-                            width: "100%", height: 38, borderRadius: 8, padding: 8,
-                            backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                            border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
-                          }}
-                        >
-                          <option value="all">All Users</option>
-                          <option value="all_paid">All Enrolled Users</option>
-                          <option value="all_free">All Free Users</option>
-                          <option value="erp">ERP Batches (All)</option>
-                          <option value="select">Select Specific Batches</option>
-                        </select>
-                      </View>
-                    )}
                   </View>
 
                   {liveClassForm.accessLevel === "batch" && liveClassForm.batchTargetType === "select" && (
@@ -11440,44 +11619,29 @@ function MainApp() {
                   </View>
 
                   {/* Target Audience / Access Selector */}
-                  <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View style={{ gap: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Audience / Access</Text>
                       <select
                         value={recordedClassForm.accessLevel}
-                        onChange={e => setRecordedClassForm({ ...recordedClassForm, accessLevel: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setRecordedClassForm({
+                            ...recordedClassForm,
+                            accessLevel: val,
+                            batchTargetType: val === "batch" ? "select" : "all"
+                          });
+                        }}
                         style={{
                           width: "100%", height: 38, borderRadius: 8, padding: 8,
                           backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
                           border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
                         }}
                       >
-                        <option value="premium">All Enrolled Students</option>
-                        <option value="free">All Students (Free & Enrolled)</option>
-                        <option value="batch">Specific Batch</option>
+                        <option value="premium">All Enrolled Users</option>
+                        <option value="batch">Enrolled Users Batch Wise</option>
                       </select>
                     </View>
-
-                    {recordedClassForm.accessLevel === "batch" && (
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.label, darkMode && { color: "#aaa" }]}>Target Batch Type</Text>
-                        <select
-                          value={recordedClassForm.batchTargetType || "all"}
-                          onChange={e => setRecordedClassForm({ ...recordedClassForm, batchTargetType: e.target.value })}
-                          style={{
-                            width: "100%", height: 38, borderRadius: 8, padding: 8,
-                            backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
-                            border: "1px solid " + (darkMode ? "#444" : "#e0e0e0")
-                          }}
-                        >
-                          <option value="all">All Users</option>
-                          <option value="all_paid">All Enrolled Users</option>
-                          <option value="all_free">All Free Users</option>
-                          <option value="erp">ERP Batches (All)</option>
-                          <option value="select">Select Specific Batches</option>
-                        </select>
-                      </View>
-                    )}
                   </View>
 
                   {recordedClassForm.accessLevel === "batch" && recordedClassForm.batchTargetType === "select" && (
@@ -15777,12 +15941,7 @@ function MainApp() {
                                   <Text style={{ fontSize: 10, fontWeight: "bold", color: n.priority === "high" ? "#c62828" : "#1976d2" }}>Batch: {n.targetBatch}</Text>
                                 </View>
                               )}
-                              {expiryText && (
-                                <View style={{ alignSelf: "flex-start", backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 3 }}>
-                                  <Ionicons name="time-outline" size={10} color="#c62828" />
-                                  <Text style={{ fontSize: 10, fontWeight: "bold", color: "#c62828" }}>Expires in: {expiryText}</Text>
-                                </View>
-                              )}
+                              {/* Expiry timer removed */}
                             </View>
                           </View>
                           );
@@ -22840,42 +22999,46 @@ function MainApp() {
                                       <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
                                         <TouchableOpacity
                                           disabled={isBulkGenerating}
-                                          onPress={async () => {
-                                            try {
-                                              setIsBulkGenerating(true);
-                                              if (generationMode === "individual") {
-                                                await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                                  idCardGenerated: true,
-                                                  idCardExpiry,
-                                                  idCardRole,
-                                                  idCardTheme
-                                                });
-                                                Alert.alert("Success", "ID Card generated and saved successfully!");
-                                                setSelectedIdStudent({
-                                                  ...selectedIdStudent,
-                                                  idCardGenerated: true,
-                                                  idCardExpiry,
-                                                  idCardRole,
-                                                  idCardTheme
-                                                });
-                                              } else {
-                                                const res = await api.post("/erp/student/bulk/credentials", {
-                                                  batch: selectedBatchForGen,
-                                                  targetGroup: bulkTargetGroup,
-                                                  type: "idcard",
-                                                  idCardGenerated: true,
-                                                  idCardExpiry,
-                                                  idCardRole,
-                                                  idCardTheme
-                                                });
-                                                Alert.alert("Success", res.message || "Batch ID Cards generated successfully!");
-                                              }
-                                              loadStudents();
-                                            } catch (e: any) {
-                                              Alert.alert("Error", e.message || "Failed to generate ID card(s)");
-                                            } finally {
-                                              setIsBulkGenerating(false);
-                                            }
+                                          onPress={() => {
+                                            const payload = {
+                                              idCardGenerated: true,
+                                              idCardExpiry,
+                                              idCardRole,
+                                              idCardTheme
+                                            };
+                                            executeEditOrApproval(
+                                              "id_card",
+                                              "edit",
+                                              payload,
+                                              async () => {
+                                                try {
+                                                  setIsBulkGenerating(true);
+                                                  if (generationMode === "individual") {
+                                                    await api.put(`/erp/student/${selectedIdStudent.id}`, payload);
+                                                    Alert.alert("Success", "ID Card generated and saved successfully!");
+                                                    setSelectedIdStudent({
+                                                      ...selectedIdStudent,
+                                                      ...payload
+                                                    });
+                                                  } else {
+                                                    const res = await api.post("/erp/student/bulk/credentials", {
+                                                      batch: selectedBatchForGen,
+                                                      targetGroup: bulkTargetGroup,
+                                                      type: "idcard",
+                                                      ...payload
+                                                    });
+                                                    Alert.alert("Success", res.message || "Batch ID Cards generated successfully!");
+                                                  }
+                                                  loadStudents();
+                                                } catch (e: any) {
+                                                  Alert.alert("Error", e.message || "Failed to generate ID card(s)");
+                                                } finally {
+                                                  setIsBulkGenerating(false);
+                                                }
+                                              },
+                                              "students",
+                                              generationMode === "individual" ? selectedIdStudent.id : "bulk"
+                                            );
                                           }}
                                           style={[styles.primaryBtn, { flex: 1, backgroundColor: "#2e7d32", opacity: isBulkGenerating ? 0.6 : 1 }]}
                                         >
@@ -22887,34 +23050,42 @@ function MainApp() {
                                         {((generationMode === "individual" && selectedIdStudent?.idCardGenerated) || generationMode === "batch") && (
                                           <TouchableOpacity
                                             disabled={isBulkGenerating}
-                                            onPress={async () => {
-                                              try {
-                                                setIsBulkGenerating(true);
-                                                if (generationMode === "individual") {
-                                                  await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                                    idCardGenerated: false
-                                                  });
-                                                  Alert.alert("Success", "ID Card status revoked.");
-                                                  setSelectedIdStudent({
-                                                    ...selectedIdStudent,
-                                                    idCardGenerated: false
-                                                  });
-                                                } else {
-                                                  const res = await api.post("/erp/student/bulk/credentials", {
-                                                    batch: selectedBatchForGen,
-                                                    targetGroup: bulkTargetGroup,
-                                                    type: "idcard",
-                                                    idCardGenerated: false
-                                                  });
-                                                  Alert.alert("Success", res.message || "Batch ID Cards revoked successfully.");
-                                                }
-                                                loadStudents();
-                                              } catch (e: any) {
-                                                Alert.alert("Error", e.message || "Failed to revoke ID card(s)");
-                                              } finally {
-                                                setIsBulkGenerating(false);
-                                              }
-                                            }}
+                                            onPress={() => {
+                                               const payload = { idCardGenerated: false };
+                                               executeEditOrApproval(
+                                                 "id_card",
+                                                 "edit",
+                                                 payload,
+                                                 async () => {
+                                                   try {
+                                                     setIsBulkGenerating(true);
+                                                     if (generationMode === "individual") {
+                                                       await api.put(`/erp/student/${selectedIdStudent.id}`, payload);
+                                                       Alert.alert("Success", "ID Card status revoked.");
+                                                       setSelectedIdStudent({
+                                                         ...selectedIdStudent,
+                                                         ...payload
+                                                       });
+                                                     } else {
+                                                       const res = await api.post("/erp/student/bulk/credentials", {
+                                                         batch: selectedBatchForGen,
+                                                         targetGroup: bulkTargetGroup,
+                                                         type: "idcard",
+                                                         ...payload
+                                                       });
+                                                       Alert.alert("Success", res.message || "Batch ID Cards revoked successfully.");
+                                                     }
+                                                     loadStudents();
+                                                   } catch (e: any) {
+                                                     Alert.alert("Error", e.message || "Failed to revoke ID card(s)");
+                                                   } finally {
+                                                     setIsBulkGenerating(false);
+                                                   }
+                                                 },
+                                                 "students",
+                                                 generationMode === "individual" ? selectedIdStudent.id : "bulk"
+                                               );
+                                             }}
                                             style={[styles.primaryBtn, { flex: 1, backgroundColor: "#c62828", opacity: isBulkGenerating ? 0.6 : 1 }]}
                                           >
                                             <Text style={styles.primaryBtnTxt}>
@@ -23002,49 +23173,49 @@ function MainApp() {
                                       <View style={{ flexDirection: "row", gap: 10, marginTop: 15 }}>
                                         <TouchableOpacity
                                           disabled={isBulkGenerating}
-                                          onPress={async () => {
-                                            try {
-                                              setIsBulkGenerating(true);
-                                              if (generationMode === "individual") {
-                                                await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                                  hallTicketGenerated: true,
-                                                  hallTicketExamName,
-                                                  hallTicketExamDate,
-                                                  hallTicketVenue,
-                                                  hallTicketTime,
-                                                  hallTicketInstructions
-                                                });
-                                                Alert.alert("Success", "Hall Ticket generated and saved successfully!");
-                                                setSelectedIdStudent({
-                                                  ...selectedIdStudent,
-                                                  hallTicketGenerated: true,
-                                                  hallTicketExamName,
-                                                  hallTicketExamDate,
-                                                  hallTicketVenue,
-                                                  hallTicketTime,
-                                                  hallTicketInstructions
-                                                });
-                                              } else {
-                                                const res = await api.post("/erp/student/bulk/credentials", {
-                                                  batch: selectedBatchForGen,
-                                                  targetGroup: bulkTargetGroup,
-                                                  type: "hallticket",
-                                                  hallTicketGenerated: true,
-                                                  hallTicketExamName,
-                                                  hallTicketExamDate,
-                                                  hallTicketVenue,
-                                                  hallTicketTime,
-                                                  hallTicketInstructions
-                                                });
-                                                Alert.alert("Success", res.message || "Batch Hall Tickets generated successfully!");
-                                              }
-                                              loadStudents();
-                                            } catch (e: any) {
-                                              Alert.alert("Error", e.message || "Failed to generate Hall Ticket(s)");
-                                            } finally {
-                                              setIsBulkGenerating(false);
-                                            }
-                                          }}
+                                          onPress={() => {
+                                             const payload = {
+                                               hallTicketGenerated: true,
+                                               hallTicketExamName,
+                                               hallTicketExamDate,
+                                               hallTicketVenue,
+                                               hallTicketTime,
+                                               hallTicketInstructions
+                                             };
+                                             executeEditOrApproval(
+                                               "hall_ticket",
+                                               "edit",
+                                               payload,
+                                               async () => {
+                                                 try {
+                                                   setIsBulkGenerating(true);
+                                                   if (generationMode === "individual") {
+                                                     await api.put(`/erp/student/${selectedIdStudent.id}`, payload);
+                                                     Alert.alert("Success", "Hall Ticket generated and saved successfully!");
+                                                     setSelectedIdStudent({
+                                                       ...selectedIdStudent,
+                                                       ...payload
+                                                     });
+                                                   } else {
+                                                     const res = await api.post("/erp/student/bulk/credentials", {
+                                                       batch: selectedBatchForGen,
+                                                       targetGroup: bulkTargetGroup,
+                                                       type: "hallticket",
+                                                       ...payload
+                                                     });
+                                                     Alert.alert("Success", res.message || "Batch Hall Tickets generated successfully!");
+                                                   }
+                                                   loadStudents();
+                                                 } catch (e: any) {
+                                                   Alert.alert("Error", e.message || "Failed to generate Hall Ticket(s)");
+                                                 } finally {
+                                                   setIsBulkGenerating(false);
+                                                 }
+                                               },
+                                               "students",
+                                               generationMode === "individual" ? selectedIdStudent.id : "bulk"
+                                             );
+                                           }}
                                           style={[styles.primaryBtn, { flex: 1, backgroundColor: "#2e7d32", opacity: isBulkGenerating ? 0.6 : 1 }]}
                                         >
                                           <Text style={styles.primaryBtnTxt}>
@@ -23055,34 +23226,42 @@ function MainApp() {
                                         {((generationMode === "individual" && selectedIdStudent?.hallTicketGenerated) || generationMode === "batch") && (
                                           <TouchableOpacity
                                             disabled={isBulkGenerating}
-                                            onPress={async () => {
-                                              try {
-                                                setIsBulkGenerating(true);
-                                                if (generationMode === "individual") {
-                                                  await api.put(`/erp/student/${selectedIdStudent.id}`, {
-                                                    hallTicketGenerated: false
-                                                  });
-                                                  Alert.alert("Success", "Hall Ticket status revoked.");
-                                                  setSelectedIdStudent({
-                                                    ...selectedIdStudent,
-                                                    hallTicketGenerated: false
-                                                  });
-                                                } else {
-                                                  const res = await api.post("/erp/student/bulk/credentials", {
-                                                    batch: selectedBatchForGen,
-                                                    targetGroup: bulkTargetGroup,
-                                                    type: "hallticket",
-                                                    hallTicketGenerated: false
-                                                  });
-                                                  Alert.alert("Success", res.message || "Batch Hall Tickets revoked successfully.");
-                                                }
-                                                loadStudents();
-                                              } catch (e: any) {
-                                                Alert.alert("Error", e.message || "Failed to revoke Hall Ticket(s)");
-                                              } finally {
-                                                setIsBulkGenerating(false);
-                                              }
-                                            }}
+                                            onPress={() => {
+                                               const payload = { hallTicketGenerated: false };
+                                               executeEditOrApproval(
+                                                 "hall_ticket",
+                                                 "edit",
+                                                 payload,
+                                                 async () => {
+                                                   try {
+                                                     setIsBulkGenerating(true);
+                                                     if (generationMode === "individual") {
+                                                       await api.put(`/erp/student/${selectedIdStudent.id}`, payload);
+                                                       Alert.alert("Success", "Hall Ticket status revoked.");
+                                                       setSelectedIdStudent({
+                                                         ...selectedIdStudent,
+                                                         ...payload
+                                                       });
+                                                     } else {
+                                                       const res = await api.post("/erp/student/bulk/credentials", {
+                                                         batch: selectedBatchForGen,
+                                                         targetGroup: bulkTargetGroup,
+                                                         type: "hallticket",
+                                                         ...payload
+                                                       });
+                                                       Alert.alert("Success", res.message || "Batch Hall Tickets revoked successfully.");
+                                                     }
+                                                     loadStudents();
+                                                   } catch (e: any) {
+                                                     Alert.alert("Error", e.message || "Failed to revoke Hall Ticket(s)");
+                                                   } finally {
+                                                     setIsBulkGenerating(false);
+                                                   }
+                                                 },
+                                                 "students",
+                                                 generationMode === "individual" ? selectedIdStudent.id : "bulk"
+                                               );
+                                             }}
                                             style={[styles.primaryBtn, { flex: 1, backgroundColor: "#c62828", opacity: isBulkGenerating ? 0.6 : 1 }]}
                                           >
                                             <Text style={styles.primaryBtnTxt}>
@@ -27801,7 +27980,7 @@ function MainApp() {
                   <LMSProvider>
                     <>
                       {/* Admin — Course Management */}
-                      {isAdmin && lmsSub === 'lms-courses' && CoursesPage && (
+                      {isAdmin && lmsSub === 'lms-courses' && CoursesPage && getFeatureAccess('lms_courses') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNCardGridSkeleton count={6} darkMode={darkMode} />}>
                             <CoursesPage />
@@ -27809,7 +27988,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Teacher Management */}
-                      {isAdmin && lmsSub === 'lms-teachers' && TeachersPage && (
+                      {isAdmin && lmsSub === 'lms-teachers' && TeachersPage && getFeatureAccess('lms_teachers') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <TeachersPage />
@@ -27817,7 +27996,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Subject Management */}
-                      {isAdmin && lmsSub === 'lms-subjects' && SubjectsPage && (
+                      {isAdmin && lmsSub === 'lms-subjects' && SubjectsPage && getFeatureAccess('lms_subjects') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <SubjectsPage />
@@ -27825,7 +28004,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Topic Management */}
-                      {isAdmin && lmsSub === 'lms-topics' && TopicsPage && (
+                      {isAdmin && lmsSub === 'lms-topics' && TopicsPage && getFeatureAccess('lms_topics') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <TopicsPage />
@@ -27833,7 +28012,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Subtopic Management */}
-                      {isAdmin && lmsSub === 'lms-subtopics' && SubtopicsPage && (
+                      {isAdmin && lmsSub === 'lms-subtopics' && SubtopicsPage && getFeatureAccess('lms_subtopics') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <SubtopicsPage />
@@ -27841,7 +28020,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Class Management */}
-                      {isAdmin && lmsSub === 'lms-classes' && ClassesPage && (
+                      {isAdmin && lmsSub === 'lms-classes' && ClassesPage && getFeatureAccess('lms_classes') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <ClassesPage />
@@ -27849,7 +28028,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Resource Management */}
-                      {isAdmin && lmsSub === 'lms-resources' && ResourcesPage && (
+                      {isAdmin && lmsSub === 'lms-resources' && ResourcesPage && getFeatureAccess('lms_resource_mgmt') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <ResourcesPage />
@@ -27857,7 +28036,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Videos */}
-                      {isAdmin && lmsSub === 'lms-videos' && VideosPage && (
+                      {isAdmin && lmsSub === 'lms-videos' && VideosPage && getFeatureAccess('lms_video_library') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNCardGridSkeleton count={4} darkMode={darkMode} />}>
                             <VideosPage />
@@ -27865,7 +28044,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Live Sessions */}
-                      {isAdmin && lmsSub === 'lms-live-sessions' && LiveSessionsPage && (
+                      {isAdmin && lmsSub === 'lms-live-sessions' && LiveSessionsPage && getFeatureAccess('lms_live_sessions') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <LiveSessionsPage />
@@ -27873,7 +28052,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Provider Accounts */}
-                      {isAdmin && lmsSub === 'lms-providers' && ProviderAccountsPage && (
+                      {isAdmin && lmsSub === 'lms-providers' && ProviderAccountsPage && getFeatureAccess('lms_provider_mgmt') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
                             <ProviderAccountsPage />
@@ -27881,7 +28060,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Zoom SDK Accounts */}
-                      {isAdmin && lmsSub === 'lms-zoom-accounts' && ZoomAccountsPage && (
+                      {isAdmin && lmsSub === 'lms-zoom-accounts' && ZoomAccountsPage && getFeatureAccess('lms_zoom_accounts') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
                             <ZoomAccountsPage />
@@ -27889,7 +28068,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Syllabus Tracker */}
-                      {(isAdmin || isTeacher) && lmsSub === 'lms-syllabus' && SyllabusTrackerPage && (
+                      {(isAdmin || isTeacher) && lmsSub === 'lms-syllabus' && SyllabusTrackerPage && getFeatureAccess('lms_syllabus') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={5} darkMode={darkMode} />}>
                             <SyllabusTrackerPage />
@@ -27897,7 +28076,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — Access Control */}
-                      {isAdmin && lmsSub === 'lms-access' && AccessControlPage && (
+                      {isAdmin && lmsSub === 'lms-access' && AccessControlPage && getFeatureAccess('lms_sacs_access') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <AccessControlPage />
@@ -27905,7 +28084,7 @@ function MainApp() {
                         </View>
                       )}
                       {/* Admin — NERMAI AI Studio (KnowledgeStudio) */}
-                      {isAdmin && lmsSub === 'lms-chatbot' && KnowledgeStudio && (
+                      {isAdmin && lmsSub === 'lms-chatbot' && KnowledgeStudio && getFeatureAccess('lms_chatbot_cms') !== 'none' && (
                         <View style={{ flex: 1, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNContainerSkeleton rows={2} darkMode={darkMode} />}>
                             <KnowledgeStudio />
@@ -29500,28 +29679,38 @@ function MainApp() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={async () => {
+                  onPress={() => {
                     const tot = Number(feeEditStudent.totalFees) || 0;
                     const paid = Number(feeEditStudent.feesPaid) || 0;
                     if (paid > tot) {
                       Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
                       return;
                     }
-                    try {
-                      await api.put(`/erp/student/${feeEditStudent.id}`, {
-                        totalFees: feeEditStudent.totalFees,
-                        feesPaid: feeEditStudent.feesPaid,
-                        modeOfPayment: feeEditModeOfPayment,
-                        transactionId: feeEditTransactionId
-                      });
-                      setFeeEditStudent(null);
-                      setFeeEditModeOfPayment("cash");
-                      setFeeEditTransactionId("");
-                      loadStudents();
-                      Alert.alert("Success", "Student fee details updated successfully.");
-                    } catch (err: any) {
-                      Alert.alert("Error", err.message || "Failed to update fees.");
-                    }
+                    const payload = {
+                      totalFees: feeEditStudent.totalFees,
+                      feesPaid: feeEditStudent.feesPaid,
+                      modeOfPayment: feeEditModeOfPayment,
+                      transactionId: feeEditTransactionId
+                    };
+                    executeEditOrApproval(
+                      "fees_management",
+                      "edit",
+                      payload,
+                      async () => {
+                        try {
+                          await api.put(`/erp/student/${feeEditStudent.id}`, payload);
+                          setFeeEditStudent(null);
+                          setFeeEditModeOfPayment("cash");
+                          setFeeEditTransactionId("");
+                          loadStudents();
+                          Alert.alert("Success", "Student fee details updated successfully.");
+                        } catch (err: any) {
+                          Alert.alert("Error", err.message || "Failed to update fees.");
+                        }
+                      },
+                      "students",
+                      feeEditStudent.id
+                    );
                   }}
                   style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, backgroundColor: "#0288d1" }}
                 >

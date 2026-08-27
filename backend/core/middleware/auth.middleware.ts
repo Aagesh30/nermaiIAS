@@ -192,6 +192,54 @@ export const requirePermission = (featureKey: string, action: 'C' | 'R' | 'U' | 
       }
 
       // Block direct writes for other permission levels (e.g., 'view', 'edit_on_approval')
+      if (perm === 'edit_on_approval') {
+        const actionType = action === 'C' ? 'create' : action === 'D' ? 'delete' : 'edit';
+        
+        let targetCollection = featureKey;
+        const pathLower = req.originalUrl.toLowerCase();
+        if (pathLower.includes('/erp/student')) targetCollection = 'students';
+        else if (pathLower.includes('/erp/batch')) targetCollection = 'batches';
+        else if (pathLower.includes('/erp/staff')) targetCollection = 'staff';
+        else if (pathLower.includes('/lms/daily-content')) targetCollection = 'daily-content';
+        else if (pathLower.includes('/lms/daily-quiz')) targetCollection = 'daily-quiz';
+        else if (pathLower.includes('/resources')) targetCollection = 'resources';
+        else if (pathLower.includes('/classes')) targetCollection = 'classes';
+        else if (pathLower.includes('/live-sessions')) targetCollection = 'live-sessions';
+        else if (pathLower.includes('/crm/campaigns')) targetCollection = 'campaigns';
+        else if (pathLower.includes('/announcement')) targetCollection = 'announcements';
+        else if (pathLower.includes('/notification')) targetCollection = 'notifications';
+        else if (pathLower.includes('/test-portal/test-creation')) targetCollection = 'tests';
+        
+        let docId = req.params.id || req.params.docId || req.body.id || req.body._id;
+        if (!docId) {
+          const parts = req.originalUrl.split('?')[0].split('/');
+          const lastSegment = parts[parts.length - 1];
+          if (lastSegment && lastSegment !== 'student' && lastSegment !== 'batch' && lastSegment !== 'staff' && lastSegment !== 'daily-content' && lastSegment !== 'daily-quiz' && lastSegment !== 'test-creation') {
+            docId = lastSegment;
+          } else {
+            docId = 'new_document';
+          }
+        }
+        
+        await db.collection('notifications').add({
+          type: actionType === 'delete' ? 'delete_approval' : actionType === 'create' ? 'create_approval' : 'edit_approval',
+          feature: featureKey,
+          targetCollection: targetCollection,
+          docId: docId,
+          proposedPayload: req.body || {},
+          requestedBy: req.user.name || req.user.username || 'Staff',
+          requestedByUserId: req.user.userId,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+
+        return res.status(202).json({
+          success: true,
+          approvalRequired: true,
+          message: 'Your request has been submitted to the Super Admin for approval.'
+        });
+      }
+
       return next(new AppError(`Forbidden: Direct edit permission denied for ${featureKey}. Access level: ${perm}`, 403));
 
     } catch (err: any) {

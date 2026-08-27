@@ -7,11 +7,16 @@ import bcrypt from 'bcrypt';
 import { SessionService, DeviceInfo } from '../../core/security/sessions/SessionService';
 import { logger } from '../../core/logger';
 
-// ─── New Device Alert Helper ───────────────────────────────────────────────────
+// ─── Single-Device Policy Enforcement ─────────────────────────────────────────
 /**
- * Fire-and-forget: checks if the current login is from a new/unknown device.
- * If so, writes a device_alerts record to Firestore for admin visibility in ERP.
- * Never throws — login must not be impacted.
+ * Fire-and-forget: enforces a single-device login policy.
+ * On every new login, ALL previously active sessions for this user are revoked
+ * immediately, ensuring only one device can be logged in at a time.
+ *
+ * If prior sessions were displaced, writes a device_alert record to Firestore
+ * so the admin can see the event in the ERP dashboard.
+ *
+ * Never throws — login must not be impacted by this function.
  */
 async function checkAndAlertNewDevice(
   userId: string,
@@ -21,30 +26,23 @@ async function checkAndAlertNewDevice(
   currentSessionId: string
 ): Promise<void> {
   try {
-    // Fetch existing active sessions for this user
+    // Fetch all currently active sessions for this user
     const priorSessions = await SessionService.listActiveSessions(userId);
 
-    // Filter out the current session we just created
+    // Exclude the session we just created (it's already in the list)
     const activeOldSessions = priorSessions.filter(s => s.sessionId !== currentSessionId);
 
-    // Determine a fingerprint for the current login
-    const currentIp = currentDevice.ip || '';
-    const currentDeviceId = currentDevice.deviceId || '';
-    const currentUa = currentDevice.userAgent || '';
-
-    // Only check if the user has other active sessions
+    // Nothing to do if this is a fresh login with no competing sessions
     if (activeOldSessions.length === 0) return;
 
-    // Check if ANY of the other active sessions matches this device (by deviceId or IP)
-    const isKnownDevice = activeOldSessions.some(s => {
-      if (currentDeviceId && s.deviceId && s.deviceId === currentDeviceId) return true;
-      if (currentIp && s.ip && s.ip === currentIp) return true;
-      return false;
-    });
+    const currentIp = currentDevice.ip || '';
 
-    if (isKnownDevice) return; // Already known — no alert needed
+    // ── Single-device policy: revoke ALL prior sessions immediately ─────────
+    for (const oldSession of activeOldSessions) {
+      await SessionService.revoke(oldSession.sessionId, 'NEW_DEVICE_LOGIN');
+    }
 
-    // New device detected — write alert to Firestore
+    // ── Notify admin that a prior session was displaced ─────────────────────
     await db.collection('device_alerts').add({
       userId,
       userName,
@@ -54,26 +52,22 @@ async function checkAndAlertNewDevice(
       loginPlatform: currentDevice.platform || 'unknown',
       loginOs: currentDevice.os || '',
       loginBrowser: currentDevice.browser || '',
-      loginUserAgent: currentUa,
-      loginDeviceId: currentDeviceId,
-      knownDeviceCount: activeOldSessions.length,
+      loginUserAgent: currentDevice.userAgent || '',
+      loginDeviceId: currentDevice.deviceId || '',
+      displacedSessionCount: activeOldSessions.length,
       acknowledged: false,
       acknowledgedBy: null,
       acknowledgedByName: null,
       acknowledgedAt: null,
     });
 
-    // Revoke all previous active sessions to force logout on other devices
-    for (const oldSession of activeOldSessions) {
-      await SessionService.revoke(oldSession.sessionId, 'NEW_DEVICE_LOGIN');
-    }
-
     logger.warn(
-      `[DeviceAlert] New device login detected for user ${userId} (${userName}) from IP ${currentIp}. Revoked ${activeOldSessions.length} older sessions.`
+      `[SingleDevicePolicy] New login for user ${userId} (${userName}) from IP ${currentIp}. ` +
+      `Revoked ${activeOldSessions.length} prior session(s) and notified admin.`
     );
   } catch (err) {
     // Non-fatal — never let this block the login response
-    logger.error('[DeviceAlert] Failed to process device check (non-fatal):', err);
+    logger.error('[SingleDevicePolicy] Failed to process device check (non-fatal):', err);
   }
 }
 
