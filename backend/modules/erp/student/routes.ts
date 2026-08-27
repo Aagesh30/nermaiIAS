@@ -32,7 +32,31 @@ router.get("/:id", requirePermission("student_management", "R"), StudentControll
 router.post("/", requirePermission("student_management", "C"), StudentController.create);
 
 // Update student
-router.put("/:id", requirePermission("student_management", "U"), StudentController.update);
+router.put("/:id", (req, res, next) => {
+  let featureKey = "student_management";
+  const bodyKeys = Object.keys(req.body || {});
+  
+  const idCardKeys = ["idCardGenerated", "idCardTheme", "idCardRole", "idCardExpiry"];
+  const hallTicketKeys = ["hallTicketGenerated", "hallTicketExamName", "hallTicketExamDate", "hallTicketVenue", "hallTicketTime", "hallTicketInstructions"];
+  const feesKeys = ["feesPaid", "totalFees", "modeOfPayment", "transactionId"];
+  
+  const hasIdCardKeys = bodyKeys.some(k => idCardKeys.includes(k));
+  const hasHallTicketKeys = bodyKeys.some(k => hallTicketKeys.includes(k));
+  const hasFeesKeys = bodyKeys.some(k => feesKeys.includes(k));
+  const hasOtherKeys = bodyKeys.some(k => !idCardKeys.includes(k) && !hallTicketKeys.includes(k) && !feesKeys.includes(k) && k !== "updatedBy");
+
+  if (!hasOtherKeys) {
+    if (hasIdCardKeys && !hasHallTicketKeys && !hasFeesKeys) {
+      featureKey = "id_card";
+    } else if (hasHallTicketKeys && !hasIdCardKeys && !hasFeesKeys) {
+      featureKey = "hall_ticket";
+    } else if (hasFeesKeys && !hasIdCardKeys && !hasHallTicketKeys) {
+      featureKey = "fees_management";
+    }
+  }
+  
+  return requirePermission(featureKey, "U")(req, res, next);
+}, StudentController.update);
 
 // Bulk update credentials for batch (super_admin only — highly privileged)
 router.post("/bulk/credentials", requireRole(['super_admin']), StudentController.bulkUpdateCredentials);

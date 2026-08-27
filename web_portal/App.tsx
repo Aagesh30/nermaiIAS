@@ -16183,7 +16183,9 @@ function MainApp() {
 
                 <ScrollView style={[styles.body, { paddingTop: (isMobile && testSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80 }}>
                   {checkAccessNone(getTestFeatureKey(testSub))}
-                  {getFeatureAccess(getTestFeatureKey(testSub)) !== "none" && renderPendingApprovalsBanner(getTestFeatureKey(testSub))}
+                  {getFeatureAccess(getTestFeatureKey(testSub)) !== "none" && (
+                    <>
+                      {renderPendingApprovalsBanner(getTestFeatureKey(testSub))}
 
                   {testSub === "available" && getFeatureAccess("examinations") !== "none" && (() => {
                     const now = nowTick;
@@ -18105,6 +18107,8 @@ function MainApp() {
                       </View>
                     </View>
                   )}
+                    </>
+                  )}
                 </ScrollView>
               </View>
             </View>
@@ -18297,7 +18301,9 @@ function MainApp() {
                 )}
                 <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && erpSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
                   {checkAccessNone(getErpFeatureKey(erpSub))}
-                  {getFeatureAccess(getErpFeatureKey(erpSub)) !== "none" && renderPendingApprovalsBanner(getErpFeatureKey(erpSub))}
+                  {getFeatureAccess(getErpFeatureKey(erpSub)) !== "none" && (
+                    <>
+                      {renderPendingApprovalsBanner(getErpFeatureKey(erpSub))}
                   {erpSub === "students" && isAdmin && getFeatureAccess("student_management") !== "none" && (
                     isInitialLoading ? (
                       <RNTableSkeleton rows={6} darkMode={darkMode} />
@@ -25624,7 +25630,8 @@ function MainApp() {
                       </View>
                     );
                   })()}
-
+                    </>
+                  )}
                 </ScrollView>
 
               </View>
@@ -25808,7 +25815,9 @@ function MainApp() {
 
               <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && lmsTabsCollapsed) ? 50 : 15 }, darkMode && styles.splitContentDark]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
                 {checkAccessNone(getLmsFeatureKey(lmsSub))}
-                {getFeatureAccess(getLmsFeatureKey(lmsSub)) !== "none" && renderPendingApprovalsBanner(getLmsFeatureKey(lmsSub))}
+                {getFeatureAccess(getLmsFeatureKey(lmsSub)) !== "none" && (
+                  <>
+                    {renderPendingApprovalsBanner(getLmsFeatureKey(lmsSub))}
 
                 {/* Consolidated Quiz Section */}
                 {(lmsSub === "quiz" || lmsSub === undefined || lmsSub === "create-quiz" || lmsSub === "all-quizzes") && getFeatureAccess("lms_quiz_posting") !== "none" && (
@@ -27922,7 +27931,8 @@ function MainApp() {
                     </>
                   </LMSProvider>
                 )}
-
+                    </>
+                  )}
               </ScrollView>
             </View>
           )
@@ -28084,7 +28094,9 @@ function MainApp() {
                 )}
                 <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && crmSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
                   {checkAccessNone(getCrmFeatureKey(crmSub))}
-                  {getFeatureAccess(getCrmFeatureKey(crmSub)) !== "none" && renderPendingApprovalsBanner(getCrmFeatureKey(crmSub))}
+                  {getFeatureAccess(getCrmFeatureKey(crmSub)) !== "none" && (
+                    <>
+                      {renderPendingApprovalsBanner(getCrmFeatureKey(crmSub))}
                   {crmSub === "admissions" && getFeatureAccess("admissions") !== "none" && (() => {
                     const pendingInquiries = admissions.filter((ad: any) => ad.status !== "converted");
                     const convertedInquiries = admissions.filter((ad: any) => ad.status === "converted");
@@ -28822,6 +28834,8 @@ function MainApp() {
                         )}
                       </View>
                     </View>
+                  )}
+                    </>
                   )}
                 </ScrollView>
               </View>
