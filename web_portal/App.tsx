@@ -2609,8 +2609,7 @@ function MainApp() {
   const [profileForm, setProfileForm] = useState({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
   const [showDocModal, setShowDocModal] = useState(false);
   const [showConstituencyModal, setShowConstituencyModal] = useState(false);
-  const [showLedgerSubjectModal, setShowLedgerSubjectModal] = useState(false);
-  const [showLedgerTopicModal, setShowLedgerTopicModal] = useState(false);
+  const [showLedgerTestTypeModal, setShowLedgerTestTypeModal] = useState(false);
   const [showLedgerExamModal, setShowLedgerExamModal] = useState(false);
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const [previewImageTitle, setPreviewImageTitle] = useState<string>("Preview");
@@ -2630,8 +2629,8 @@ function MainApp() {
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [resultsSubjectFilter, setResultsSubjectFilter] = useState("");
   const [resultsTopicFilter, setResultsTopicFilter] = useState("");
-  const [ledgerSubjectFilter, setLedgerSubjectFilter] = useState("");
-  const [ledgerTopicFilter, setLedgerTopicFilter] = useState("");
+  const [ledgerTestTypeFilter, setLedgerTestTypeFilter] = useState("");
+  const [ledgerTestNameFilter, setLedgerTestNameFilter] = useState("");
   const [resultsCategoryFilter, setResultsCategoryFilter] = useState("");
   const [testModeFilter, setTestModeFilter] = useState("all");
   const [knownSubjects, setKnownSubjects] = useState<string[]>([]);
@@ -23980,18 +23979,15 @@ function MainApp() {
                           <Text style={styles.emptyText}>No mock tests available.</Text>
                         ) : (
                           <View style={{ marginTop: 12, gap: 10 }}>
-                            {/* Subject and Topic Filters */}
+                            {/* Test Type and Test Name Filters */}
                             <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
-                              {/* Subject Filter */}
+                              {/* Test Type Filter */}
                               <View style={{ flex: 1, minWidth: 200 }}>
-                                <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Subject</Text>
+                                <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Test Type</Text>
                                 {Platform.OS === 'web' ? (
                                   <select
-                                    value={ledgerSubjectFilter}
-                                    onChange={e => {
-                                      setLedgerSubjectFilter((e.target as HTMLSelectElement).value);
-                                      setLedgerTopicFilter(""); // Reset topic
-                                    }}
+                                    value={ledgerTestTypeFilter}
+                                    onChange={e => setLedgerTestTypeFilter((e.target as HTMLSelectElement).value)}
                                     style={{
                                       width: "100%",
                                       height: 40,
@@ -24006,60 +24002,48 @@ function MainApp() {
                                       outline: "none"
                                     } as any}
                                   >
-                                    <option value="">-- All Subjects --</option>
-                                    {[...new Set(tests.map((t: any) => t.subject || ""))].filter(Boolean).map(sName => (
-                                      <option key={sName} value={sName}>{sName}</option>
-                                    ))}
+                                    <option value="">-- All Test Types --</option>
+                                    <option value="daily">Daily Test</option>
+                                    <option value="weekly">Weekly Test</option>
+                                    <option value="mock">Mock Test</option>
                                   </select>
                                 ) : (
                                   <TouchableOpacity
-                                    onPress={() => setShowLedgerSubjectModal(true)}
+                                    onPress={() => setShowLedgerTestTypeModal(true)}
                                     style={[styles.input, { justifyContent: 'center', minHeight: 40 }]}
                                   >
-                                    <Text style={{ color: ledgerSubjectFilter ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
-                                      {ledgerSubjectFilter || "-- All Subjects --"}
+                                    <Text style={{ color: ledgerTestTypeFilter ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
+                                      {ledgerTestTypeFilter === "daily" ? "Daily Test" : ledgerTestTypeFilter === "weekly" ? "Weekly Test" : ledgerTestTypeFilter === "mock" ? "Mock Test" : "-- All Test Types --"}
                                     </Text>
                                   </TouchableOpacity>
                                 )}
                               </View>
 
-                              {/* Custom Modal subject selector for mobile */}
-                              {Platform.OS !== 'web' && showLedgerSubjectModal && (
-                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerSubjectModal(false)}>
+                              {/* Custom Modal test type selector for mobile */}
+                              {Platform.OS !== 'web' && showLedgerTestTypeModal && (
+                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerTestTypeModal(false)}>
                                   <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
                                     <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
                                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Subject</Text>
-                                        <TouchableOpacity onPress={() => setShowLedgerSubjectModal(false)} style={{ padding: 4 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Test Type</Text>
+                                        <TouchableOpacity onPress={() => setShowLedgerTestTypeModal(false)} style={{ padding: 4 }}>
                                           <Ionicons name="close" size={24} color="#757575" />
                                         </TouchableOpacity>
                                       </View>
                                       <ScrollView style={{ marginVertical: 10 }}>
-                                        <TouchableOpacity
-                                          onPress={() => {
-                                            setLedgerSubjectFilter("");
-                                            setLedgerTopicFilter("");
-                                            setShowLedgerSubjectModal(false);
-                                          }}
-                                          style={{
-                                            paddingVertical: 12,
-                                            paddingHorizontal: 15,
-                                            borderBottomWidth: 1,
-                                            borderBottomColor: darkMode ? "#333" : "#f0f0f0",
-                                            backgroundColor: !ledgerSubjectFilter ? (darkMode ? "#c62828" : "#ffebee") : "transparent"
-                                          }}
-                                        >
-                                          <Text style={{ color: !ledgerSubjectFilter ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: !ledgerSubjectFilter ? "bold" : "normal" }}>-- All Subjects --</Text>
-                                        </TouchableOpacity>
-                                        {[...new Set(tests.map((t: any) => t.subject || ""))].filter(Boolean).map(sName => {
-                                          const isSelected = ledgerSubjectFilter === sName;
+                                        {[
+                                          { value: "", label: "-- All Test Types --" },
+                                          { value: "daily", label: "Daily Test" },
+                                          { value: "weekly", label: "Weekly Test" },
+                                          { value: "mock", label: "Mock Test" }
+                                        ].map(item => {
+                                          const isSelected = ledgerTestTypeFilter === item.value;
                                           return (
                                             <TouchableOpacity
-                                              key={sName}
+                                              key={item.value}
                                               onPress={() => {
-                                                setLedgerSubjectFilter(sName);
-                                                setLedgerTopicFilter("");
-                                                setShowLedgerSubjectModal(false);
+                                                setLedgerTestTypeFilter(item.value);
+                                                setShowLedgerTestTypeModal(false);
                                               }}
                                               style={{
                                                 paddingVertical: 12,
@@ -24072,7 +24056,7 @@ function MainApp() {
                                                 alignItems: "center"
                                               }}
                                             >
-                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{sName}</Text>
+                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{item.label}</Text>
                                               {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
                                             </TouchableOpacity>
                                           );
@@ -24083,103 +24067,21 @@ function MainApp() {
                                 </Modal>
                               )}
 
-                              {/* Topic Filter */}
-                              {ledgerSubjectFilter !== "" && (
-                                <View style={{ flex: 1, minWidth: 200 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Topic</Text>
-                                  {Platform.OS === 'web' ? (
-                                    <select
-                                      value={ledgerTopicFilter}
-                                      onChange={e => setLedgerTopicFilter((e.target as HTMLSelectElement).value)}
-                                      style={{
-                                        width: "100%",
-                                        height: 40,
-                                        borderRadius: 8,
-                                        paddingLeft: 12,
-                                        paddingRight: 12,
-                                        fontSize: 14,
-                                        fontWeight: "500",
-                                        backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5",
-                                        color: darkMode ? "#fff" : "#212121",
-                                        border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
-                                        outline: "none"
-                                      } as any}
-                                    >
-                                      <option value="">-- All Topics --</option>
-                                      {[...new Set(tests.filter((t: any) => t.subject === ledgerSubjectFilter).map((t: any) => t.topic || ""))].filter(Boolean).map(tName => (
-                                        <option key={tName} value={tName}>{tName}</option>
-                                      ))}
-                                    </select>
-                                  ) : (
-                                    <TouchableOpacity
-                                      onPress={() => setShowLedgerTopicModal(true)}
-                                      style={[styles.input, { justifyContent: 'center', minHeight: 40 }]}
-                                    >
-                                      <Text style={{ color: ledgerTopicFilter ? (darkMode ? "#fff" : "#212121") : "#999", fontSize: 13 }}>
-                                        {ledgerTopicFilter || "-- All Topics --"}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )}
-                                </View>
-                              )}
-
-                              {/* Custom Modal topic selector for mobile */}
-                              {Platform.OS !== 'web' && ledgerSubjectFilter !== "" && showLedgerTopicModal && (
-                                <Modal visible={true} transparent animationType="fade" onRequestClose={() => setShowLedgerTopicModal(false)}>
-                                  <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-                                    <View style={{ width: "100%", maxHeight: "80%", backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, padding: 20 }}>
-                                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                                        <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#c62828" }}>Select Topic</Text>
-                                        <TouchableOpacity onPress={() => setShowLedgerTopicModal(false)} style={{ padding: 4 }}>
-                                          <Ionicons name="close" size={24} color="#757575" />
-                                        </TouchableOpacity>
-                                      </View>
-                                      <ScrollView style={{ marginVertical: 10 }}>
-                                        <TouchableOpacity
-                                          onPress={() => {
-                                            setLedgerTopicFilter("");
-                                            setShowLedgerTopicModal(false);
-                                          }}
-                                          style={{
-                                            paddingVertical: 12,
-                                            paddingHorizontal: 15,
-                                            borderBottomWidth: 1,
-                                            borderBottomColor: darkMode ? "#333" : "#f0f0f0",
-                                            backgroundColor: !ledgerTopicFilter ? (darkMode ? "#c62828" : "#ffebee") : "transparent"
-                                          }}
-                                        >
-                                          <Text style={{ color: !ledgerTopicFilter ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: !ledgerTopicFilter ? "bold" : "normal" }}>-- All Topics --</Text>
-                                        </TouchableOpacity>
-                                        {[...new Set(tests.filter((t: any) => t.subject === ledgerSubjectFilter).map((t: any) => t.topic || ""))].filter(Boolean).map(tName => {
-                                          const isSelected = ledgerTopicFilter === tName;
-                                          return (
-                                            <TouchableOpacity
-                                              key={tName}
-                                              onPress={() => {
-                                                setLedgerTopicFilter(tName);
-                                                setShowLedgerTopicModal(false);
-                                              }}
-                                              style={{
-                                                paddingVertical: 12,
-                                                paddingHorizontal: 15,
-                                                borderBottomWidth: 1,
-                                                borderBottomColor: darkMode ? "#333" : "#f0f0f0",
-                                                backgroundColor: isSelected ? (darkMode ? "#c62828" : "#ffebee") : "transparent",
-                                                flexDirection: "row",
-                                                justifyContent: "space-between",
-                                                alignItems: "center"
-                                              }}
-                                            >
-                                              <Text style={{ color: isSelected ? "#c62828" : (darkMode ? "#fff" : "#333"), fontWeight: isSelected ? "bold" : "normal" }}>{tName}</Text>
-                                              {isSelected && <Ionicons name="checkmark" size={18} color="#c62828" />}
-                                            </TouchableOpacity>
-                                          );
-                                        })}
-                                      </ScrollView>
-                                    </View>
-                                  </View>
-                                </Modal>
-                              )}
+                              {/* Test Name Filter */}
+                              <View style={{ flex: 1, minWidth: 200 }}>
+                                <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#aaa" : "#555", marginBottom: 5 }}>Filter by Test Name</Text>
+                                <TextInput
+                                  value={ledgerTestNameFilter}
+                                  onChangeText={setLedgerTestNameFilter}
+                                  placeholder="Type test name to search..."
+                                  placeholderTextColor={darkMode ? "#666" : "#999"}
+                                  style={[
+                                    styles.input,
+                                    { minHeight: 40, fontSize: 14 },
+                                    darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#fff" }
+                                  ]}
+                                />
+                              </View>
                             </View>
 
                             {/* Mock Exam Dropdown */}
@@ -24211,8 +24113,12 @@ function MainApp() {
                                   {selectedErpTestId === "" && <option value="">-- Select a Mock Exam --</option>}
                                   {tests
                                     .filter((t: any) => {
-                                      if (ledgerSubjectFilter && t.subject !== ledgerSubjectFilter) return false;
-                                      if (ledgerTopicFilter && t.topic !== ledgerTopicFilter) return false;
+                                      if (ledgerTestTypeFilter && (t.testType || "mock") !== ledgerTestTypeFilter) return false;
+                                      if (ledgerTestNameFilter.trim() !== "") {
+                                        const query = ledgerTestNameFilter.toLowerCase().trim();
+                                        const title = (t.title || "").toLowerCase();
+                                        if (!title.includes(query)) return false;
+                                      }
                                       return true;
                                     })
                                     .map(t => (
@@ -24247,8 +24153,12 @@ function MainApp() {
                                     <ScrollView style={{ marginVertical: 10 }}>
                                       {tests
                                         .filter((t: any) => {
-                                          if (ledgerSubjectFilter && t.subject !== ledgerSubjectFilter) return false;
-                                          if (ledgerTopicFilter && t.topic !== ledgerTopicFilter) return false;
+                                          if (ledgerTestTypeFilter && (t.testType || "mock") !== ledgerTestTypeFilter) return false;
+                                          if (ledgerTestNameFilter.trim() !== "") {
+                                            const query = ledgerTestNameFilter.toLowerCase().trim();
+                                            const title = (t.title || "").toLowerCase();
+                                            if (!title.includes(query)) return false;
+                                          }
                                           return true;
                                         })
                                         .map(t => {
