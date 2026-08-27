@@ -5,12 +5,12 @@ import { AppError } from "../../core/errors/AppError";
 
 const router = Router();
 
-const requireDeveloperOnly = (req: any, res: any, next: any) => {
+const requireDeveloperOrSuperAdmin = (req: any, res: any, next: any) => {
   if (!req.user) {
     return next(new AppError('Forbidden: User not authenticated', 403));
   }
-  if (req.user.role !== 'developer') {
-    return next(new AppError('Forbidden: Developer access only', 403));
+  if (req.user.role !== 'developer' && req.user.role !== 'super_admin') {
+    return next(new AppError('Forbidden: Developer or Super Admin access only', 403));
   }
   next();
 };
@@ -33,19 +33,43 @@ router.get("/page-locks", DeveloperController.getPageLocks);
 router.use(requireAuth);
 
 // Role permissions reading is allowed for all admin/staff roles so their frontend can configure views
-router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff', 'developer']), DeveloperController.getRolePermissions);
+router.get("/role-permissions", requireRole(['super_admin', 'admin', 'staff', 'developer', 'editor', 'contributor']), DeveloperController.getRolePermissions);
 
 // Custom Role Permissions Management (Writes) - super_admin and developer only
 router.put("/role-permissions/:role", requireRole(['super_admin', 'developer']), DeveloperController.updateRolePermissions);
 
 // Allow admin/staff roles to submit approval request notifications
-router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff', 'developer']), (req, res, next) => {
+router.post("/collection/notifications", requireRole(['super_admin', 'admin', 'staff', 'developer', 'editor', 'contributor']), (req, res, next) => {
   req.params.name = "notifications";
   next();
 }, DeveloperController.createDocument);
 
-// All other developer routes require developer role only (super_admin and admin are forbidden)
-router.use(requireDeveloperOnly);
+// Allow all staff roles to fetch approvals list so standard editors/admins can see their pending requests
+router.get("/collection/notifications", requireRole(['super_admin', 'admin', 'staff', 'developer', 'editor', 'contributor']), (req, res, next) => {
+  req.params.name = "notifications";
+  next();
+}, DeveloperController.getDocuments);
+
+// Allow super_admin and developer to update/process notifications (Approve / Reject)
+router.put("/collection/notifications/:docId", requireRole(['super_admin', 'developer']), (req, res, next) => {
+  req.params.name = "notifications";
+  next();
+}, DeveloperController.updateDocument);
+
+// Allow all staff/admin roles to fetch one-time permissions
+router.get("/collection/one_time_permissions", requireRole(['super_admin', 'admin', 'staff', 'developer', 'editor', 'contributor']), (req, res, next) => {
+  req.params.name = "one_time_permissions";
+  next();
+}, DeveloperController.getDocuments);
+
+// Consume one-time permission (staff/admin)
+router.post("/consume-one-time-permission", requireRole(['super_admin', 'admin', 'staff', 'developer', 'editor', 'contributor']), DeveloperController.consumeOneTimePermission);
+
+// Approve one-time permission (super_admin/developer only)
+router.post("/approve-one-time-permission", requireRole(['super_admin', 'developer']), DeveloperController.approveOneTimePermission);
+
+// All other developer routes require developer or super_admin role only (admin is forbidden)
+router.use(requireDeveloperOrSuperAdmin);
 
 // Collection overview
 router.get("/collections", DeveloperController.listCollections);

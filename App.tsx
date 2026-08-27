@@ -2341,10 +2341,6 @@ export default function App() {
     const myStudent = getLoggedInStudent(user, students);
     const rawCount = myStudent?.profileSubmitCount;
     const count = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
-    if (count >= 3) {
-      Alert.alert("Limit Reached", "You have reached the maximum limit of 3 profile submission attempts. Please contact the administrator directly.");
-      return;
-    }
     if (!profileForm.name || !profileForm.dob || !profileForm.address) {
       Alert.alert("Error", "Name, Date of Birth and Address are required.");
       return;
@@ -7271,19 +7267,9 @@ export default function App() {
                       const myStudent = getLoggedInStudent(user, students);
                       const rawCount = myStudent?.profileSubmitCount;
                       const count = typeof rawCount === "number" ? rawCount : (rawCount && typeof rawCount === "object" && typeof (rawCount as any).__increment === "number") ? (rawCount as any).__increment : 0;
-                      if (count >= 3) {
-                        return (
-                          <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#c62828" }]}>
-                            <Text style={{ fontWeight: "bold", fontSize: 14, color: "#c62828", marginBottom: 12 }}>⚠️ Profile Completion Blocked</Text>
-                            <Text style={{ color: "#c62828", fontSize: 13, fontWeight: "600", marginBottom: 8 }}>You have reached the maximum limit of 3 profile submission attempts.</Text>
-                            <Text style={{ color: "#757575", fontSize: 12 }}>Please contact the administrator directly to complete your profile registration details.</Text>
-                          </View>
-                        );
-                      }
                       return (
                         <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#1976d2" }]}>
                           <Text style={{ fontWeight: "bold", fontSize: 14, color: "#1976d2", marginBottom: 6 }}>📋 Complete Your Profile</Text>
-                          <Text style={{ color: "#e53935", fontSize: 11, marginBottom: 12, fontWeight: "600" }}>⚠️ Note: You have used {count} of 3 submission attempts.</Text>
                           <Text style={{ color: "#757575", fontSize: 12, marginBottom: 12 }}>Fill all fields and upload documents. Admin will review and approve your profile.</Text>
 
                           <TextInput style={styles.input} placeholder="Full Name *" placeholderTextColor="#999" value={profileForm.name} onChangeText={v => setProfileForm({ ...profileForm, name: v })} />

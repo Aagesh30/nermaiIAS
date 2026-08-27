@@ -133,6 +133,29 @@ export const requirePermission = (featureKey: string, action: 'C' | 'R' | 'U' | 
     }
 
     try {
+      // ── Check JIT One-Time Upload Token ──
+      if (action !== 'R') {
+        const userId = req.user.userId;
+        if (userId) {
+          const otpId = `${userId}_${featureKey}`;
+          const otpDoc = await db.collection('one_time_permissions').doc(otpId).get();
+          if (otpDoc.exists) {
+            const otpData = otpDoc.data() || {};
+            if (otpData.remainingUses > 0) {
+              if (otpData.remainingUses <= 1) {
+                await db.collection('one_time_permissions').doc(otpId).delete();
+              } else {
+                await db.collection('one_time_permissions').doc(otpId).update({
+                  remainingUses: otpData.remainingUses - 1
+                });
+              }
+              logger.info(`One-Time Upload Token consumed for user: ${userId}, feature: ${featureKey}`);
+              return next();
+            }
+          }
+        }
+      }
+
       const doc = await db.collection('role_permissions').doc(req.user.role).get();
       if (!doc.exists) {
         return next(new AppError(`Forbidden: Permissions not configured for role ${req.user.role}`, 403));

@@ -11,7 +11,7 @@ const router = Router();
  * SECURITY: All routes require auth + admin/staff role.
  * ==========================================
  */
-const adminRoles = ['super_admin', 'admin', 'staff'];
+const adminRoles = ['super_admin', 'admin', 'staff', 'editor', 'contributor', 'teacher', 'developer'];
 
 router.use(requireAuth);
 

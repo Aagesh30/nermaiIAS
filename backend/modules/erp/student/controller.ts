@@ -274,10 +274,30 @@ export class StudentController {
             };
 
             const snapshot = await db.collection(COLLECTION).get();
+
+            // Fetch all users to resolve createdBy admin IDs to names
+            const usersMap: Record<string, string> = {};
+            try {
+                const usersSnap = await db.collection("users")
+                    .where("role", "in", ["admin", "super_admin", "staff", "teacher", "editor", "contributor", "developer"])
+                    .get();
+                usersSnap.docs.forEach(doc => {
+                    const u = doc.data();
+                    const name = u.name || u.username || doc.id;
+                    usersMap[doc.id] = name;
+                    if (u.id) usersMap[u.id] = name;
+                });
+            } catch (err) {
+                console.error("Failed to build usersMap for createdBy resolution:", err);
+            }
+
             let students = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const creatorId = data.createdBy || "";
+                const creatorName = usersMap[creatorId] || creatorId || "Super Admin";
                 return {
                     ...data,
+                    createdBy: creatorName,
                     createdAt: parseTimestamp(data.createdAt),
                     updatedAt: parseTimestamp(data.updatedAt),
                     deletedAt: parseTimestamp(data.deletedAt),
@@ -372,10 +392,21 @@ export class StudentController {
             }
 
             const data = doc.data()!;
+            let creatorName = data.createdBy || "";
+            if (creatorName && creatorName.length > 20) {
+                try {
+                    const userDoc = await db.collection("users").doc(creatorName).get();
+                    if (userDoc.exists) {
+                        creatorName = userDoc.data()?.name || userDoc.data()?.username || creatorName;
+                    }
+                } catch (_) {}
+            }
+
             return res.status(200).json({
                 success: true,
                 data: sanitizeStudent({
                     ...data,
+                    createdBy: creatorName || "Super Admin",
                     createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                     updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                     deletedAt: data.deletedAt ? (data.deletedAt as admin.firestore.Timestamp).toDate().toISOString() : null,

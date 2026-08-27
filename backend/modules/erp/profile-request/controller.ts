@@ -70,13 +70,6 @@ export class ProfileRequestController {
                 currentCount = (submitCount as any).__increment;
             }
 
-            if (currentCount >= 3) {
-                return res.status(400).json({
-                    success: false,
-                    message: "You have reached the maximum limit of 3 profile submission attempts. Please contact the administrator directly."
-                });
-            }
-
             // Upsert: if a pending request exists for this student, overwrite it
             const existing = await db.collection(COLLECTION)
                 .where("studentId", "==", studentId)
@@ -86,11 +79,19 @@ export class ProfileRequestController {
 
             const id = existing.empty ? randomUUID() : existing.docs[0].id;
 
+            const studentName = name || studentData.name || studentData.firstName || username || "Student";
+            const safeName = studentName.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const safeId = studentId.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const folderName = `${safeName}_${safeId}`;
+
             // ── Upload passport photo to Google Drive (primary) ──
             let passportPhotoUrl = "";
             let passportPhotoPublicId = "";
             let passportPhotoDisplayUrl = "";
-            if (passportPhotoBase64 && passportPhotoBase64 !== "test") {
+            if (passportPhotoBase64 && (passportPhotoBase64.startsWith("http://") || passportPhotoBase64.startsWith("https://"))) {
+                passportPhotoUrl = passportPhotoBase64;
+                passportPhotoDisplayUrl = passportPhotoBase64;
+            } else if (passportPhotoBase64 && passportPhotoBase64 !== "test") {
                 try {
                     // Decode the data URL
                     const passportRaw = passportPhotoBase64.startsWith("data:")
@@ -102,14 +103,13 @@ export class ProfileRequestController {
                     const ext = mime.includes("png") ? "png" : "jpg";
                     const pureBase64 = passportRaw.substring(commaIdx + 1);
                     const fileBuffer = Buffer.from(pureBase64, "base64");
-                    const safeId = studentId.replace(/[^a-zA-Z0-9_-]/g, "_");
 
                     console.log("[Drive] Uploading passport photo for student:", studentId);
                     const driveResult = await uploadFileToGoogleDrive({
                         fileName: `passport_photo_${safeId}.${ext}`,
                         mimeType: mime,
                         buffer: fileBuffer,
-                        subPath: `ERP/Students/${safeId}`
+                        subPath: `ERP/Students/${folderName}`
                     });
 
                     if (driveResult) {
@@ -138,7 +138,10 @@ export class ProfileRequestController {
             let photoIdUrl = "";
             let photoIdPublicId = "";
             let photoIdDisplayUrl = "";
-            if (photoIdBase64 && photoIdBase64 !== "test") {
+            if (photoIdBase64 && (photoIdBase64.startsWith("http://") || photoIdBase64.startsWith("https://"))) {
+                photoIdUrl = photoIdBase64;
+                photoIdDisplayUrl = photoIdBase64;
+            } else if (photoIdBase64 && photoIdBase64 !== "test") {
                 try {
                     const idRaw = photoIdBase64.startsWith("data:")
                         ? photoIdBase64
@@ -149,7 +152,6 @@ export class ProfileRequestController {
                     const ext = mime.includes("png") ? "png" : "jpg";
                     const pureBase64 = idRaw.substring(commaIdx + 1);
                     const fileBuffer = Buffer.from(pureBase64, "base64");
-                    const safeId = studentId.replace(/[^a-zA-Z0-9_-]/g, "_");
                     const safeType = (photoIdType || "id").replace(/[^a-zA-Z0-9_-]/g, "_");
 
                     console.log("[Drive] Uploading photo ID for student:", studentId);
@@ -157,7 +159,7 @@ export class ProfileRequestController {
                         fileName: `photo_id_${safeType}_${safeId}.${ext}`,
                         mimeType: mime,
                         buffer: fileBuffer,
-                        subPath: `ERP/Students/${safeId}`
+                        subPath: `ERP/Students/${folderName}`
                     });
 
                     if (driveResult) {

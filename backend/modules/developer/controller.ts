@@ -45,7 +45,8 @@ const KNOWN_COLLECTIONS = [
     "courses",
     "freebies",
     "notifications",
-    "dailyContent"
+    "dailyContent",
+    "one_time_permissions"
 ];
 
 export class DeveloperController {
@@ -406,10 +407,29 @@ export class DeveloperController {
                 fees_management: "edit_direct",
                 marks_management: "edit_direct",
                 test_creation: "edit_direct",
-                quiz_posting: "edit_direct",
                 id_card: "edit_direct",
                 hall_ticket: "edit_direct",
-                profile_requests: "edit_direct"
+                profile_requests: "edit_direct",
+                qr_permissions: "edit_direct",
+                lms_sacs_access: "edit_direct",
+                lms_live_classes: "edit_direct",
+                lms_daily_content: "edit_direct",
+                lms_quiz_posting: "edit_direct",
+                lms_recorded_videos: "edit_direct",
+                lms_resources: "edit_direct",
+                lms_courses: "edit_direct",
+                lms_subjects: "edit_direct",
+                lms_topics: "edit_direct",
+                lms_subtopics: "edit_direct",
+                lms_classes: "edit_direct",
+                lms_teachers: "edit_direct",
+                lms_syllabus: "edit_direct",
+                lms_resource_mgmt: "edit_direct",
+                lms_video_library: "edit_direct",
+                lms_live_sessions: "edit_direct",
+                lms_provider_mgmt: "edit_direct",
+                lms_zoom_accounts: "edit_direct",
+                lms_chatbot_cms: "edit_direct"
             },
             admin: {
                 student_management: "edit_direct",
@@ -418,10 +438,29 @@ export class DeveloperController {
                 fees_management: "edit_direct",
                 marks_management: "edit_direct",
                 test_creation: "edit_direct",
-                quiz_posting: "edit_direct",
                 id_card: "edit_direct",
                 hall_ticket: "edit_direct",
-                profile_requests: "edit_direct"
+                profile_requests: "edit_direct",
+                qr_permissions: "edit_direct",
+                lms_sacs_access: "edit_direct",
+                lms_live_classes: "edit_direct",
+                lms_daily_content: "edit_direct",
+                lms_quiz_posting: "edit_direct",
+                lms_recorded_videos: "edit_direct",
+                lms_resources: "edit_direct",
+                lms_courses: "edit_direct",
+                lms_subjects: "edit_direct",
+                lms_topics: "edit_direct",
+                lms_subtopics: "edit_direct",
+                lms_classes: "edit_direct",
+                lms_teachers: "edit_direct",
+                lms_syllabus: "edit_direct",
+                lms_resource_mgmt: "edit_direct",
+                lms_video_library: "edit_direct",
+                lms_live_sessions: "edit_direct",
+                lms_provider_mgmt: "edit_direct",
+                lms_zoom_accounts: "edit_direct",
+                lms_chatbot_cms: "edit_direct"
             },
             editor: {
                 student_management: "edit_on_approval",
@@ -430,10 +469,29 @@ export class DeveloperController {
                 fees_management: "edit_on_approval",
                 marks_management: "edit_on_approval",
                 test_creation: "edit_on_approval",
-                quiz_posting: "edit_on_approval",
                 id_card: "edit_on_approval",
                 hall_ticket: "edit_on_approval",
-                profile_requests: "edit_on_approval"
+                profile_requests: "edit_on_approval",
+                qr_permissions: "edit_on_approval",
+                lms_sacs_access: "edit_on_approval",
+                lms_live_classes: "edit_on_approval",
+                lms_daily_content: "edit_on_approval",
+                lms_quiz_posting: "edit_on_approval",
+                lms_recorded_videos: "edit_on_approval",
+                lms_resources: "edit_on_approval",
+                lms_courses: "edit_on_approval",
+                lms_subjects: "edit_on_approval",
+                lms_topics: "edit_on_approval",
+                lms_subtopics: "edit_on_approval",
+                lms_classes: "edit_on_approval",
+                lms_teachers: "edit_on_approval",
+                lms_syllabus: "edit_on_approval",
+                lms_resource_mgmt: "edit_on_approval",
+                lms_video_library: "edit_on_approval",
+                lms_live_sessions: "edit_on_approval",
+                lms_provider_mgmt: "edit_on_approval",
+                lms_zoom_accounts: "edit_on_approval",
+                lms_chatbot_cms: "edit_on_approval"
             },
             contributor: {
                 student_management: "view",
@@ -442,10 +500,29 @@ export class DeveloperController {
                 fees_management: "view",
                 marks_management: "view",
                 test_creation: "view",
-                quiz_posting: "view",
                 id_card: "view",
                 hall_ticket: "view",
-                profile_requests: "view"
+                profile_requests: "view",
+                qr_permissions: "view",
+                lms_sacs_access: "view",
+                lms_live_classes: "view",
+                lms_daily_content: "view",
+                lms_quiz_posting: "view",
+                lms_recorded_videos: "view",
+                lms_resources: "view",
+                lms_courses: "view",
+                lms_subjects: "view",
+                lms_topics: "view",
+                lms_subtopics: "view",
+                lms_classes: "view",
+                lms_teachers: "view",
+                lms_syllabus: "view",
+                lms_resource_mgmt: "view",
+                lms_video_library: "view",
+                lms_live_sessions: "view",
+                lms_provider_mgmt: "view",
+                lms_zoom_accounts: "view",
+                lms_chatbot_cms: "view"
             }
         };
 
@@ -630,6 +707,107 @@ export class DeveloperController {
                 success: false,
                 message: error.message || "Failed to update page locks"
             });
+        }
+    }
+
+    /**
+     * CONSUME ONE TIME PERMISSION
+     * POST /developer/consume-one-time-permission
+     * Body: { feature }
+     */
+    static async consumeOneTimePermission(req: Request, res: Response) {
+        try {
+            const userId = (req as any).user?.userId || (req as any).user?.uid || (req as any).user?.id;
+            const { feature } = req.body;
+            if (!userId || !feature) {
+                return res.status(400).json({ success: false, message: "userId and feature are required" });
+            }
+
+            const querySnapshot = await db.collection("one_time_permissions")
+                .where("userId", "==", userId)
+                .where("feature", "==", feature)
+                .get();
+
+            if (querySnapshot.empty) {
+                return res.status(404).json({ success: false, message: "No one-time permission found for this feature." });
+            }
+
+            const doc = querySnapshot.docs[0];
+            const currentUses = doc.data().remainingUses || 0;
+
+            if (currentUses <= 0) {
+                return res.status(400).json({ success: false, message: "No remaining uses for this permission." });
+            }
+
+            const nextUses = currentUses - 1;
+            if (nextUses <= 0) {
+                // Delete doc if count drops to 0
+                await db.collection("one_time_permissions").doc(doc.id).delete();
+            } else {
+                await db.collection("one_time_permissions").doc(doc.id).update({
+                    remainingUses: nextUses,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "One-time permission consumed successfully",
+                remainingUses: nextUses
+            });
+        } catch (error: any) {
+            return res.status(500).json({ success: false, message: error.message || "Failed to consume permission" });
+        }
+    }
+
+    /**
+     * APPROVE ONE TIME PERMISSION
+     * POST /developer/approve-one-time-permission
+     * Body: { userId, username, feature, uses }
+     */
+    static async approveOneTimePermission(req: Request, res: Response) {
+        try {
+            const { userId, username, feature, uses } = req.body;
+            if (!userId || !feature || !uses) {
+                return res.status(400).json({ success: false, message: "userId, feature, and uses are required" });
+            }
+
+            const querySnapshot = await db.collection("one_time_permissions")
+                .where("userId", "==", userId)
+                .where("feature", "==", feature)
+                .get();
+
+            let docId: string;
+            let finalUses = Number(uses);
+
+            if (!querySnapshot.empty) {
+                const doc = querySnapshot.docs[0];
+                docId = doc.id;
+                finalUses += (doc.data().remainingUses || 0);
+                await db.collection("one_time_permissions").doc(docId).update({
+                    remainingUses: finalUses,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            } else {
+                docId = randomUUID();
+                await db.collection("one_time_permissions").doc(docId).set({
+                    userId,
+                    username: username || "Staff User",
+                    feature,
+                    remainingUses: finalUses,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "One-time permission approved and updated",
+                docId,
+                remainingUses: finalUses
+            });
+        } catch (error: any) {
+            return res.status(500).json({ success: false, message: error.message || "Failed to approve permission" });
         }
     }
 }

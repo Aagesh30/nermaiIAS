@@ -1852,10 +1852,10 @@ function MainApp() {
     collapsed?: boolean,
     featureKey?: string
   ) => {
-    if (featureKey) {
-      const access = getFeatureAccess(featureKey);
-      if (access === "none") return null;
+    if (featureKey && getFeatureAccess(featureKey) === "none") {
+      return null;
     }
+
     const isActive = activeSub === itemKey;
     const isLocked = lockKey ? lockedPages[lockKey]?.locked : false;
 
@@ -2420,6 +2420,7 @@ function MainApp() {
   const [profileRequestsTab, setProfileRequestsTab] = useState<"incomplete" | "requests">("incomplete");
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
   const [rolePermissions, setRolePermissions] = useState<any>({});
+  const [oneTimePermissions, setOneTimePermissions] = useState<Record<string, number>>({});
   const [showDrawer, setShowDrawer] = useState(false);
   const [todayQuiz, setTodayQuiz] = useState<any>(null);
   const [allQuizzes, setAllQuizzes] = useState<any[]>([]);
@@ -2975,7 +2976,7 @@ function MainApp() {
   const [selectedCampaignModal, setSelectedCampaignModal] = useState<any | null>(null);
   const [editingQData, setEditingQData] = useState<any | null>(null);
   const [editingQIdx, setEditingQIdx] = useState<number | null>(null);
-  const [activePermissionRole, setActivePermissionRole] = useState("");
+  const [activePermissionRole, setActivePermissionRole] = useState("super_admin");
   const [lmsTabsCollapsed, setLmsTabsCollapsed] = useState(true);
   const [erpSidebarCollapsed, setErpSidebarCollapsed] = useState(true);
   const [crmSidebarCollapsed, setCrmSidebarCollapsed] = useState(true);
@@ -3754,7 +3755,7 @@ function MainApp() {
     // ── ERP ──────────────────────────────────────────────────────────────
     { key: "student_management", label: "ERP — Student Directory", icon: "people-outline", category: "ERP" },
     { key: "staff_management", label: "ERP — Staff & Admin Directory", icon: "body-outline", category: "ERP" },
-    { key: "batch_management", label: "ERP — Batches & Timetables", icon: "calendar-outline", category: "ERP" },
+    { key: "batch_management", label: "ERP — Batch & Course Management", icon: "calendar-outline", category: "ERP" },
     { key: "fees_management", label: "ERP — Tuition Fees & Ledger", icon: "cash-outline", category: "ERP" },
     { key: "marks_management", label: "ERP — Marks & Score Records", icon: "bar-chart-outline", category: "ERP" },
     { key: "id_card", label: "ERP — ID Card Generation", icon: "card-outline", category: "ERP" },
@@ -3762,21 +3763,28 @@ function MainApp() {
     { key: "profile_requests", label: "ERP — Profile Edit Approvals", icon: "checkmark-circle-outline", category: "ERP" },
     { key: "offline_attendance", label: "ERP — Offline Attendance Registry", icon: "clipboard-outline", category: "ERP" },
     { key: "analytics", label: "ERP — Analytics & Reports", icon: "analytics-outline", category: "ERP" },
+    { key: "notices_announcements", label: "ERP — Create New Notice & Notification", icon: "notifications-outline", category: "ERP" },
+    { key: "qr_permissions", label: "ERP — QR Code Permissions", icon: "qr-code-outline", category: "ERP" },
     // ── LMS ──────────────────────────────────────────────────────────────
-    { key: "quiz_posting", label: "LMS — Daily Practice Quiz", icon: "help-circle-outline", category: "LMS" },
-    { key: "daily_content", label: "LMS — Daily Study Content", icon: "document-attach-outline", category: "LMS" },
-    { key: "video_content", label: "LMS — Recorded Video Classes", icon: "play-circle-outline", category: "LMS" },
-    { key: "course_materials", label: "LMS — Study Materials & PDFs", icon: "document-text-outline", category: "LMS" },
-    { key: "live_classes", label: "LMS — Live Classes & Sessions", icon: "videocam-outline", category: "LMS" },
-    { key: "courses_management", label: "LMS — Courses Management", icon: "school-outline", category: "LMS" },
-    { key: "subjects_topics", label: "LMS — Subjects & Topics", icon: "library-outline", category: "LMS" },
-    { key: "live_attendance", label: "LMS — Live Class Attendance", icon: "finger-print-outline", category: "LMS" },
-    { key: "live_comments", label: "LMS — Live Comments & Chat", icon: "chatbubbles-outline", category: "LMS" },
-    { key: "lms_announcements", label: "LMS — LMS Announcements", icon: "megaphone-outline", category: "LMS" },
-    { key: "access_rules", label: "LMS — Access Rules & Permissions", icon: "shield-checkmark-outline", category: "LMS" },
-    { key: "knowledge_base", label: "LMS — Knowledge Base & AI KB", icon: "bulb-outline", category: "LMS" },
-    { key: "live_sessions_mgmt", label: "LMS — Live Session Management", icon: "tv-outline", category: "LMS" },
-    { key: "provider_accounts", label: "LMS — Provider Accounts (Zoom etc)", icon: "key-outline", category: "LMS" },
+    { key: "lms_sacs_access", label: "LMS — Access Control (SACS)", icon: "shield-checkmark-outline", category: "LMS" },
+    { key: "lms_live_classes", label: "LMS — Live & Scheduled Classes", icon: "videocam-outline", category: "LMS" },
+    { key: "lms_daily_content", label: "LMS — Daily IAS Study Content", icon: "calendar-outline", category: "LMS" },
+    { key: "lms_quiz_posting", label: "LMS — Publish Daily Quiz Question", icon: "help-circle-outline", category: "LMS" },
+    { key: "lms_recorded_videos", label: "LMS — Recorded Video Library", icon: "play-circle-outline", category: "LMS" },
+    { key: "lms_resources", label: "LMS — resources", icon: "folder-open-outline", category: "LMS" },
+    { key: "lms_courses", label: "LMS — Courses", icon: "school-outline", category: "LMS" },
+    { key: "lms_subjects", label: "LMS — Subjects", icon: "library-outline", category: "LMS" },
+    { key: "lms_topics", label: "LMS — Topics", icon: "list-outline", category: "LMS" },
+    { key: "lms_subtopics", label: "LMS — Subtopics", icon: "git-commit-outline", category: "LMS" },
+    { key: "lms_classes", label: "LMS — Classes", icon: "play-outline", category: "LMS" },
+    { key: "lms_teachers", label: "LMS — Teachers", icon: "people-outline", category: "LMS" },
+    { key: "lms_syllabus", label: "LMS — Syllabus Tracker", icon: "checkbox-outline", category: "LMS" },
+    { key: "lms_resource_mgmt", label: "LMS — Resource Management", icon: "documents-outline", category: "LMS" },
+    { key: "lms_video_library", label: "LMS — Video Library", icon: "film-outline", category: "LMS" },
+    { key: "lms_live_sessions", label: "LMS — Live Sessions", icon: "videocam-outline", category: "LMS" },
+    { key: "lms_provider_mgmt", label: "LMS — Provider Credential Management", icon: "cloud-outline", category: "LMS" },
+    { key: "lms_zoom_accounts", label: "LMS — Zoom SDK Accounts", icon: "videocam-outline", category: "LMS" },
+    { key: "lms_chatbot_cms", label: "LMS — Knowledge Studio & Assistant CMS", icon: "chatbubbles-outline", category: "LMS" },
     // ── CRM ──────────────────────────────────────────────────────────────
     { key: "admissions", label: "CRM — Admission Applications", icon: "person-add-outline", category: "CRM" },
     { key: "leads", label: "CRM — Prospective Leads", icon: "funnel-outline", category: "CRM" },
@@ -3791,13 +3799,27 @@ function MainApp() {
     { key: "test_results", label: "Test — Results & Leaderboards", icon: "podium-outline", category: "Test Portal" },
     { key: "test_review", label: "Test — Test Review & Analytics", icon: "stats-chart-outline", category: "Test Portal" },
     // ── System ────────────────────────────────────────────────────────────
-    { key: "notices_announcements", label: "System — General Announcements", icon: "notifications-outline", category: "System" },
     { key: "push_notifications", label: "System — Push Notifications", icon: "send-outline", category: "System" }
   ];
+
+  const consumeOneTimePermission = async (featureKey: string) => {
+    try {
+      await api.post("/developer/consume-one-time-permission", { feature: featureKey });
+      loadOneTimePermissions();
+    } catch (e) {
+      console.log("Failed to consume one time permission:", e);
+    }
+  };
 
   const getFeatureAccess = (featureKey: string): "none" | "view" | "edit_direct" | "edit_on_approval" => {
     if (!user) return "none";
     if (user.role === "developer" || user.role === "super_admin") return "edit_direct";
+    
+    // Check JIT (One-Time Upload) Permission
+    if ((oneTimePermissions[featureKey] || 0) > 0) {
+      return "edit_direct";
+    }
+
     const rawCustom = user.customPermissions?.[featureKey];
     if (rawCustom) {
       if (rawCustom === "none") return "none";
@@ -3818,8 +3840,8 @@ function MainApp() {
   const canEditDaily = isAdmin && (
     user?.role === "super_admin" ||
     user?.role === "developer" ||
-    getFeatureAccess("daily_content") === "edit_direct" ||
-    getFeatureAccess("daily_content") === "edit_on_approval"
+    getFeatureAccess("lms_daily_content") === "edit_direct" ||
+    getFeatureAccess("lms_daily_content") === "edit_on_approval"
   );
 
   const executeEditOrApproval = (
@@ -3830,7 +3852,9 @@ function MainApp() {
     targetCollection?: string,
     docId?: string
   ) => {
-    const access = getFeatureAccess(featureKey);
+    const hasOneTime = (oneTimePermissions[featureKey] || 0) > 0;
+    const access = hasOneTime ? "edit_direct" : getFeatureAccess(featureKey);
+
     if (access === "none") {
       Alert.alert("Permission Denied", "You do not have permission to perform actions in this section.");
       return;
@@ -3840,7 +3864,14 @@ function MainApp() {
       return;
     }
     if (access === "edit_direct") {
-      directCallback();
+      const res = directCallback();
+      if (hasOneTime) {
+        if (res instanceof Promise) {
+          res.then(() => consumeOneTimePermission(featureKey)).catch(() => {});
+        } else {
+          consumeOneTimePermission(featureKey);
+        }
+      }
       return;
     }
     if (access === "edit_on_approval") {
@@ -3889,6 +3920,115 @@ function MainApp() {
       );
     }
     return content;
+  };
+
+  const checkAccessNone = (featureKey: string) => {
+    if (getFeatureAccess(featureKey) === "none") {
+      return (
+        <View style={{ flex: 1, padding: 40, alignItems: "center", justifyContent: "center", minHeight: 300 }}>
+          <Ionicons name="lock-closed" size={48} color="#c62828" style={{ marginBottom: 15 }} />
+          <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : "#212121", marginBottom: 5 }}>
+            Access Restricted
+          </Text>
+          <Text style={{ fontSize: 13, color: "#757575", textAlign: "center" }}>
+            Your account role does not have permission to access this module.
+          </Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  const renderPendingApprovalsBanner = (featureKey: string) => {
+    const items = pendingApprovals.filter((p: any) => p.feature === featureKey);
+    if (items.length === 0) return null;
+    return (
+      <View style={{ backgroundColor: "#fff3e0", borderWidth: 1, borderColor: "#ffe0b2", borderRadius: 8, padding: 12, marginBottom: 15, gap: 6, alignSelf: "stretch" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Ionicons name="time-outline" size={16} color="#e65100" />
+          <Text style={{ fontWeight: "bold", color: "#e65100", fontSize: 13 }}>Pending Super Admin Approval ({items.length})</Text>
+        </View>
+        <Text style={{ color: "#666", fontSize: 11 }}>You have submitted changes in this module that are awaiting Super Admin review:</Text>
+        <View style={{ gap: 4, marginTop: 4 }}>
+          {items.map((it: any, idx: number) => {
+            const action = it.type === "delete_approval" ? "Delete" : it.type === "create_approval" ? "Create" : "Edit";
+            return (
+              <View key={it._id || it.id || idx} style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#fff", padding: 6, borderRadius: 4, borderWidth: 0.5, borderColor: "#ffe0b2" }}>
+                <Text style={{ fontSize: 11, color: "#333", fontWeight: "600" }}>{action} action requested</Text>
+                <Text style={{ fontSize: 10, color: "#777" }}>by {it.requestedBy}</Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+  const isReadOnly = (featureKey: string): boolean => {
+    return getFeatureAccess(featureKey) === "view";
+  };
+
+  const getErpFeatureKey = (sub: string): string => {
+    switch (sub) {
+      case "students": return "student_management";
+      case "batch": return "batch_management";
+      case "announcements": return "notices_announcements";
+      case "fees": return "fees_management";
+      case "id-card": return "id_card";
+      case "qr-permissions": return "qr_permissions";
+      case "profile-requests": return "profile_requests";
+      case "edit-permissions": return "profile_requests";
+      case "offline-attendance": return "offline_attendance";
+      case "staff": return "staff_management";
+      case "marks": return "marks_management";
+      case "analytics": return "analytics";
+      default: return "";
+    }
+  };
+
+  const getLmsFeatureKey = (sub: string): string => {
+    switch (sub) {
+      case "quiz": return "lms_quiz_posting";
+      case "daily-content": return "lms_daily_content";
+      case "live-classes": return "lms_live_classes";
+      case "recorded": return "lms_recorded_videos";
+      case "resources": return "lms_resources";
+      case "lms-courses": return "lms_courses";
+      case "lms-teachers": return "lms_teachers";
+      case "lms-subjects": return "lms_subjects";
+      case "lms-topics": return "lms_topics";
+      case "lms-subtopics": return "lms_subtopics";
+      case "lms-classes": return "lms_classes";
+      case "lms-resources": return "lms_resource_mgmt";
+      case "lms-videos": return "lms_video_library";
+      case "lms-live-sessions": return "lms_live_sessions";
+      case "lms-providers": return "lms_provider_mgmt";
+      case "lms-zoom-accounts": return "lms_zoom_accounts";
+      case "lms-syllabus": return "lms_syllabus";
+      case "lms-access": return "lms_sacs_access";
+      case "lms-chatbot": return "lms_chatbot_cms";
+      default: return "";
+    }
+  };
+
+  const getCrmFeatureKey = (sub: string): string => {
+    switch (sub) {
+      case "leads": return "leads";
+      case "campaigns": return "campaigns";
+      case "admissions": return "admissions";
+      case "feedback": return "alumni_feedback";
+      default: return "";
+    }
+  };
+
+  const getTestFeatureKey = (sub: string): string => {
+    switch (sub) {
+      case "available": return "examinations";
+      case "pdf-create": return "test_creation";
+      case "feedback": return "test_review";
+      case "results": return "test_results";
+      default: return "";
+    }
   };
 
   // Legacy Permissions Helpers
@@ -3948,28 +4088,30 @@ function MainApp() {
   };
 
   const executeDelete = (feature: string, docId: string, deleteCallback: () => void) => {
-    if (user?.role === "developer" || user?.role === "super_admin") {
-      confirmAction("Confirm Deletion", "Are you sure you want to delete this record? This action cannot be undone.", deleteCallback);
-      return;
-    }
-    const perm = getPermission(feature);
-    if (perm === "CRUD") {
-      confirmAction("Confirm Deletion", "Are you sure you want to delete this record? This action cannot be undone.", deleteCallback);
-    } else if (perm === "Delete but approval required from super admin") {
-      confirmAction("Approval Required", "Your role requires Super Admin approval to delete this item. Submit deletion request?", () => {
-        Alert.alert("Request Submitted", "Delete request submitted successfully to Super Admin.");
-        api.post("/developer/collection/notifications", {
-          type: "delete_approval",
-          feature,
-          docId,
-          requestedBy: user.username,
-          status: "pending",
-          createdAt: new Date().toISOString()
-        }).catch(() => { });
-      });
-    } else {
-      Alert.alert("Permission Denied", "You do not have permission to delete items in this section.");
-    }
+    let featureKey = feature;
+    if (feature === "students") featureKey = "student_management";
+    if (feature === "tests") featureKey = "test_creation";
+    if (feature === "batches") featureKey = "batch_management";
+    if (feature === "staff") featureKey = "staff_management";
+
+    const confirmAndDelete = () => {
+      confirmAction(
+        "Confirm Deletion",
+        "Are you sure you want to delete this record? This action cannot be undone.",
+        deleteCallback,
+        "Delete",
+        true
+      );
+    };
+
+    executeEditOrApproval(
+      featureKey,
+      "delete",
+      { id: docId },
+      confirmAndDelete,
+      feature,
+      docId
+    );
   };
   const [newQuestion, setNewQuestion] = useState({ question: "", optA: "", optB: "", optC: "", optD: "", answer: "A", explanation: "" });
   const [newTest, setNewTest] = useState(() => {
@@ -4660,13 +4802,14 @@ function MainApp() {
         loadTests();
       }
 
-      // Only load role permissions for super_admin role
-      if (user.role === "super_admin") {
+      // Load role permissions for non-student staff
+      if (user && user.role !== "student" && user.role !== "guest") {
         loadRolePermissions();
       }
 
-      if (user.role && ["developer", "super_admin"].includes(user.role)) {
+      if (user && user.role !== "student" && user.role !== "guest") {
         loadPendingApprovals();
+        loadOneTimePermissions();
       }
     } else {
       loadAnnouncements();
@@ -4745,11 +4888,13 @@ function MainApp() {
       loadFees();
     } else if (erpSub === "approvals") {
       loadPendingApprovals();
+      loadOneTimePermissions();
     }
   }, [erpSub, user]);
 
   useEffect(() => {
     if (!user) return;
+    loadOneTimePermissions();
     if (lmsSub === "daily-content") {
       loadLmsDailyContent();
     }
@@ -4994,6 +5139,48 @@ function MainApp() {
     };
   }, [activeAttempt]);
 
+  // Pre-fetch and populate student details, documents, and credentials when opening the profile editor
+  useEffect(() => {
+    if (user?.role === "student" && erpSub === "my-profile") {
+      const myStudent = getLoggedInStudent(user, students);
+      if (myStudent) {
+        const nameVal = myStudent.name || (myStudent.firstName && myStudent.lastName ? `${myStudent.firstName} ${myStudent.lastName}` : "");
+        setProfileForm(prev => ({
+          ...prev,
+          name: prev.name || nameVal || "",
+          initial: prev.initial || myStudent.initial || "",
+          dob: prev.dob || myStudent.dob || myStudent.dateOfBirth || "",
+          bloodGroup: prev.bloodGroup || myStudent.bloodGroup || "",
+          address: prev.address || myStudent.address || "",
+          gender: prev.gender || myStudent.gender || "",
+          community: prev.community || myStudent.community || "",
+          fatherName: prev.fatherName || myStudent.fatherName || "",
+          occupation: prev.occupation || myStudent.occupation || "",
+          studentOccupation: prev.studentOccupation || myStudent.studentOccupation || "",
+          altPhone: prev.altPhone || myStudent.altPhone || "",
+          email: prev.email || myStudent.email || "",
+          qualification: prev.qualification || myStudent.qualification || "",
+          college: prev.college || myStudent.college || "",
+          referralSource: prev.referralSource || myStudent.referralSource || "",
+          passportPhotoBase64: prev.passportPhotoBase64 || myStudent.photoBase64 || myStudent.photoUrl || "",
+          photoIdBase64: prev.photoIdBase64 || myStudent.photoIdBase64 || myStudent.photoIdUrl || "",
+          photoIdType: prev.photoIdType || myStudent.photoIdType || "",
+          photoIdConfirmed: prev.photoIdConfirmed || !!myStudent.photoIdType,
+          horizontalReservation: prev.horizontalReservation || myStudent.horizontalReservation || "",
+          constituency: prev.constituency || myStudent.constituency || "",
+          constituencyOthers: prev.constituencyOthers || (myStudent.constituency === "Others" ? myStudent.constituencyOthers || "" : "")
+        }));
+        
+        // Pre-fill password inputs with existing password to prevent re-entering
+        if (myStudent.loginPassword) {
+          setStudentOldPassword(prev => prev || myStudent.loginPassword || "");
+          setStudentNewPassword(prev => prev || myStudent.loginPassword || "");
+          setStudentConfirmPassword(prev => prev || myStudent.loginPassword || "");
+        }
+      }
+    }
+  }, [erpSub, students, user]);
+
   // Auto-sync student profile, ID Card, Hall Ticket, and Edit Permissions without requiring re-login
   useEffect(() => {
     if (!user || user.role !== "student") return;
@@ -5236,7 +5423,7 @@ function MainApp() {
       const list = res?.data || res || [];
       const rawList = Array.isArray(list) ? list : Array.isArray(list?.docs) ? list.docs : [];
       const filtered = rawList.filter((n: any) =>
-        ["delete_approval", "edit_approval", "create_approval"].includes(n.type) && n.status === "pending"
+        ["delete_approval", "edit_approval", "create_approval", "one_time_upload_request"].includes(n.type) && n.status === "pending"
       );
       setPendingApprovals(filtered);
     } catch (e) {
@@ -5244,10 +5431,30 @@ function MainApp() {
     }
   };
 
+  const loadOneTimePermissions = async () => {
+    const userId = user?.userId || user?.user_id || user?.sub || user?.id;
+    if (!userId) return;
+    try {
+      const res = await api.get("/developer/collection/one_time_permissions");
+      const list = res?.data || res || [];
+      const rawList = Array.isArray(list) ? list : Array.isArray(list?.docs) ? list.docs : [];
+      const map: Record<string, number> = {};
+      rawList.forEach((d: any) => {
+        if (d.userId === userId) {
+          map[d.feature] = d.remainingUses || 0;
+        }
+      });
+      setOneTimePermissions(map);
+    } catch (e) {
+      console.log("Failed loading one time permissions:", e);
+    }
+  };
+
   const handleApproveRequest = async (item: any, callback?: () => void) => {
     const isDelete = item.type === "delete_approval";
     const isCreate = item.type === "create_approval";
-    const actionTitle = isDelete ? "Delete" : isCreate ? "Create" : "Apply Edit";
+    const isOneTime = item.type === "one_time_upload_request";
+    const actionTitle = isDelete ? "Delete" : isCreate ? "Create" : isOneTime ? "One-Time Permission" : "Apply Edit";
 
     confirmAction(
       `Confirm ${actionTitle} Approval`,
@@ -5260,7 +5467,14 @@ function MainApp() {
           if (collectionName === "student_management") collectionName = "students";
           if (collectionName === "staff_management") collectionName = "staff";
 
-          if (isDelete) {
+          if (isOneTime) {
+            await api.post(`/developer/approve-one-time-permission`, {
+              userId: item.requestedByUserId,
+              username: item.requestedBy,
+              feature: item.feature,
+              uses: 1
+            });
+          } else if (isDelete) {
             await api.delete(`/developer/collection/${collectionName}/${item.docId}`);
           } else if (isCreate) {
             await api.post(`/developer/collection/${collectionName}`, item.proposedPayload || {});
@@ -7249,17 +7463,26 @@ function MainApp() {
       Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
-    setIsSavingStudent(true);
-    try {
-      await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user?.name || user?.username || "Super Admin", createdByAdmin: user?.username || user?.name || "Super Admin" });
-      Alert.alert("Success", "Student created successfully.");
-      setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
-      loadStudents();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to save student profile.");
-    } finally {
-      setIsSavingStudent(false);
-    }
+
+    executeEditOrApproval(
+      "student_management",
+      "create",
+      studentToSave,
+      async () => {
+        setIsSavingStudent(true);
+        try {
+          await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user?.name || user?.username || "Super Admin", createdByAdmin: user?.username || user?.name || "Super Admin" });
+          Alert.alert("Success", "Student created successfully.");
+          setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
+          loadStudents();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to save student profile.");
+        } finally {
+          setIsSavingStudent(false);
+        }
+      },
+      "students"
+    );
   };
 
   // Publish Fee Alert Notification with Due Date to Student Dashboard
@@ -7402,60 +7625,88 @@ function MainApp() {
       Alert.alert("Error", "Batch name and course are required.");
       return;
     }
-    setIsSavingBatch(true);
-    try {
-      let studentRollMap: Record<string, string> = {};
-      if (isSpecialBatch && newBatch.enableSpecialRollNo && (newBatch.subBatches || []).length > 0) {
+    
+    let studentRollMap: Record<string, string> = {};
+    if (isSpecialBatch && newBatch.enableSpecialRollNo && (newBatch.subBatches || []).length > 0) {
+      try {
         studentRollMap = await generateSpecialRollNumbersForBatch(newBatch.batchName, newBatch.subBatches, true);
+      } catch (err) {
+        console.log("Failed pre-generating special roll numbers:", err);
       }
-
-      const payload = {
-        ...newBatch,
-        isSpecial: isSpecialBatch,
-        studentRollMap,
-        createdBy: user.name
-      };
-      await api.post("/erp/batch", payload);
-      Alert.alert("Success", isSpecialBatch ? `Special Batch created successfully with ${Object.keys(studentRollMap).length > 0 ? Object.keys(studentRollMap).length + ' special roll numbers generated!' : 'same general roll numbers.'}` : "Batch created successfully.");
-      setNewBatch({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [], enableSpecialRollNo: false });
-      loadBatches();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to create batch.");
-    } finally {
-      setIsSavingBatch(false);
     }
+
+    const payload = {
+      ...newBatch,
+      isSpecial: isSpecialBatch,
+      studentRollMap,
+      createdBy: user.name
+    };
+
+    executeEditOrApproval(
+      "batch_management",
+      "create",
+      payload,
+      async () => {
+        setIsSavingBatch(true);
+        try {
+          await api.post("/erp/batch", payload);
+          Alert.alert("Success", isSpecialBatch ? `Special Batch created successfully with ${Object.keys(studentRollMap).length > 0 ? Object.keys(studentRollMap).length + ' special roll numbers generated!' : 'same general roll numbers.'}` : "Batch created successfully.");
+          setNewBatch({ batchName: "", course: "", year: String(new Date().getFullYear()), description: "", isSpecial: false, subBatches: [], enableSpecialRollNo: false });
+          loadBatches();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to create batch.");
+        } finally {
+          setIsSavingBatch(false);
+        }
+      },
+      "batches"
+    );
   };
 
   const updateBatch = async () => {
     if (!editingBatch || !editingBatch.id) return;
-    try {
-      let studentRollMap: Record<string, string> = editingBatch.studentRollMap || {};
-      if (editingBatch.isSpecial && editingBatch.enableSpecialRollNo && (editingBatch.subBatches || []).length > 0) {
+    
+    let studentRollMap: Record<string, string> = editingBatch.studentRollMap || {};
+    if (editingBatch.isSpecial && editingBatch.enableSpecialRollNo && (editingBatch.subBatches || []).length > 0) {
+      try {
         studentRollMap = await generateSpecialRollNumbersForBatch(editingBatch.batchName, editingBatch.subBatches, true);
+      } catch (err) {
+        console.log("Failed pre-generating special roll numbers for update:", err);
       }
-      await api.put(`/erp/batch/${editingBatch.id}`, { ...editingBatch, studentRollMap, updatedBy: user.name });
-      Alert.alert("Success", "Batch updated successfully!");
-      setEditingBatch(null);
-      loadBatches();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to update batch.");
     }
+
+    const payload = { ...editingBatch, studentRollMap, updatedBy: user.name };
+
+    executeEditOrApproval(
+      "batch_management",
+      "edit",
+      payload,
+      async () => {
+        try {
+          await api.put(`/erp/batch/${editingBatch.id}`, payload);
+          Alert.alert("Success", "Batch updated successfully!");
+          setEditingBatch(null);
+          loadBatches();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to update batch.");
+        }
+      },
+      "batches",
+      editingBatch.id
+    );
   };
 
   const deleteBatch = async (id: string) => {
-    confirmAction(
-      "Confirm Delete Batch",
-      "Are you sure you want to delete this batch? All associated schedules will be removed.",
-      async () => {
-        try {
-          await api.delete(`/erp/batch/${id}`);
-          Alert.alert("Success", "Batch deleted.");
-          loadBatches();
-        } catch (e: any) {
-          Alert.alert("Error", e.message || "Failed to delete batch.");
-        }
+    const performDelete = async () => {
+      try {
+        await api.delete(`/erp/batch/${id}`);
+        Alert.alert("Success", "Batch deleted.");
+        loadBatches();
+      } catch (e: any) {
+        Alert.alert("Error", e.message || "Failed to delete batch.");
       }
-    );
+    };
+    executeDelete("batches", id, performDelete);
   };
 
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -7498,6 +7749,16 @@ function MainApp() {
 
 
   const validatePage1 = () => {
+    const myStudent = getLoggedInStudent(user, students);
+    const existingPassword = myStudent?.loginPassword || "";
+    
+    const isUnchanged = (!studentOldPassword && !studentNewPassword && !studentConfirmPassword) ||
+                        (studentOldPassword === existingPassword && studentNewPassword === existingPassword && studentConfirmPassword === existingPassword);
+                        
+    if (isUnchanged) {
+      return true;
+    }
+
     if (!studentOldPassword || !studentNewPassword || !studentConfirmPassword) {
       Alert.alert("Validation Error", "Please fill in old, new, and confirm passwords.");
       return false;
@@ -7551,20 +7812,28 @@ function MainApp() {
     const myStudent = getLoggedInStudent(user, students);
     if (!myStudent) return;
     setIsSubmittingProfile(true);
-    try {
-      await api.post("/auth/login", { username: user.username, password: studentOldPassword });
-    } catch (err: any) {
-      setIsSubmittingProfile(false);
-      Alert.alert("Error", "Incorrect old password. Please enter the correct password created by the administrator.");
-      return;
+
+    const existingPassword = myStudent?.loginPassword || "";
+    const isUnchanged = (!studentOldPassword && !studentNewPassword && !studentConfirmPassword) ||
+                        (studentOldPassword === existingPassword && studentNewPassword === existingPassword && studentConfirmPassword === existingPassword);
+
+    if (!isUnchanged) {
+      try {
+        await api.post("/auth/login", { username: user.username, password: studentOldPassword });
+      } catch (err: any) {
+        setIsSubmittingProfile(false);
+        Alert.alert("Error", "Incorrect old password. Please enter the correct password created by the administrator.");
+        return;
+      }
+      try {
+        await api.put("/erp/student/profile/me", { loginPassword: studentNewPassword });
+      } catch (err: any) {
+        setIsSubmittingProfile(false);
+        Alert.alert("Error", "Failed to update password: " + err.message);
+        return;
+      }
     }
-    try {
-      await api.put("/erp/student/profile/me", { loginPassword: studentNewPassword });
-    } catch (err: any) {
-      setIsSubmittingProfile(false);
-      Alert.alert("Error", "Failed to update password: " + err.message);
-      return;
-    }
+
     try {
       const compressedPassport = await compressImageBase64(profileForm.passportPhotoBase64);
       const compressedPhotoId = await compressImageBase64(profileForm.photoIdBase64);
@@ -7609,51 +7878,72 @@ function MainApp() {
   };
 
   const approveProfileRequest = async (id: string) => {
-    setIsProcessingProfile(id);
-    try {
-      await api.put(`/erp/profile-request/${id}/approve`, { reviewedBy: user.name }, undefined, 60000);
-      Alert.alert("Success", "Profile request approved successfully.");
-      setViewingProfileReqId(null);
-      loadProfileRequests();
-      loadStudents();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to approve.");
-    } finally {
-      setIsProcessingProfile(null);
-    }
+    executeEditOrApproval(
+      "profile_requests",
+      "approve",
+      { id },
+      async () => {
+        setIsProcessingProfile(id);
+        try {
+          await api.put(`/erp/profile-request/${id}/approve`, { reviewedBy: user.name }, undefined, 60000);
+          Alert.alert("Success", "Profile request approved successfully.");
+          setViewingProfileReqId(null);
+          loadProfileRequests();
+          loadStudents();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to approve.");
+        } finally {
+          setIsProcessingProfile(null);
+        }
+      },
+      "profile-requests"
+    );
   };
 
   const rejectProfileRequest = async (id: string, reason: string) => {
-    setIsProcessingProfile(id);
-    try {
-      await api.put(`/erp/profile-request/${id}/reject`, { reviewedBy: user.name, rejectionReason: reason });
-      Alert.alert("Success", "Profile request rejected successfully.");
-      setViewingProfileReqId(null);
-      loadProfileRequests();
-      loadStudents();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to reject.");
-    } finally {
-      setIsProcessingProfile(null);
-    }
+    executeEditOrApproval(
+      "profile_requests",
+      "reject",
+      { id, reason },
+      async () => {
+        setIsProcessingProfile(id);
+        try {
+          await api.put(`/erp/profile-request/${id}/reject`, { reviewedBy: user.name, rejectionReason: reason });
+          Alert.alert("Success", "Profile request rejected successfully.");
+          setViewingProfileReqId(null);
+          loadProfileRequests();
+          loadStudents();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to reject.");
+        } finally {
+          setIsProcessingProfile(null);
+        }
+      },
+      "profile-requests"
+    );
   };
 
   const createStaffRecord = async () => {
-    if (!["developer", "super_admin", "admin"].includes(user?.role)) {
-      Alert.alert("Permission Denied", "You do not have permission to create admin accounts.");
-      return;
-    }
-    setIsSavingAdmin(true);
-    try {
-      await api.post("/erp/staff", { ...newStaff, createdBy: user.name });
-      Alert.alert("Success", "Admin record saved successfully.");
-      setNewStaff({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin" });
-      loadStaff();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to save admin record.");
-    } finally {
-      setIsSavingAdmin(false);
-    }
+    const payload = { ...newStaff, createdBy: user.name };
+    executeEditOrApproval(
+      "staff_management",
+      "create",
+      payload,
+      async () => {
+        setIsSavingAdmin(true);
+        try {
+          await api.post("/erp/staff", payload);
+          Alert.alert("Success", "Admin record saved successfully.");
+          setNewStaff({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin" });
+          loadStaff();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to save admin record.");
+        } finally {
+          setIsSavingAdmin(false);
+        }
+      },
+      "staff"
+    );
   };
 
   const updateStudentRecord = async () => {
@@ -7675,15 +7965,25 @@ function MainApp() {
       Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
-    try {
-      await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
-      Alert.alert("Success", "Student record updated!");
-      setEditingStudent(null);
-      setShowStudentForm(false);
-      loadStudents();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to update student profile.");
-    }
+
+    executeEditOrApproval(
+      "student_management",
+      "edit",
+      editingStudent,
+      async () => {
+        try {
+          await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
+          Alert.alert("Success", "Student record updated!");
+          setEditingStudent(null);
+          setShowStudentForm(false);
+          loadStudents();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to update student profile.");
+        }
+      },
+      "students",
+      editingStudent.id
+    );
   };
 
   const deleteStudentRecord = async (id: string) => {
@@ -7700,40 +8000,38 @@ function MainApp() {
   };
 
   const updateStaffRecord = async () => {
-    if (!["developer", "super_admin", "admin"].includes(user?.role)) {
-      Alert.alert("Permission Denied", "You do not have permission to update admin accounts.");
-      return;
-    }
     if (!editingStaff) return;
-    try {
-      await api.put(`/erp/staff/${editingStaff.id}`, editingStaff);
-      Alert.alert("Success", "Admin record updated!");
-      setEditingStaff(null);
-      setShowStaffForm(false);
-      loadStaff();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to update admin profile.");
-    }
+    executeEditOrApproval(
+      "staff_management",
+      "edit",
+      editingStaff,
+      async () => {
+        try {
+          await api.put(`/erp/staff/${editingStaff.id}`, editingStaff);
+          Alert.alert("Success", "Admin record updated!");
+          setEditingStaff(null);
+          setShowStaffForm(false);
+          loadStaff();
+        } catch (e: any) {
+          Alert.alert("Error", e.message || "Failed to update admin profile.");
+        }
+      },
+      "staff",
+      editingStaff.id
+    );
   };
 
   const deleteStaffRecord = async (id: string) => {
-    if (!["developer", "super_admin", "admin"].includes(user?.role)) {
-      Alert.alert("Permission Denied", "You do not have permission to delete admin accounts.");
-      return;
-    }
-    confirmAction(
-      "Confirm Delete Admin",
-      "Are you sure you want to delete this admin record? This action cannot be undone.",
-      async () => {
-        try {
-          await api.delete(`/erp/staff/${id}`);
-          Alert.alert("Success", "Admin record deleted.");
-          loadStaff();
-        } catch (e: any) {
-          Alert.alert("Error", e.message || "Failed to delete admin record.");
-        }
+    const performDelete = async () => {
+      try {
+        await api.delete(`/erp/staff/${id}`);
+        Alert.alert("Success", "Admin record deleted.");
+        loadStaff();
+      } catch (e: any) {
+        Alert.alert("Error", e.message || "Failed to delete admin record.");
       }
-    );
+    };
+    executeDelete("staff", id, performDelete);
   };
 
   const saveQuestion = async () => {
@@ -8103,7 +8401,7 @@ function MainApp() {
       }
     };
 
-    executeEditOrApproval("quiz_posting", "create", qPayload, performPublish, "questions");
+    executeEditOrApproval("lms_quiz_posting", "create", qPayload, performPublish, "questions");
   };
 
   const submitLmsQuiz = async () => {
@@ -9193,7 +9491,9 @@ function MainApp() {
                     pendingApprovals.map((item, idx) => (
                       <View key={item._id} style={{ flexDirection: "row", paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: idx === pendingApprovals.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0", alignItems: "center" }}>
                         <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12, textTransform: "capitalize", fontWeight: "600" }}>{item.feature}</Text>
-                        <Text style={{ flex: 2.5, color: "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>{item.docId}</Text>
+                        <Text style={{ flex: 2.5, color: item.type === "one_time_upload_request" ? "#1976d2" : "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>
+                          {item.type === "one_time_upload_request" ? "JIT Single-Use Upload" : item.docId}
+                        </Text>
                         <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12 }} numberOfLines={1}>{item.requestedBy}</Text>
                         <Text style={{ flex: 1.5, color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "N/A"}</Text>
                         <View style={{ flex: 1.5, flexDirection: "row", justifyContent: "center", gap: 6 }}>
@@ -15124,9 +15424,9 @@ function MainApp() {
                       <Ionicons name="flash-outline" size={18} color="#c62828" style={{ marginRight: 6 }} />
                       <Text style={{ fontSize: 15, fontWeight: "bold", color: "#c62828" }}>Quick Access</Text>
                     </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 16, gap: 12 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
                       <TouchableOpacity
-                        onPress={() => { setActiveTab("crm"); changeCrmSub("admission"); }}
+                        onPress={() => { setActiveTab("crm"); changeCrmSub("admissions"); }}
                         style={{
                           width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2a1b38" : "#f3e5f5",
                           borderWidth: 1, borderColor: darkMode ? "#4a148c" : "#e1bee7", minHeight: 90, justifyContent: "space-between"
@@ -15143,7 +15443,7 @@ function MainApp() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        onPress={() => { setActiveTab("crm"); changeCrmSub("queries"); }}
+                        onPress={() => { setActiveTab("crm"); changeCrmSub("inquiries"); }}
                         style={{
                           width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#192a3a" : "#e1f5fe",
                           borderWidth: 1, borderColor: darkMode ? "#0277bd" : "#b3e5fc", minHeight: 90, justifyContent: "space-between"
@@ -15183,7 +15483,7 @@ function MainApp() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        onPress={() => { setActiveTab("lms"); setLmsSubTab("qrcode-permissions"); }}
+                        onPress={() => { setActiveTab("erp"); changeErpSub("qr-permissions"); }}
                         style={{
                           width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#19302c" : "#e0f2f1",
                           borderWidth: 1, borderColor: darkMode ? "#00695c" : "#b2dfdb", minHeight: 90, justifyContent: "space-between"
@@ -15200,7 +15500,7 @@ function MainApp() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        onPress={() => { setActiveTab("erp"); changeErpSub("profile-requests"); setProfileRequestsTab("requests"); }}
+                        onPress={() => { setActiveTab("erp"); changeErpSub("edit-permissions"); }}
                         style={{
                           width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#361b24" : "#fce4ec",
                           borderWidth: 1, borderColor: darkMode ? "#880e4f" : "#f8bbd0", minHeight: 90, justifyContent: "space-between"
@@ -15217,7 +15517,7 @@ function MainApp() {
                       </TouchableOpacity>
 
                       <TouchableOpacity
-                        onPress={() => { setActiveTab("erp"); changeErpSub("finance"); }}
+                        onPress={() => { setActiveTab("erp"); changeErpSub("fees"); }}
                         style={{
                           width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1b2e1e" : "#e8f5e9",
                           borderWidth: 1, borderColor: darkMode ? "#1b5e20" : "#c8e6c9", minHeight: 90, justifyContent: "space-between"
@@ -15232,7 +15532,58 @@ function MainApp() {
                           <Text style={{ fontSize: 11, color: darkMode ? "#81c784" : "#2e7d32", marginTop: 2 }}>Student Finance</Text>
                         </View>
                       </TouchableOpacity>
-                    </ScrollView>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("lms"); changeLmsSub("live-classes"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#3e1c1c" : "#ffebee",
+                          borderWidth: 1, borderColor: darkMode ? "#c62828" : "#ff8a80", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="videocam-outline" size={20} color="#c62828" />
+                          <Ionicons name="arrow-forward" size={14} color="#c62828" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#ff8a80" : "#c62828" }}>Live Class</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#ff8a80" : "#c62828", marginTop: 2 }}>Live Streaming</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("lms"); changeLmsSub("resources"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1c2a38" : "#e3f2fd",
+                          borderWidth: 1, borderColor: darkMode ? "#1565c0" : "#90caf9", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="folder-open-outline" size={20} color="#1565c0" />
+                          <Ionicons name="arrow-forward" size={14} color="#1565c0" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#90caf9" : "#1565c0" }}>Resources</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#90caf9" : "#1565c0", marginTop: 2 }}>Study Materials</Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => { setActiveTab("lms"); changeLmsSub("lms-access"); }}
+                        style={{
+                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2e1c38" : "#f3e5f5",
+                          borderWidth: 1, borderColor: darkMode ? "#6a1b9a" : "#ce93d8", minHeight: 90, justifyContent: "space-between"
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Ionicons name="shield-checkmark-outline" size={20} color="#6a1b9a" />
+                          <Ionicons name="arrow-forward" size={14} color="#6a1b9a" />
+                        </View>
+                        <View>
+                          <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#ce93d8" : "#6a1b9a" }}>Access Control</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#ce93d8" : "#6a1b9a", marginTop: 2 }}>SACS Security</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ) : (
                   <>
@@ -15831,8 +16182,10 @@ function MainApp() {
                 )}
 
                 <ScrollView style={[styles.body, { paddingTop: (isMobile && testSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80 }}>
+                  {checkAccessNone(getTestFeatureKey(testSub))}
+                  {getFeatureAccess(getTestFeatureKey(testSub)) !== "none" && renderPendingApprovalsBanner(getTestFeatureKey(testSub))}
 
-                  {testSub === "available" && (() => {
+                  {testSub === "available" && getFeatureAccess("examinations") !== "none" && (() => {
                     const now = nowTick;
                     
                     // Filter tests based on search and category
@@ -16089,7 +16442,6 @@ function MainApp() {
                                               };
                                               try {
                                                 await api.post("/test-portal/test-creation/permission-requests", reqObj);
-                                                // Update local state so UI shows "pending" immediately
                                                 setOfflineTestRequests(prev => [reqObj, ...prev.filter((r: any) => !(r.testId === t.id && (r.studentId === reqObj.studentId || r.rollNumber === reqObj.rollNumber)))]);
                                                 Alert.alert("Permission Requested", "Your request to attend this test has been sent to Super Admin / Admin for approval.");
                                               } catch (e: any) {
@@ -16123,7 +16475,6 @@ function MainApp() {
                                            }
                                          </TouchableOpacity>
                                        )}
-                                      )}
                                     </View>
                                   );
                                 })}
@@ -17945,28 +18296,32 @@ function MainApp() {
                   </TouchableOpacity>
                 )}
                 <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && erpSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
-                  {erpSub === "students" && isAdmin && (
+                  {checkAccessNone(getErpFeatureKey(erpSub))}
+                  {getFeatureAccess(getErpFeatureKey(erpSub)) !== "none" && renderPendingApprovalsBanner(getErpFeatureKey(erpSub))}
+                  {erpSub === "students" && isAdmin && getFeatureAccess("student_management") !== "none" && (
                     isInitialLoading ? (
                       <RNTableSkeleton rows={6} darkMode={darkMode} />
                     ) : (
                       <View style={{ gap: 15 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
                           <Text style={styles.sectionTitle}>Student Management Portal</Text>
-                          <TouchableOpacity
-                            onPress={() => {
-                              if (showStudentForm) {
-                                setEditingStudent(null);
-                                setShowStudentForm(false);
-                              } else {
-                                setShowStudentForm(true);
-                              }
-                            }}
-                            style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center" }]}
-                          >
-                            <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
-                              {showStudentForm ? "Close Form" : "Create New Student"}
-                            </Text>
-                          </TouchableOpacity>
+                          {!isReadOnly("student_management") && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                if (showStudentForm) {
+                                  setEditingStudent(null);
+                                  setShowStudentForm(false);
+                                } else {
+                                  setShowStudentForm(true);
+                                }
+                              }}
+                              style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center" }]}
+                            >
+                              <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
+                                {showStudentForm ? "Close Form" : "Create New Student"}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
 
                         {showStudentForm && (
@@ -18851,34 +19206,38 @@ function MainApp() {
                                               <Ionicons name="download-outline" size={14} color="#ffffff" />
                                               <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Download PDF</Text>
                                             </TouchableOpacity>
-                                            <TouchableOpacity
-                                              onPress={() => {
-                                                setSelectedDirectoryStudent(null);
-                                                const initialBatches = s.batches || (s.batch ? [s.batch] : []);
-                                                const initialBatchModes = s.batchModes || {};
-                                                initialBatches.forEach((b: string) => {
-                                                  if (!initialBatchModes[b]) {
-                                                    initialBatchModes[b] = [s.type || "offline"];
-                                                  }
-                                                });
-                                                setEditingStudent({ ...s, batches: initialBatches, batchModes: initialBatchModes });
-                                                setShowStudentForm(true);
-                                              }}
-                                              style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
-                                            >
-                                              <Ionicons name="create-outline" size={14} color="#ffffff" />
-                                              <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Edit</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity
-                                              onPress={() => {
-                                                deleteStudentRecord(s.id);
-                                                setSelectedDirectoryStudent(null);
-                                              }}
-                                              style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#d32f2f", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
-                                            >
-                                              <Ionicons name="trash-outline" size={14} color="#ffffff" />
-                                              <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Delete</Text>
-                                            </TouchableOpacity>
+                                            {!isReadOnly("student_management") && (
+                                              <TouchableOpacity
+                                                onPress={() => {
+                                                  setSelectedDirectoryStudent(null);
+                                                  const initialBatches = s.batches || (s.batch ? [s.batch] : []);
+                                                  const initialBatchModes = s.batchModes || {};
+                                                  initialBatches.forEach((b: string) => {
+                                                    if (!initialBatchModes[b]) {
+                                                      initialBatchModes[b] = [s.type || "offline"];
+                                                    }
+                                                  });
+                                                  setEditingStudent({ ...s, batches: initialBatches, batchModes: initialBatchModes });
+                                                  setShowStudentForm(true);
+                                                }}
+                                                style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
+                                              >
+                                                <Ionicons name="create-outline" size={14} color="#ffffff" />
+                                                <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Edit</Text>
+                                              </TouchableOpacity>
+                                            )}
+                                            {!isReadOnly("student_management") && (
+                                              <TouchableOpacity
+                                                onPress={() => {
+                                                  deleteStudentRecord(s.id);
+                                                  setSelectedDirectoryStudent(null);
+                                                }}
+                                                style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#d32f2f", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
+                                              >
+                                                <Ionicons name="trash-outline" size={14} color="#ffffff" />
+                                                <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Delete</Text>
+                                              </TouchableOpacity>
+                                            )}
                                           </View>
                                         </ScrollView>
                                       );
@@ -19352,7 +19711,7 @@ function MainApp() {
                   })()}
 
                   {/* BATCH MANAGEMENT SECTION */}
-                  {erpSub === "batch" && isAdmin && (
+                  {erpSub === "batch" && isAdmin && getFeatureAccess("batch_management") !== "none" && (
                     isInitialLoading ? (
                       <RNFormSkeleton darkMode={darkMode} />
                     ) : (
@@ -19614,19 +19973,21 @@ function MainApp() {
                               </View>
                             )}
 
-                            <TouchableOpacity
-                              onPress={() => createBatch(batchTab === "special")}
-                              style={[styles.primaryBtn, { backgroundColor: batchTab === "special" ? "#7b1fa2" : "#1976d2" }]}
-                              disabled={isSavingBatch}
-                            >
-                              {isSavingBatch ? (
-                                <ActivityIndicator color="#ffffff" size="small" />
-                              ) : (
-                                <Text style={styles.primaryBtnTxt}>
-                                  {batchTab === "special" ? "⭐ Save Special Batch" : "Save General Batch"}
-                                </Text>
-                              )}
-                            </TouchableOpacity>
+                            {!isReadOnly("batch_management") && (
+                              <TouchableOpacity
+                                onPress={() => createBatch(batchTab === "special")}
+                                style={[styles.primaryBtn, { backgroundColor: batchTab === "special" ? "#7b1fa2" : "#1976d2" }]}
+                                disabled={isSavingBatch}
+                              >
+                                {isSavingBatch ? (
+                                  <ActivityIndicator color="#ffffff" size="small" />
+                                ) : (
+                                  <Text style={styles.primaryBtnTxt}>
+                                    {batchTab === "special" ? "⭐ Save Special Batch" : "Save General Batch"}
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                            )}
                           </View>
                         )}
 
@@ -19741,23 +20102,24 @@ function MainApp() {
                                          </View>
                                        </View>
                                      )}
-                                    )}
                                   </View>
 
-                                  <View style={{ flexDirection: "row", gap: 6 }}>
-                                    <TouchableOpacity
-                                      onPress={() => setEditingBatch(b)}
-                                      style={{ backgroundColor: "#1976d2", borderRadius: 6, padding: 8 }}
-                                    >
-                                      <Ionicons name="pencil-outline" size={16} color="#fff" />
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                      onPress={() => deleteBatch(b.id)}
-                                      style={{ backgroundColor: "#d32f2f", borderRadius: 6, padding: 8 }}
-                                    >
-                                      <Ionicons name="trash-outline" size={16} color="#fff" />
-                                    </TouchableOpacity>
-                                  </View>
+                                  {!isReadOnly("batch_management") && (
+                                    <View style={{ flexDirection: "row", gap: 6 }}>
+                                      <TouchableOpacity
+                                        onPress={() => setEditingBatch(b)}
+                                        style={{ backgroundColor: "#1976d2", borderRadius: 6, padding: 8 }}
+                                      >
+                                        <Ionicons name="pencil-outline" size={16} color="#fff" />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={() => deleteBatch(b.id)}
+                                        style={{ backgroundColor: "#d32f2f", borderRadius: 6, padding: 8 }}
+                                      >
+                                        <Ionicons name="trash-outline" size={16} color="#fff" />
+                                      </TouchableOpacity>
+                                    </View>
+                                  )}
                                 </View>
                               );
                             })
@@ -20455,7 +20817,7 @@ function MainApp() {
                                     style={{ marginBottom: 6 }}
                                   />
                                   {profileForm.passportPhotoBase64 ? (
-                                    <Image source={{ uri: profileForm.passportPhotoBase64 }} style={{ width: 80, height: 80, borderRadius: 8 }} />
+                                    <Image source={{ uri: getDirectImageUrl(profileForm.passportPhotoBase64) }} style={{ width: 80, height: 80, borderRadius: 8 }} />
                                   ) : null}
                                 </View>
                               ) : (
@@ -20493,7 +20855,7 @@ function MainApp() {
                                     <Text style={{ color: "#ffffff", fontWeight: "bold" }}>Select Photo from Gallery</Text>
                                   </TouchableOpacity>
                                   {profileForm.passportPhotoBase64 ? (
-                                    <Image source={{ uri: profileForm.passportPhotoBase64 }} style={{ width: 80, height: 80, borderRadius: 8 }} />
+                                    <Image source={{ uri: getDirectImageUrl(profileForm.passportPhotoBase64) }} style={{ width: 80, height: 80, borderRadius: 8 }} />
                                   ) : null}
                                 </View>
                               )}
@@ -20524,7 +20886,7 @@ function MainApp() {
                                     style={{ marginBottom: 6 }}
                                   />
                                   {profileForm.photoIdBase64 ? (
-                                    <Image source={{ uri: profileForm.photoIdBase64 }} style={{ width: 140, height: 80, borderRadius: 8 }} />
+                                    <Image source={{ uri: getDirectImageUrl(profileForm.photoIdBase64) }} style={{ width: 140, height: 80, borderRadius: 8 }} />
                                   ) : null}
                                 </View>
                               ) : (
@@ -20563,7 +20925,7 @@ function MainApp() {
                                     <Text style={{ color: "#ffffff", fontWeight: "bold" }}>Select Photo ID from Gallery</Text>
                                   </TouchableOpacity>
                                   {profileForm.photoIdBase64 ? (
-                                    <Image source={{ uri: profileForm.photoIdBase64 }} style={{ width: 140, height: 80, borderRadius: 8 }} />
+                                    <Image source={{ uri: getDirectImageUrl(profileForm.photoIdBase64) }} style={{ width: 140, height: 80, borderRadius: 8 }} />
                                   ) : null}
                                 </View>
                               )}
@@ -20827,28 +21189,30 @@ function MainApp() {
                     )
                   )}
 
-                  {erpSub === "staff" && isAdmin && (
+                  {erpSub === "staff" && isAdmin && getFeatureAccess("staff_management") !== "none" && (
                     isInitialLoading ? (
                       <RNTableSkeleton rows={5} darkMode={darkMode} />
                     ) : (
                       <View style={{ gap: 15 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
                           <Text style={styles.sectionTitle}>Admin Management Portal</Text>
-                          <TouchableOpacity
-                            onPress={() => {
-                              if (showStaffForm) {
-                                setEditingStaff(null);
-                                setShowStaffForm(false);
-                              } else {
-                                setShowStaffForm(true);
-                              }
-                            }}
-                            style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center" }]}
-                          >
-                            <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
-                              {showStaffForm ? "Close Form" : "Create New Admin"}
-                            </Text>
-                          </TouchableOpacity>
+                          {!isReadOnly("staff_management") && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                if (showStaffForm) {
+                                  setEditingStaff(null);
+                                  setShowStaffForm(false);
+                                } else {
+                                  setShowStaffForm(true);
+                                }
+                              }}
+                              style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center" }]}
+                            >
+                              <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
+                                {showStaffForm ? "Close Form" : "Create New Admin"}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
 
                         {showStaffForm && (
@@ -21237,12 +21601,16 @@ function MainApp() {
                                     </View>
                                     <Text style={{ flex: 1.5, color: "#757575", fontSize: 12 }}>{st.email}{"\n"}{st.phone}</Text>
                                     <View style={{ flex: 1, flexDirection: "row", justifyContent: "center", gap: 8 }}>
-                                      <TouchableOpacity onPress={() => { setEditingStaff(st); setShowStaffForm(true); }} style={{ padding: 6, backgroundColor: "#0288d1", borderRadius: 4 }}>
-                                        <Ionicons name="create-outline" size={16} color="#ffffff" />
-                                      </TouchableOpacity>
-                                      <TouchableOpacity onPress={() => deleteStaffRecord(st.id)} style={{ padding: 6, backgroundColor: "#d32f2f", borderRadius: 4 }}>
-                                        <Ionicons name="trash-outline" size={16} color="#ffffff" />
-                                      </TouchableOpacity>
+                                      {!isReadOnly("staff_management") && (
+                                        <TouchableOpacity onPress={() => { setEditingStaff(st); setShowStaffForm(true); }} style={{ padding: 6, backgroundColor: "#0288d1", borderRadius: 4 }}>
+                                          <Ionicons name="create-outline" size={16} color="#ffffff" />
+                                        </TouchableOpacity>
+                                      )}
+                                      {!isReadOnly("staff_management") && (
+                                        <TouchableOpacity onPress={() => deleteStaffRecord(st.id)} style={{ padding: 6, backgroundColor: "#d32f2f", borderRadius: 4 }}>
+                                          <Ionicons name="trash-outline" size={16} color="#ffffff" />
+                                        </TouchableOpacity>
+                                      )}
                                     </View>
                                   </View>
                                 ))
@@ -21709,9 +22077,10 @@ function MainApp() {
                                 pendingApprovals.map((item, idx) => {
                                   const isDelete = item.type === "delete_approval";
                                   const isCreate = item.type === "create_approval";
-                                  const typeBadgeBg = isDelete ? "#ffebee" : isCreate ? "#e3f2fd" : "#fff8e1";
-                                  const typeBadgeColor = isDelete ? "#c62828" : isCreate ? "#1565c0" : "#f57f17";
-                                  const typeLabel = isDelete ? "DELETE" : isCreate ? "CREATE" : "EDIT";
+                                  const isOneTime = item.type === "one_time_upload_request";
+                                  const typeBadgeBg = isDelete ? "#ffebee" : isCreate ? "#e3f2fd" : isOneTime ? "#e8f5e9" : "#fff8e1";
+                                  const typeBadgeColor = isDelete ? "#c62828" : isCreate ? "#1565c0" : isOneTime ? "#2e7d32" : "#f57f17";
+                                  const typeLabel = isDelete ? "DELETE" : isCreate ? "CREATE" : isOneTime ? "ONE-TIME" : "EDIT";
 
                                   return (
                                     <View key={item._id || item.id || idx} style={[styles.tableRow, { borderBottomWidth: 1, borderColor: "#eeeeee", paddingVertical: 12, paddingHorizontal: 12, backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fafafa", alignItems: "center" }]}>
@@ -21722,8 +22091,10 @@ function MainApp() {
                                       </View>
                                       <Text style={{ flex: 1.5, color: "#212121", fontWeight: "600", textTransform: "capitalize" }}>{item.feature}</Text>
                                       <View style={{ flex: 2, gap: 2 }}>
-                                        <Text style={{ color: "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>{item.docId || "New Record"}</Text>
-                                        {item.proposedPayload && (
+                                        <Text style={{ color: isOneTime ? "#1976d2" : "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>
+                                          {isOneTime ? "JIT Single-Use Upload Request" : (item.docId || "New Record")}
+                                        </Text>
+                                        {item.proposedPayload && !isOneTime && (
                                           <Text style={{ fontSize: 10, color: "#757575" }} numberOfLines={1}>
                                             Payload: {JSON.stringify(item.proposedPayload).substring(0, 40)}...
                                           </Text>
@@ -25370,39 +25741,39 @@ function MainApp() {
                     contentContainerStyle={{ alignItems: lmsTabsCollapsed && !isMobile ? "center" : "stretch", gap: 6, paddingBottom: 60 }}
                     showsVerticalScrollIndicator={false}
                   >
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-checkmark-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile, "access_rules")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-access", lmsSub, "Access Control", "shield-checkmark-outline", () => changeLmsSub("lms-access"), "lms-admin-access", undefined, lmsTabsCollapsed && !isMobile, "lms_sacs_access")}
 
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>LEARNING</Text> : null}
-                    {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile, "live_classes")}
-                    {renderSidebarItem("daily-content", lmsSub, "Daily Content", "calendar-outline", () => changeLmsSub("daily-content"), "lms-daily-content", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
-                    {renderSidebarItem("quiz", (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "quiz" : lmsSub, "Quiz", "help-circle-outline", () => changeLmsSub("quiz"), "lms-quiz", undefined, lmsTabsCollapsed && !isMobile, "quiz_posting")}
-                    {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile, "video_content")}
+                    {isAdmin && renderSidebarItem("live-classes", lmsSub, "Live", "videocam-outline", () => changeLmsSub("live-classes"), "lms-live-classes", undefined, lmsTabsCollapsed && !isMobile, "lms_live_classes")}
+                    {renderSidebarItem("daily-content", lmsSub, "Daily Content", "calendar-outline", () => changeLmsSub("daily-content"), "lms-daily-content", undefined, lmsTabsCollapsed && !isMobile, "lms_daily_content")}
+                    {renderSidebarItem("quiz", (lmsSub === "quiz" || lmsSub === "all-quizzes" || lmsSub === "create-quiz") ? "quiz" : lmsSub, "Quiz", "help-circle-outline", () => changeLmsSub("quiz"), "lms-quiz", undefined, lmsTabsCollapsed && !isMobile, "lms_quiz_posting")}
+                    {renderSidebarItem("recorded", lmsSub, "Recorded", "play-circle-outline", () => changeLmsSub("recorded"), "lms-recorded", undefined, lmsTabsCollapsed && !isMobile, "lms_recorded_videos")}
                     {/* Student: My Courses & Live page */}
                     {!isAdmin && renderSidebarItem("my-courses", lmsSub, "My Courses", "school-outline", () => changeLmsSub("my-courses"), "lms-my-courses", undefined, lmsTabsCollapsed && !isMobile)}
                     {!isAdmin && renderSidebarItem("my-live", lmsSub, "Live Classes", "radio-outline", () => changeLmsSub("my-live"), "lms-my-live", undefined, lmsTabsCollapsed && !isMobile)}
 
                     {!lmsTabsCollapsed || isMobile ? <Text style={styles.categoryHeader}>MATERIALS</Text> : null}
-                    {renderSidebarItem("resources", lmsSub, "Resources", "folder-outline", () => changeLmsSub("resources"), "lms-resources", undefined, lmsTabsCollapsed && !isMobile, "course_materials")}
+                    {renderSidebarItem("resources", lmsSub, "Resources", "folder-outline", () => changeLmsSub("resources"), "lms-resources", undefined, lmsTabsCollapsed && !isMobile, "lms_resources")}
 
                     {/* Admin-only: Full LMS Management */}
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>LMS MANAGEMENT</Text>}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-courses", lmsSub, "Courses", "library-outline", () => changeLmsSub("lms-courses"), "lms-admin-courses", undefined, lmsTabsCollapsed && !isMobile, "courses_management")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subjects", lmsSub, "Subjects", "layers-outline", () => changeLmsSub("lms-subjects"), "lms-admin-subjects", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-topics", lmsSub, "Topics", "list-outline", () => changeLmsSub("lms-topics"), "lms-admin-topics", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subtopics", lmsSub, "Subtopics", "git-commit-outline", () => changeLmsSub("lms-subtopics"), "lms-admin-subtopics", undefined, lmsTabsCollapsed && !isMobile, "subjects_topics")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-classes", lmsSub, "Classes", "play-outline", () => changeLmsSub("lms-classes"), "lms-admin-classes", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-teachers", lmsSub, "Teachers", "people-outline", () => changeLmsSub("lms-teachers"), "lms-admin-teachers", undefined, lmsTabsCollapsed && !isMobile, "staff_management")}
-                    {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile, "daily_content")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-courses", lmsSub, "Courses", "library-outline", () => changeLmsSub("lms-courses"), "lms-admin-courses", undefined, lmsTabsCollapsed && !isMobile, "lms_courses")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subjects", lmsSub, "Subjects", "layers-outline", () => changeLmsSub("lms-subjects"), "lms-admin-subjects", undefined, lmsTabsCollapsed && !isMobile, "lms_subjects")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-topics", lmsSub, "Topics", "list-outline", () => changeLmsSub("lms-topics"), "lms-admin-topics", undefined, lmsTabsCollapsed && !isMobile, "lms_topics")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subtopics", lmsSub, "Subtopics", "git-commit-outline", () => changeLmsSub("lms-subtopics"), "lms-admin-subtopics", undefined, lmsTabsCollapsed && !isMobile, "lms_subtopics")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-classes", lmsSub, "Classes", "play-outline", () => changeLmsSub("lms-classes"), "lms-admin-classes", undefined, lmsTabsCollapsed && !isMobile, "lms_classes")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-teachers", lmsSub, "Teachers", "people-outline", () => changeLmsSub("lms-teachers"), "lms-admin-teachers", undefined, lmsTabsCollapsed && !isMobile, "lms_teachers")}
+                    {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile, "lms_syllabus")}
 
                     {/* Remaining LMS management items at the bottom */}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-resources", lmsSub, "Resources Mgmt", "documents-outline", () => changeLmsSub("lms-resources"), "lms-admin-resources", undefined, lmsTabsCollapsed && !isMobile, "course_materials")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile, "video_content")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile, "live_sessions_mgmt")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile, "provider_accounts")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile, "provider_accounts")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-resources", lmsSub, "Resources Mgmt", "documents-outline", () => changeLmsSub("lms-resources"), "lms-admin-resources", undefined, lmsTabsCollapsed && !isMobile, "lms_resource_mgmt")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile, "lms_video_library")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile, "lms_live_sessions")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile, "lms_provider_mgmt")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile, "lms_zoom_accounts")}
 
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>AI STUDIO</Text>}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-chatbot", lmsSub, "NERMAI AI Studio", "chatbubbles-outline", () => changeLmsSub("lms-chatbot"), "lms-admin-chatbot", undefined, lmsTabsCollapsed && !isMobile, "knowledge_base")}
+                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-chatbot", lmsSub, "NERMAI AI Studio", "chatbubbles-outline", () => changeLmsSub("lms-chatbot"), "lms-admin-chatbot", undefined, lmsTabsCollapsed && !isMobile, "lms_chatbot_cms")}
                   </ScrollView>
                 </View>
               )}
@@ -25436,9 +25807,11 @@ function MainApp() {
               )}
 
               <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && lmsTabsCollapsed) ? 50 : 15 }, darkMode && styles.splitContentDark]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
+                {checkAccessNone(getLmsFeatureKey(lmsSub))}
+                {getFeatureAccess(getLmsFeatureKey(lmsSub)) !== "none" && renderPendingApprovalsBanner(getLmsFeatureKey(lmsSub))}
 
                 {/* Consolidated Quiz Section */}
-                {(lmsSub === "quiz" || lmsSub === undefined || lmsSub === "create-quiz" || lmsSub === "all-quizzes") && (
+                {(lmsSub === "quiz" || lmsSub === undefined || lmsSub === "create-quiz" || lmsSub === "all-quizzes") && getFeatureAccess("lms_quiz_posting") !== "none" && (
                   <View style={{ gap: 20 }}>
                     {/* Part 1: Publish Quiz (Visible only to Admin/Staff) */}
                     {user?.role !== "student" && (
@@ -27710,7 +28083,9 @@ function MainApp() {
                   </TouchableOpacity>
                 )}
                 <ScrollView style={[styles.splitContent, { paddingTop: (isMobile && crmSidebarCollapsed) ? 50 : 15 }]} contentContainerStyle={{ paddingBottom: 80, alignItems: "stretch" }}>
-                  {crmSub === "admissions" && (() => {
+                  {checkAccessNone(getCrmFeatureKey(crmSub))}
+                  {getFeatureAccess(getCrmFeatureKey(crmSub)) !== "none" && renderPendingApprovalsBanner(getCrmFeatureKey(crmSub))}
+                  {crmSub === "admissions" && getFeatureAccess("admissions") !== "none" && (() => {
                     const pendingInquiries = admissions.filter((ad: any) => ad.status !== "converted");
                     const convertedInquiries = admissions.filter((ad: any) => ad.status === "converted");
                     const displayedInquiries = inquiriesTab === "pending" ? pendingInquiries : convertedInquiries;
