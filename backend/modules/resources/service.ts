@@ -196,6 +196,37 @@ export class ResourceService {
       return 'Unknown';
     };
 
+    // OPTIMIZATION: Pre-fetch all referenced entity names in batch upfront
+    const classIdsToFetch = new Set<string>();
+    const topicIdsToFetch = new Set<string>();
+    const subjectIdsToFetch = new Set<string>();
+    const courseIdsToFetch = new Set<string>();
+
+    list.forEach(res => {
+      if (res.classIds?.[0]) classIdsToFetch.add(res.classIds[0]);
+      if (res.topicIds?.[0]) topicIdsToFetch.add(res.topicIds[0]);
+      if (res.subjectIds?.[0]) subjectIdsToFetch.add(res.subjectIds[0]);
+      if (res.courseIds?.[0]) courseIdsToFetch.add(res.courseIds[0]);
+    });
+
+    const batchFetchNames = async (repo: any, idsSet: Set<string>) => {
+      const ids = Array.from(idsSet).filter(id => id && !namesCache[id]);
+      if (ids.length === 0) return;
+      await Promise.all(ids.map(async id => {
+        try {
+          const doc = await repo.findById(id);
+          if (doc) namesCache[id] = doc.name || doc.title;
+        } catch (e) {}
+      }));
+    };
+
+    await Promise.all([
+      batchFetchNames(classRepo, classIdsToFetch),
+      batchFetchNames(topicRepo, topicIdsToFetch),
+      batchFetchNames(subjectRepo, subjectIdsToFetch),
+      batchFetchNames(courseRepo, courseIdsToFetch),
+    ]);
+
     const populatedList = await Promise.all(list.map(async (res) => {
       let finalRes = { ...res };
       if (res.provider === 'google_drive' || res.provider === 'external_link' || res.provider === 'firebase_asset') {

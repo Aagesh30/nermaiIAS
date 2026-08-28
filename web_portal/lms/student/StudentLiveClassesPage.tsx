@@ -623,12 +623,28 @@ const SessionCard = ({
           </div>
         )}
 
-        {/* ENDED — has access */}
         {isEnded && !accessDenied && (
           <div className="space-y-2 mt-2">
             <div className="w-full py-2 px-4 text-center text-xs text-red-400/80 bg-red-500/10 border border-red-500/20 rounded-lg">
               Session ended
             </div>
+            {/* Show recording section only if this class has a recording */}
+            {liveStatus === 'RECORDED_AVAILABLE' && (
+              cls.hasRecordedAccess ? (
+                // Student can watch recording — navigate to CoursePlayer
+                <button
+                  className="w-full py-2 px-4 text-center text-xs font-semibold rounded-lg border border-purple-400/50 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 hover:bg-purple-100 transition-colors flex items-center justify-center gap-2"
+                  onClick={() => onJoin(cls.courseId || cls.id, cls.classId || cls.id)}
+                >
+                  <Video size={12} /> Watch Recording
+                </button>
+              ) : (
+                // Online-only student: recording locked
+                <div className="w-full py-2 px-4 text-center text-xs font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg dark:text-amber-400 dark:bg-amber-900/30 dark:border-amber-700/50">
+                  🔒 Recording available — upgrade to Recorded batch to access
+                </div>
+              )
+            )}
             {/* Show attendance outcome if submitted */}
             {attRecord?.attendanceSubmittedAt && (
               <div className={`w-full py-2 px-4 text-center text-xs font-semibold rounded-lg border ${

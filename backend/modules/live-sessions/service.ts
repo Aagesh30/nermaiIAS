@@ -168,7 +168,7 @@ export class LiveSessionService {
 
     // 1. Fetch user to resolve studentId
     let studentId = userId;
-    let studentType = 'offline';
+    let studentType = '';
 
     const userDoc = await db.collection('users').doc(userId).get();
     if (userDoc.exists) {
@@ -257,13 +257,22 @@ export class LiveSessionService {
     }
 
     const userBatchIds = Array.from(new Set(rawBatchIds.filter(Boolean)));
+    const userBatchTypes: string[] = []; // NEW: track batch types for each enrolled batch
 
     if (userBatchIds.length > 0) {
       const batchDocs = await Promise.all(userBatchIds.map((b: string) => db.collection('student_batches').doc(b).get()));
       batchDocs.forEach(d => {
         const cId = d.data()?.courseId;
         if (cId) userCourseIds.push(cId);
+        // NEW: collect batch type
+        const bType = (d.data()?.type || d.data()?.batchType || '').toLowerCase().trim();
+        if (bType) userBatchTypes.push(bType);
       });
+    }
+
+    // Fallback: if no batch types were found in the batch docs, fallback to studentType
+    if (userBatchTypes.length === 0 && studentType) {
+      userBatchTypes.push(studentType.toLowerCase().trim());
     }
 
     const uniqueUserCourseIds = Array.from(new Set(userCourseIds.filter(Boolean)));
@@ -315,11 +324,31 @@ export class LiveSessionService {
       const targetBatches: string[] = cls.targetBatchIds || cls.targetBatches || [];
       const accessLevel = cls.accessLevel || '';
 
-      // Check access: free, all, batch, course matching, or an approved content_access grant
+      // ── Permission Matrix access logic ──────────────────────────────────────────
       let hasAccess = false;
+      let hasRecordedAccess = false; // NEW: whether student can watch recording after class ends
+
       const isEnrolled = userBatchIds.length > 0 || uniqueUserCourseIds.length > 0;
-      const isOffline = studentType?.toLowerCase() === 'offline';
-      
+
+      // Determine batch types from actual enrolled batch documents
+      const hasOnlineBatch   = userBatchTypes.includes('online');
+      const hasOfflineBatch  = userBatchTypes.includes('offline');
+      const hasRecordedBatch = userBatchTypes.includes('recorded');
+
+      // Permission Matrix:
+      // - Only Offline                 → no live, no recording (must request)
+      // - Only Online                  → live only, no recording
+      // - Online + Offline             → live only, no recording
+      // - Offline + Recorded           → live + recording
+      // - Online + Recorded            → live + recording
+      // - Only Recorded                → live + recording
+      // - No batch type (unknown/free) → treat as online (live only)
+      const isOnlyOffline = hasOfflineBatch && !hasOnlineBatch && !hasRecordedBatch;
+      const isOnlineStudent = hasOnlineBatch || studentType === 'online' || (!hasOfflineBatch && !hasRecordedBatch);
+
+      // hasRecordedAccess = true only when student has a recorded batch
+      hasRecordedAccess = hasRecordedBatch;
+
       const targetCourses = cls.targetCourses || (cls.courseId ? [cls.courseId] : []);
       const isTargeted = targetBatches.length > 0 || targetCourses.length > 0;
       const matchBatch = targetBatches.length > 0 ? targetBatches.some((bId: string) => userBatchIds.includes(bId)) : false;
@@ -330,28 +359,32 @@ export class LiveSessionService {
 
       if (hasGrant) {
         hasAccess = true;
+        hasRecordedAccess = true; // Grant unlocks everything
+      } else if (isOnlineStudent) {
+        hasAccess = true; // Online students have access to live classes
       } else if (
         accessLevel === 'free' || 
         accessLevel === 'all' || 
         targetBatches.includes('all') || 
         targetBatches.includes('all_free')
       ) {
-        hasAccess = true;
+        // Free/open class: everyone except only-offline students can join live
+        hasAccess = !isOnlyOffline;
       } else if (!isEnrolled) {
         hasAccess = false;
-      } else if (isOffline) {
-        hasAccess = false; // Offline must request access
+      } else if (isOnlyOffline) {
+        hasAccess = false; // Only-offline must request access from admin
       } else if (isTargeted) {
-        // Online/Recorded student: must match either batch OR course
+        // Student must match either a targeted batch or targeted course
         hasAccess = matchBatch || matchCourse;
       } else {
-        // Not targeted to anyone specifically, but student is enrolled
+        // Not targeted specifically, but student is enrolled and not only-offline
         hasAccess = true;
       }
 
       if (hasAccess) {
         console.log('DEBUG: Resolving session for classId:', cls.id);
-         const resolvedSession = await LiveSessionResolver.resolveActiveSession(cls.id, cls);
+        const resolvedSession = await LiveSessionResolver.resolveActiveSession(cls.id, cls);
         const liveStatus = resolvedSession.status;
         let isJoinAllowed = resolvedSession.joinAllowed;
         
@@ -416,6 +449,7 @@ export class LiveSessionService {
           courseId: cls.courseId || '',
           courseName,
           batchName,
+          hasRecordedAccess, // NEW: true if student can watch recording
           accessDenied: false
         });
       } else {

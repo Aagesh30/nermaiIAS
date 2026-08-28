@@ -97,6 +97,19 @@ export class DailyQuizController {
                 });
             }
 
+            // OPTIMIZATION: Fetch all attempts in one single query to build count & presence maps
+            const allAttemptsSnapshot = await db.collection(QUIZ_ATTEMPT_COLLECTION).get();
+            const attemptCountMap: Record<string, number> = {};
+            const hasAttemptsMap: Record<string, boolean> = {};
+
+            allAttemptsSnapshot.docs.forEach(d => {
+                const qId = d.data()?.quizId;
+                if (qId) {
+                    attemptCountMap[qId] = (attemptCountMap[qId] || 0) + 1;
+                    hasAttemptsMap[qId] = true;
+                }
+            });
+
             const quizzes = await Promise.all(snapshot.docs.map(async doc => {
                 const data = doc.data();
                 const quizId = doc.id;
@@ -107,23 +120,15 @@ export class DailyQuizController {
                     const disableTime = new Date(data.autoDisableAt);
                     if (now > disableTime) {
                         // Check if any student attempted
-                        const attemptCheck = await db.collection(QUIZ_ATTEMPT_COLLECTION)
-                            .where("quizId", "==", quizId)
-                            .limit(1)
-                            .get();
-                        status = attemptCheck.empty ? "unattended" : "disabled";
+                        const hasAttempt = !!hasAttemptsMap[quizId];
+                        status = hasAttempt ? "disabled" : "unattended";
                         // Update status in DB (fire and forget)
                         doc.ref.update({ status, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
                     }
                 }
 
                 const attempt = attemptsMap[quizId];
-
-                // Count total attempts for this quiz (for admin view)
-                const allAttemptsSnap = await db.collection(QUIZ_ATTEMPT_COLLECTION)
-                    .where("quizId", "==", quizId)
-                    .get();
-                const attemptCount = allAttemptsSnap.size;
+                const attemptCount = attemptCountMap[quizId] || 0;
 
                 return {
                     id: quizId,

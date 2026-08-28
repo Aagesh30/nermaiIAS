@@ -104,41 +104,57 @@ export class AccessRequestService {
       .map(doc => ({ id: doc.id, ...doc.data() }))
       .sort((a: any, b: any) => (a.requestedAt > b.requestedAt ? 1 : -1));
 
+    // OPTIMIZATION: Batch pre-fetch student profiles and batch data upfront
+    const studentIdsNeeded = Array.from(new Set(
+      requests.filter((r: any) => !r.studentName && r.studentId).map((r: any) => r.studentId)
+    ));
+    const batchIdsNeeded = Array.from(new Set(
+      requests.filter((r: any) => r.batchId).map((r: any) => r.batchId)
+    ));
+
+    const studentMap = new Map<string, any>();
+    const batchMap = new Map<string, any>();
+
+    await Promise.all([
+      Promise.all(studentIdsNeeded.map(async (sId) => {
+        try {
+          let doc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(sId).get();
+          let data = doc.exists ? doc.data() : null;
+          if (!data) {
+            const legacyDoc = await db.collection('students').doc(sId).get();
+            if (legacyDoc.exists) data = legacyDoc.data();
+          }
+          if (!data) {
+            const userDoc = await db.collection('users').doc(sId).get();
+            if (userDoc.exists) data = userDoc.data();
+          }
+          if (data) studentMap.set(sId, data);
+        } catch (e) {}
+      })),
+      Promise.all(batchIdsNeeded.map(async (bId) => {
+        try {
+          const bDoc = await db.collection(STUDENT_COLLECTIONS.BATCHES).doc(bId).get();
+          if (bDoc.exists) batchMap.set(bId, bDoc.data());
+        } catch (e) {}
+      }))
+    ]);
+
     // Enrich with student + batch info
     const enriched = await Promise.all(
       requests.map(async (req: any) => {
         // If name was stored at creation time, use it directly (fast path)
         let finalName: string = req.studentName || '';
-        // Hoist student to outer scope so studentEmail is accessible in return
         let student: FirebaseFirestore.DocumentData | null | undefined = null;
 
-        if (!finalName) {
-          // Fallback for old requests: look up across all student collections
-          // 1. New student_profiles (self-registered via app)
-          const profileDoc = await db.collection(STUDENT_COLLECTIONS.PROFILES).doc(req.studentId).get();
-          student = profileDoc.exists ? profileDoc.data() : null;
-
-          // 2. Legacy 'students' collection (admin-imported)
-          if (!student) {
-            const legacyDoc = await db.collection('students').doc(req.studentId).get();
-            if (legacyDoc.exists) student = legacyDoc.data();
-          }
-
-          // 3. Final fallback: 'users' collection
-          if (!student) {
-            const userDoc = await db.collection('users').doc(req.studentId).get();
-            if (userDoc.exists) student = userDoc.data();
-          }
-
+        if (!finalName && req.studentId) {
+          student = studentMap.get(req.studentId);
           if (student) {
-            // Name: displayName > firstName+lastName > name
             const name =
               student.displayName ||
               (`${student.firstName || ''} ${student.lastName || ''}`.trim()) ||
               student.name ||
               '';
 
-            // Roll number: loginUsername > rollNumber > rollNo > username
             const regNo =
               student.loginUsername ||
               student.rollNumber ||
@@ -146,18 +162,13 @@ export class AccessRequestService {
               student.username ||
               '';
 
-            // Format: "<rollNo> <name>"
             finalName = regNo && name ? `${regNo} ${name}` : name || regNo || req.studentId;
           } else {
             finalName = req.studentId;
           }
         }
 
-        let batchData = null;
-        if (req.batchId) {
-          const batchDoc = await db.collection(STUDENT_COLLECTIONS.BATCHES).doc(req.batchId).get();
-          if (batchDoc.exists) batchData = batchDoc.data();
-        }
+        const batchData = req.batchId ? batchMap.get(req.batchId) : null;
 
         // Compute cost for this request
         let cost = { recordedClasses: 0, units: 0 };

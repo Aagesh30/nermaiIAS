@@ -15,13 +15,8 @@ export { LMSProvider } from './LMSProvider';
 export { CoursesPage } from './admin/CoursesPage';
 export { SubjectsPage } from './admin/SubjectsPage';
 export { TopicsPage } from './admin/TopicsPage';
-export { ClassesPage } from './admin/ClassesPage';
-export { ResourcesPage } from './admin/ResourcesPage';
-export { VideosPage } from './admin/VideosPage';
-export { default as ProviderAccountsPage } from './admin/ProviderAccountsPage';
 export { AccessControlPage } from './admin/AccessControlPage';
 export { KnowledgeStudio } from './admin/KnowledgeStudio';
-export { LiveSessionsPage } from './admin/LiveSessionsPage';
 export { AdminAttendancePage } from './admin/AdminAttendancePage';
 
 // Student LMS pages

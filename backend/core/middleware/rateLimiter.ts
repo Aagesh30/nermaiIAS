@@ -1,16 +1,6 @@
 import rateLimit, { Store } from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
-import { redisClient } from '../../infrastructure/redis';
-import { env } from '../../config/env';
-
-// Fallback to memory store if Redis is not required/initialized to prevent crashes during local dev
+// Fallback to memory store since Redis is not used
 let store: Store | undefined = undefined;
-
-if (env.REDIS_REQUIRED) {
-  store = new RedisStore({
-    sendCommand: (...args: string[]) => redisClient.call(args[0], ...args.slice(1)),
-  });
-}
 
 /**
  * SECURITY: Rate-limit key MUST use server-verified identity (req.user.userId),

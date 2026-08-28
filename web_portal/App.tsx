@@ -29,18 +29,12 @@ if (Platform.OS === "web") {
 import './lms/lms.css';
 import { LMSProvider } from './lms/LMSProvider';
 const CoursesPage = React.lazy(() => import('./lms/admin/CoursesPage').then(m => ({ default: m.CoursesPage })));
-const TeachersPage = React.lazy(() => import('./lms/admin/TeachersPage').then(m => ({ default: m.TeachersPage })));
 const SubjectsPage = React.lazy(() => import('./lms/admin/SubjectsPage').then(m => ({ default: m.SubjectsPage })));
 const TopicsPage = React.lazy(() => import('./lms/admin/TopicsPage').then(m => ({ default: m.TopicsPage })));
 const SubtopicsPage = React.lazy(() => import('./lms/admin/SubtopicsPage').then(m => ({ default: m.SubtopicsPage })));
-const ClassesPage = React.lazy(() => import('./lms/admin/ClassesPage').then(m => ({ default: m.ClassesPage })));
-const ResourcesPage = React.lazy(() => import('./lms/admin/ResourcesPage').then(m => ({ default: m.ResourcesPage })));
-const VideosPage = React.lazy(() => import('./lms/admin/VideosPage').then(m => ({ default: m.VideosPage })));
-const ProviderAccountsPage = React.lazy(() => import('./lms/admin/ProviderAccountsPage'));
 const ZoomAccountsPage = React.lazy(() => import('./lms/developer/ZoomAccountsPage'));
 const AccessControlPage = React.lazy(() => import('./lms/admin/AccessControlPage').then(m => ({ default: m.AccessControlPage })));
 const KnowledgeStudio = React.lazy(() => import('./lms/admin/KnowledgeStudio').then(m => ({ default: m.KnowledgeStudio })));
-const LiveSessionsPage = React.lazy(() => import('./lms/admin/LiveSessionsPage').then(m => ({ default: m.LiveSessionsPage })));
 const SyllabusTrackerPage = React.lazy(() => import('./lms/admin/SyllabusTrackerPage').then(m => ({ default: m.SyllabusTrackerPage })));
 const StudentCoursesPage = React.lazy(() => import('./lms/student/StudentCoursesPage').then(m => ({ default: m.StudentCoursesPage })));
 const StudentLiveClassesPage = React.lazy(() => import('./lms/student/StudentLiveClassesPage').then(m => ({ default: m.StudentLiveClassesPage })));
@@ -4098,15 +4092,9 @@ function MainApp() {
       case "recorded": return "lms_recorded_videos";
       case "resources": return "lms_resources";
       case "lms-courses": return "lms_courses";
-      case "lms-teachers": return "lms_teachers";
       case "lms-subjects": return "lms_subjects";
       case "lms-topics": return "lms_topics";
       case "lms-subtopics": return "lms_subtopics";
-      case "lms-classes": return "lms_classes";
-      case "lms-resources": return "lms_resource_mgmt";
-      case "lms-videos": return "lms_video_library";
-      case "lms-live-sessions": return "lms_live_sessions";
-      case "lms-providers": return "lms_provider_mgmt";
       case "lms-zoom-accounts": return "lms_zoom_accounts";
       case "lms-syllabus": return "lms_syllabus";
       case "lms-access": return "lms_sacs_access";
@@ -4754,9 +4742,6 @@ function MainApp() {
               alt={previewImageTitle || "Preview"}
               style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 8 }}
             />
-            <a href={previewImageUri} target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: '#1976d2', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-              Open image in new tab ↗
-            </a>
           </div>
         );
       }
@@ -21045,19 +21030,20 @@ function MainApp() {
                               {/* Step Progress Indicator */}
                               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20, backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", borderRadius: 10, padding: 8 }}>
                                 {[
-                                  { step: 1, label: "Password" },
-                                  { step: 2, label: "Details" },
-                                  { step: 3, label: "Documents" }
+                                  { step: 1, label: isMobile ? "Password" : "Password" },
+                                  { step: 2, label: isMobile ? "Details" : "Details" },
+                                  { step: 3, label: isMobile ? "Docs" : "Documents" }
                                 ].map((s, idx) => {
                                   const isActive = profileFormStep === s.step;
                                   const isCompleted = profileFormStep > s.step;
                                   return (
-                                    <View key={s.step} style={{ flexDirection: "row", alignItems: "center", flex: idx < 2 ? 1 : 0 }}>
-                                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                    <View key={s.step} style={{ flexDirection: "row", alignItems: "center", flex: idx < 2 ? 1 : undefined, minWidth: idx === 2 ? (isMobile ? 55 : 85) : undefined }}>
+                                      <View style={{ flexDirection: "row", alignItems: "center", gap: isMobile ? 4 : 6 }}>
                                         <View style={{
                                           width: 20, height: 20, borderRadius: 10,
                                           backgroundColor: isActive ? "#1976d2" : (isCompleted ? "#2e7d32" : "#bdbdbd"),
-                                          justifyContent: "center", alignItems: "center"
+                                          justifyContent: "center", alignItems: "center",
+                                          flexShrink: 0
                                         }}>
                                           {isCompleted ? (
                                             <Ionicons name="checkmark" size={12} color="#fff" />
@@ -21066,7 +21052,7 @@ function MainApp() {
                                           )}
                                         </View>
                                         <Text style={{
-                                          fontSize: 11, fontWeight: isActive ? "bold" : "500",
+                                          fontSize: isMobile ? 10 : 11, fontWeight: isActive ? "bold" : "500",
                                           color: isActive ? "#1976d2" : (isCompleted ? "#2e7d32" : "#9e9e9e")
                                         }}>
                                           {s.label}
@@ -21074,7 +21060,7 @@ function MainApp() {
                                       </View>
                                       {idx < 2 && (
                                         <View style={{
-                                          flex: 1, height: 2, marginHorizontal: 8,
+                                          flex: 1, height: 2, marginHorizontal: isMobile ? 4 : 8,
                                           backgroundColor: isCompleted ? "#2e7d32" : "#e0e0e0"
                                         }} />
                                       )}
@@ -21152,8 +21138,8 @@ function MainApp() {
                               {/* Community */}
                               <Text style={{ color: "#757575", fontSize: 12, marginBottom: 6, fontWeight: "bold" }}>Community *</Text>
                               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-                                {["SC", "ST", "OBC", "MBC", "GENERAL"].map(c => {
-                                  const fullForms: Record<string, string> = { "SC": "Scheduled Caste", "ST": "Scheduled Tribe", "OBC": "Other Backward Class", "MBC": "Most Backward Class", "GENERAL": "General Category (Unreserved)" };
+                                {["SC", "ST", "OBC", "MBC", "EBC", "GENERAL", "OTHERS"].map(c => {
+                                  const fullForms: Record<string, string> = { "SC": "Scheduled Caste", "ST": "Scheduled Tribe", "OBC": "Other Backward Class", "MBC": "Most Backward Class", "EBC": "Economically Backward Class", "GENERAL": "General Category (Unreserved)", "OTHERS": "Others" };
                                   return (
                                     <TouchableOpacity key={c} onPress={() => setProfileForm({ ...profileForm, community: c })} onLongPress={() => Alert.alert(c, fullForms[c] || c)} delayLongPress={300} style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 2, borderColor: profileForm.community === c ? "#c62828" : "#e0e0e0", backgroundColor: profileForm.community === c ? "#ffebee" : "#f9f9f9" }}>
                                       <Text style={{ fontSize: 12, color: profileForm.community === c ? "#c62828" : "#757575", fontWeight: profileForm.community === c ? "bold" : "normal" }}>{c}</Text>
@@ -26195,15 +26181,9 @@ function MainApp() {
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subjects", lmsSub, "Subjects", "layers-outline", () => changeLmsSub("lms-subjects"), "lms-admin-subjects", undefined, lmsTabsCollapsed && !isMobile, "lms_subjects")}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-topics", lmsSub, "Topics", "list-outline", () => changeLmsSub("lms-topics"), "lms-admin-topics", undefined, lmsTabsCollapsed && !isMobile, "lms_topics")}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-subtopics", lmsSub, "Subtopics", "git-commit-outline", () => changeLmsSub("lms-subtopics"), "lms-admin-subtopics", undefined, lmsTabsCollapsed && !isMobile, "lms_subtopics")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-classes", lmsSub, "Classes", "play-outline", () => changeLmsSub("lms-classes"), "lms-admin-classes", undefined, lmsTabsCollapsed && !isMobile, "lms_classes")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-teachers", lmsSub, "Teachers", "people-outline", () => changeLmsSub("lms-teachers"), "lms-admin-teachers", undefined, lmsTabsCollapsed && !isMobile, "lms_teachers")}
                     {(isAdmin || isTeacher) && Platform.OS === 'web' && renderSidebarItem("lms-syllabus", lmsSub, "Syllabus Tracker", "checkbox-outline", () => changeLmsSub("lms-syllabus"), "lms-admin-syllabus", undefined, lmsTabsCollapsed && !isMobile, "lms_syllabus")}
 
                     {/* Remaining LMS management items at the bottom */}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-resources", lmsSub, "Resources Mgmt", "documents-outline", () => changeLmsSub("lms-resources"), "lms-admin-resources", undefined, lmsTabsCollapsed && !isMobile, "lms_resource_mgmt")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-videos", lmsSub, "Videos", "film-outline", () => changeLmsSub("lms-videos"), "lms-admin-videos", undefined, lmsTabsCollapsed && !isMobile, "lms_video_library")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-live-sessions", lmsSub, "Live Sessions", "videocam-outline", () => changeLmsSub("lms-live-sessions"), "lms-admin-live", undefined, lmsTabsCollapsed && !isMobile, "lms_live_sessions")}
-                    {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-providers", lmsSub, "Providers", "cloud-outline", () => changeLmsSub("lms-providers"), "lms-admin-providers", undefined, lmsTabsCollapsed && !isMobile, "lms_provider_mgmt")}
                     {isAdmin && Platform.OS === 'web' && renderSidebarItem("lms-zoom-accounts", lmsSub, "Zoom Accounts", "videocam-outline", () => changeLmsSub("lms-zoom-accounts"), "lms-admin-zoom-accounts", undefined, lmsTabsCollapsed && !isMobile, "lms_zoom_accounts")}
 
                     {isAdmin && Platform.OS === 'web' && (!lmsTabsCollapsed || isMobile) && <Text style={styles.categoryHeader}>AI STUDIO</Text>}
@@ -28263,14 +28243,6 @@ function MainApp() {
                           </Suspense>
                         </View>
                       )}
-                      {/* Admin — Teacher Management */}
-                      {isAdmin && lmsSub === 'lms-teachers' && TeachersPage && getFeatureAccess('lms_teachers') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
-                            <TeachersPage />
-                          </Suspense>
-                        </View>
-                      )}
                       {/* Admin — Subject Management */}
                       {isAdmin && lmsSub === 'lms-subjects' && SubjectsPage && getFeatureAccess('lms_subjects') !== 'none' && (
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
@@ -28292,46 +28264,6 @@ function MainApp() {
                         <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
                           <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
                             <SubtopicsPage />
-                          </Suspense>
-                        </View>
-                      )}
-                      {/* Admin — Class Management */}
-                      {isAdmin && lmsSub === 'lms-classes' && ClassesPage && getFeatureAccess('lms_classes') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
-                            <ClassesPage />
-                          </Suspense>
-                        </View>
-                      )}
-                      {/* Admin — Resource Management */}
-                      {isAdmin && lmsSub === 'lms-resources' && ResourcesPage && getFeatureAccess('lms_resource_mgmt') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
-                            <ResourcesPage />
-                          </Suspense>
-                        </View>
-                      )}
-                      {/* Admin — Videos */}
-                      {isAdmin && lmsSub === 'lms-videos' && VideosPage && getFeatureAccess('lms_video_library') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNCardGridSkeleton count={4} darkMode={darkMode} />}>
-                            <VideosPage />
-                          </Suspense>
-                        </View>
-                      )}
-                      {/* Admin — Live Sessions */}
-                      {isAdmin && lmsSub === 'lms-live-sessions' && LiveSessionsPage && getFeatureAccess('lms_live_sessions') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNTableSkeleton rows={6} darkMode={darkMode} />}>
-                            <LiveSessionsPage />
-                          </Suspense>
-                        </View>
-                      )}
-                      {/* Admin — Provider Accounts */}
-                      {isAdmin && lmsSub === 'lms-providers' && ProviderAccountsPage && getFeatureAccess('lms_provider_mgmt') !== 'none' && (
-                        <View style={{ flex: 1, padding: 16, backgroundColor: darkMode ? '#0B0B14' : '#f9f9f9' }}>
-                          <Suspense fallback={<RNTableSkeleton rows={3} darkMode={darkMode} />}>
-                            <ProviderAccountsPage />
                           </Suspense>
                         </View>
                       )}

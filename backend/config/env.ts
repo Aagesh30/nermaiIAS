@@ -56,8 +56,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   // AES_SECRET_KEY: required; no insecure default.
   AES_SECRET_KEY: z.string().min(1, 'AES_SECRET_KEY is required'),
-  REDIS_URL: z.string().url('REDIS_URL must be a valid URL').optional().or(z.literal('')),
-  REDIS_REQUIRED: z.enum(['true', 'false']).default('false').transform(val => val === 'true'),
+  // Redis removed — in-memory cache is used instead
   FCM_SERVER_KEY: z.string().optional(),
   FIREBASE_API_KEY: z.string().optional(),
   ALLOWED_ORIGINS: z.string().default('http://localhost:8081,http://localhost:3000'),

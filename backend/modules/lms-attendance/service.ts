@@ -368,20 +368,33 @@ export class LmsAttendanceService {
 
     const records = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
-    // Enrich records with student info (name, regNo, batchName)
-    const enriched = await Promise.all(records.map(async (rec: any) => {
+    // OPTIMIZATION: Batch fetch student profiles for records missing studentName
+    const missingStudentIds = Array.from(new Set(
+      records.filter((r: any) => !r.studentName && r.studentId).map((r: any) => r.studentId)
+    ));
+
+    const profileMap = new Map<string, any>();
+    if (missingStudentIds.length > 0) {
+      await Promise.all(missingStudentIds.map(async (sId) => {
+        try {
+          let profileDoc = await db.collection('student_profiles').doc(sId).get();
+          let profile: any = profileDoc.exists ? profileDoc.data() : null;
+          if (!profile) {
+            const userDoc = await db.collection('users').doc(sId).get();
+            profile = userDoc.exists ? userDoc.data() : null;
+          }
+          if (profile) profileMap.set(sId, profile);
+        } catch (e) {}
+      }));
+    }
+
+    const enriched = records.map((rec: any) => {
       let studentName = rec.studentName || '';
       let regNo = rec.regNo || rec.username || '';
       let batchName = rec.batchName || '';
 
       if (!studentName && rec.studentId) {
-        // Try student_profiles first, then users
-        let profileDoc = await db.collection('student_profiles').doc(rec.studentId).get();
-        let profile: any = profileDoc.exists ? profileDoc.data() : null;
-        if (!profile) {
-          const userDoc = await db.collection('users').doc(rec.studentId).get();
-          profile = userDoc.exists ? userDoc.data() : null;
-        }
+        const profile = profileMap.get(rec.studentId);
         if (profile) {
           studentName = profile.displayName || profile.name || profile.fullName
             || profile.studentName || profile.username || '';
@@ -396,7 +409,7 @@ export class LmsAttendanceService {
         regNo,
         batchName,
       };
-    }));
+    });
 
     const submitted = enriched.filter(r => r.attendanceSubmittedAt);
     const pending   = enriched.filter(r => !r.attendanceSubmittedAt);
