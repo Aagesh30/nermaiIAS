@@ -6,6 +6,7 @@ import { Groq } from "groq-sdk";
 import * as fs from "fs";
 import * as path from "path";
 import { uploadFileToGoogleDrive } from "../../../services/google_drive";
+import { testDetailsCache, testQuestionsCache } from "../../../shared/utils/cache";
 
 const db = admin.firestore();
 const COLLECTION = "tests";
@@ -951,6 +952,10 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 updatedBy: req.body.updatedBy || "system"
             });
 
+            // Invalidate test cache so student side reflects changes immediately
+            testDetailsCache.delete(`test_${id}`);
+            testQuestionsCache.delete(`test_${id}`);
+
             return res.status(200).json({ success: true, message: "Test updated successfully" });
         } catch (error: any) {
             return res.status(500).json({ success: false, message: error.message });
@@ -977,6 +982,8 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
+            testDetailsCache.delete(`test_${id}`);
+
             return res.status(200).json({ success: true, message: "Test published successfully" });
         } catch (error: any) {
             return res.status(500).json({ success: false, message: error.message });
@@ -994,6 +1001,9 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 status: "draft",
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
+
+            testDetailsCache.delete(`test_${id}`);
+
             return res.status(200).json({ success: true, message: "Test unpublished successfully" });
         } catch (error: any) {
             return res.status(500).json({ success: false, message: error.message });
@@ -1011,6 +1021,9 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 deletedAt: admin.firestore.FieldValue.serverTimestamp(),
                 deletedBy: req.body.deletedBy || "system"
             });
+
+            testDetailsCache.delete(`test_${id}`);
+            testQuestionsCache.delete(`test_${id}`);
             // Also delete all permission requests for this test
             try {
                 const reqSnap = await db.collection(OFFLINE_REQUESTS_COLLECTION).where("testId", "==", id).get();
@@ -1490,7 +1503,7 @@ export class OfflineTestRequestController {
      */
     static async getAll(req: Request, res: Response) {
         try {
-            const { studentId, username } = req.query;
+            const { studentId, username, cleanup } = req.query;
             let requests: any[] = [];
             
             if (studentId && username && typeof studentId === "string" && typeof username === "string") {
@@ -1521,80 +1534,82 @@ export class OfflineTestRequestController {
                 requests = snapshot.docs.map((doc: any) => doc.data());
             }
 
-            // Auto-cleanup: Fetch tests, test_attempts, and results to purge invalid / expired / completed test requests from DB
-            try {
-                const testsSnap = await db.collection(COLLECTION).get();
-                const invalidOrOverTestIds = new Set<string>();
-                const existingTestIds = new Set<string>();
+            // Auto-cleanup: only run when explicitly requested via ?cleanup=true to prevent Firestore read spikes
+            if (cleanup === "true") {
+                try {
+                    const testsSnap = await db.collection(COLLECTION).get();
+                    const invalidOrOverTestIds = new Set<string>();
+                    const existingTestIds = new Set<string>();
 
-                testsSnap.docs.forEach((doc: any) => {
-                    const data = doc.data();
-                    const testId = doc.id;
-                    if (data.isDeleted) {
-                        invalidOrOverTestIds.add(testId);
-                    } else {
-                        existingTestIds.add(testId);
-                        if (data.endTime) {
-                            const endTimeMs = typeof data.endTime?.toDate === "function"
-                                ? data.endTime.toDate().getTime()
-                                : new Date(data.endTime).getTime();
-                            if (!isNaN(endTimeMs) && Date.now() > endTimeMs) {
-                                // Test has ended / is OVER!
-                                invalidOrOverTestIds.add(testId);
+                    testsSnap.docs.forEach((doc: any) => {
+                        const data = doc.data();
+                        const testId = doc.id;
+                        if (data.isDeleted) {
+                            invalidOrOverTestIds.add(testId);
+                        } else {
+                            existingTestIds.add(testId);
+                            if (data.endTime) {
+                                const endTimeMs = typeof data.endTime?.toDate === "function"
+                                    ? data.endTime.toDate().getTime()
+                                    : new Date(data.endTime).getTime();
+                                if (!isNaN(endTimeMs) && Date.now() > endTimeMs) {
+                                    // Test has ended / is OVER!
+                                    invalidOrOverTestIds.add(testId);
+                                }
                             }
                         }
-                    }
-                });
+                    });
 
-                const completedAttemptKeys = new Set<string>();
+                    const completedAttemptKeys = new Set<string>();
 
-                const attemptsSnap = await db.collection("student_attempts").get();
-                attemptsSnap.docs.forEach((doc: any) => {
-                    const data = doc.data();
-                    if (data.status === "submitted" || data.status === "evaluated" || data.submittedAt || data.isSubmitted) {
+                    const attemptsSnap = await db.collection("student_attempts").get();
+                    attemptsSnap.docs.forEach((doc: any) => {
+                        const data = doc.data();
+                        if (data.status === "submitted" || data.status === "evaluated" || data.submittedAt || data.isSubmitted) {
+                            if (data.testId) {
+                                if (data.studentId) completedAttemptKeys.add(`${data.testId}_${data.studentId}`);
+                                if (data.username) completedAttemptKeys.add(`${data.testId}_${data.username}`);
+                                if (data.rollNumber) completedAttemptKeys.add(`${data.testId}_${data.rollNumber}`);
+                                if (data.studentName) completedAttemptKeys.add(`${data.testId}_${data.studentName}`);
+                            }
+                        }
+                    });
+
+                    const resultsSnap = await db.collection("results").where("isDeleted", "==", false).get();
+                    resultsSnap.docs.forEach((doc: any) => {
+                        const data = doc.data();
                         if (data.testId) {
                             if (data.studentId) completedAttemptKeys.add(`${data.testId}_${data.studentId}`);
                             if (data.username) completedAttemptKeys.add(`${data.testId}_${data.username}`);
                             if (data.rollNumber) completedAttemptKeys.add(`${data.testId}_${data.rollNumber}`);
                             if (data.studentName) completedAttemptKeys.add(`${data.testId}_${data.studentName}`);
                         }
-                    }
-                });
+                    });
 
-                const resultsSnap = await db.collection("results").where("isDeleted", "==", false).get();
-                resultsSnap.docs.forEach((doc: any) => {
-                    const data = doc.data();
-                    if (data.testId) {
-                        if (data.studentId) completedAttemptKeys.add(`${data.testId}_${data.studentId}`);
-                        if (data.username) completedAttemptKeys.add(`${data.testId}_${data.username}`);
-                        if (data.rollNumber) completedAttemptKeys.add(`${data.testId}_${data.rollNumber}`);
-                        if (data.studentName) completedAttemptKeys.add(`${data.testId}_${data.studentName}`);
-                    }
-                });
+                    const activeReqs = [];
+                    for (const r of requests) {
+                        const reqTestId = String(r.testId || '');
+                        const isTestOverOrDeleted = (reqTestId && !existingTestIds.has(reqTestId)) || invalidOrOverTestIds.has(reqTestId);
 
-                const activeReqs = [];
-                for (const r of requests) {
-                    const reqTestId = String(r.testId || '');
-                    const isTestOverOrDeleted = (reqTestId && !existingTestIds.has(reqTestId)) || invalidOrOverTestIds.has(reqTestId);
+                        const k1 = `${r.testId}_${r.studentId}`;
+                        const k2 = `${r.testId}_${r.username}`;
+                        const k3 = `${r.testId}_${r.rollNumber}`;
+                        const k4 = `${r.testId}_${r.studentName}`;
+                        const isAttemptCompleted = completedAttemptKeys.has(k1) || completedAttemptKeys.has(k2) || completedAttemptKeys.has(k3) || completedAttemptKeys.has(k4);
 
-                    const k1 = `${r.testId}_${r.studentId}`;
-                    const k2 = `${r.testId}_${r.username}`;
-                    const k3 = `${r.testId}_${r.rollNumber}`;
-                    const k4 = `${r.testId}_${r.studentName}`;
-                    const isAttemptCompleted = completedAttemptKeys.has(k1) || completedAttemptKeys.has(k2) || completedAttemptKeys.has(k3) || completedAttemptKeys.has(k4);
-
-                    if (isTestOverOrDeleted || isAttemptCompleted) {
-                        // Purge request from DB asynchronously
-                        if (r.id) {
-                            db.collection(OFFLINE_REQUESTS_COLLECTION).doc(r.id).delete().catch(() => {});
+                        if (isTestOverOrDeleted || isAttemptCompleted) {
+                            // Purge request from DB asynchronously
+                            if (r.id) {
+                                db.collection(OFFLINE_REQUESTS_COLLECTION).doc(r.id).delete().catch(() => {});
+                            }
+                        } else {
+                            activeReqs.push(r);
                         }
-                    } else {
-                        activeReqs.push(r);
                     }
+                    requests = activeReqs;
+                } catch (cleanErr) {
+                    console.log("Note auto-cleaning permission requests:", cleanErr);
                 }
-                requests = activeReqs;
-            } catch (cleanErr) {
-                console.log("Note auto-cleaning permission requests:", cleanErr);
             }
             
             // Sort in-memory desc by requestedAt to avoid requiring a composite index in Firestore

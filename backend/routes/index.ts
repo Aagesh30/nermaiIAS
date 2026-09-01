@@ -31,6 +31,7 @@ import reviewRouter from "../modules/test-portal/review";
 import evaluationRouter from "../modules/test-portal/evaluation";
 import questionBankRouter from "../modules/test-portal/question-bank";
 import developerRouter from "../modules/developer";
+import adminApprovalsRouter from "../modules/admin-approvals/routes";
 
 // Integrated LMS Modules
 import { StudentsRoutes, BatchRoutes } from "../modules/students";
@@ -103,6 +104,9 @@ router.use("/test-portal/question-bank", questionBankRouter);
 
 // Developer Portal Routes
 router.use("/developer", developerRouter);
+
+// Global Admin Approvals (Edit-by-Approval) Routes
+router.use("/admin-approvals", adminApprovalsRouter);
 
 // Player Routes (Auth via token)
 router.get("/player/:token", renderPlayer);

@@ -4,7 +4,7 @@ import { AdminTable, AdminModal, AdminInput, AdminSelect, AdminButton, DeleteCon
 import { CourseApi } from '../core/services';
 import api from '../core/api';
 
-export const SubtopicsPage = () => {
+export const SubtopicsPage = ({ permission = 'edit_direct', executeEditOrApproval }: { permission?: string; executeEditOrApproval?: any }) => {
   const [subtopics, setSubtopics] = useState<any[]>([]);
   const [topics, setTopics] = useState<any[]>([]);
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -170,29 +170,49 @@ export const SubtopicsPage = () => {
       alert('Please select a topic.');
       return;
     }
-    try {
-      if (editingSubtopic) {
-        await CourseApi.updateSubtopic(editingSubtopic.id, formData);
-      } else {
-        await CourseApi.createSubtopic(formData.topicId, formData);
+    const saveAction = async () => {
+      try {
+        if (editingSubtopic) {
+          await CourseApi.updateSubtopic(editingSubtopic.id, formData);
+        } else {
+          await CourseApi.createSubtopic(formData.topicId, formData);
+        }
+        setIsModalOpen(false);
+        fetchData();
+      } catch (error) {
+        alert('Error saving subtopic.');
       }
+    };
+
+    if (executeEditOrApproval) {
+      const actionType = editingSubtopic ? 'edit' : 'create';
+      executeEditOrApproval('lms_subtopics', actionType, formData, saveAction, 'subtopics', editingSubtopic?.id);
       setIsModalOpen(false);
-      fetchData();
-    } catch (error) {
-      alert('Error saving subtopic.');
+    } else {
+      await saveAction();
     }
   };
 
   const performDelete = async (id: string) => {
     setIsDeleting(true);
-    try {
-      await CourseApi.deleteSubtopic(id);
-      fetchData();
-    } catch {
-      alert('Failed to delete subtopic');
-    } finally {
+    const deleteAction = async () => {
+      try {
+        await CourseApi.deleteSubtopic(id);
+        fetchData();
+      } catch {
+        alert('Failed to delete subtopic');
+      } finally {
+        setIsDeleting(false);
+        setDeleteConfirm(null);
+      }
+    };
+
+    if (executeEditOrApproval) {
+      executeEditOrApproval('lms_subtopics', 'delete', null, deleteAction, 'subtopics', id);
       setIsDeleting(false);
       setDeleteConfirm(null);
+    } else {
+      await deleteAction();
     }
   };
 
@@ -316,9 +336,11 @@ export const SubtopicsPage = () => {
           </div>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage subtopics belonging to topics. Teachers are inherited automatically from subjects, or overridden here.</p>
         </div>
-        <AdminButton onClick={() => handleOpenModal()}>
-          <Plus className="w-4 h-4" /> Create Subtopic
-        </AdminButton>
+        {permission !== 'view' && (
+          <AdminButton onClick={() => handleOpenModal()}>
+            <Plus className="w-4 h-4" /> Create Subtopic
+          </AdminButton>
+        )}
       </div>
 
       {/* Filters */}
@@ -394,7 +416,7 @@ export const SubtopicsPage = () => {
       </div>
 
       {/* Subtopics Table */}
-      <AdminTable columns={columns} data={filteredSubtopics} isLoading={isLoading} onEdit={handleOpenModal} onDelete={(sub) => setDeleteConfirm(sub.id)} />
+      <AdminTable columns={columns} data={filteredSubtopics} isLoading={isLoading} onEdit={permission !== 'view' ? handleOpenModal : undefined} onDelete={permission !== 'view' ? (sub) => setDeleteConfirm(sub.id) : undefined} />
 
       {/* Create / Edit Modal */}
       <AdminModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingSubtopic ? 'Edit Subtopic' : 'Create New Subtopic'}>

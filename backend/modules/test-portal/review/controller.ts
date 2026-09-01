@@ -468,31 +468,34 @@ export class ReviewController {
         try {
             const { studentId } = req.params;
 
-            // Fetch any corresponding student record IDs to cover both userId and studentId queries
+            // Fetch matching student record IDs in O(1) using index-backed queries (0 full scans)
             const matchedStudentIds = new Set<string>([studentId]);
             
             try {
-                const studentsSnap = await db.collection("students").get();
-                studentsSnap.docs.forEach(doc => {
+                const studentDoc = await db.collection("students").doc(studentId).get();
+                if (studentDoc.exists) {
+                    const s = studentDoc.data()!;
+                    if (s.userId) matchedStudentIds.add(s.userId);
+                }
+                const studentQuery = await db.collection("students").where("userId", "==", studentId).get();
+                studentQuery.docs.forEach(doc => {
+                    matchedStudentIds.add(doc.id);
                     const s = doc.data();
-                    const sid = doc.id;
-                    const uid = s.userId || s.id;
-                    if (uid === studentId || sid === studentId) {
-                        matchedStudentIds.add(sid);
-                        if (s.userId) matchedStudentIds.add(s.userId);
-                    }
+                    if (s.userId) matchedStudentIds.add(s.userId);
                 });
             } catch (_) {}
 
             try {
-                const usersSnap = await db.collection("users").get();
-                usersSnap.docs.forEach(doc => {
+                const userDoc = await db.collection("users").doc(studentId).get();
+                if (userDoc.exists) {
+                    const u = userDoc.data()!;
+                    if (u.studentId) matchedStudentIds.add(u.studentId);
+                }
+                const userQuery = await db.collection("users").where("studentId", "==", studentId).get();
+                userQuery.docs.forEach(doc => {
+                    matchedStudentIds.add(doc.id);
                     const u = doc.data();
-                    const uid = u.id || doc.id;
-                    if (uid === studentId || u.studentId === studentId) {
-                        matchedStudentIds.add(uid);
-                        if (u.studentId) matchedStudentIds.add(u.studentId);
-                    }
+                    if (u.studentId) matchedStudentIds.add(u.studentId);
                 });
             } catch (_) {}
 
@@ -592,53 +595,29 @@ export class ReviewController {
 
             const entries = snapshot.docs.map(doc => doc.data()) as any[];
 
-            // Build lookup maps for user & student records
-            const usersSnapshot = await db.collection("users").get();
-            const userToStudentMap: { [userId: string]: any } = {};
-            usersSnapshot.docs.forEach(doc => {
-                const u = doc.data();
-                const uid = u.id || doc.id;
-                userToStudentMap[uid] = u;
-            });
-
-            const studentsSnapshot = await db.collection("students").get();
-            const studentsMap: { [id: string]: any } = {};
-            studentsSnapshot.docs.forEach(doc => {
-                const s = doc.data();
-                const sid = s.id || doc.id;
-                studentsMap[sid] = s;
-            });
-
+            // Read pre-saved student profile details directly (0 extra reads)
             const enrichedEntries = entries.map(entry => {
-                const sid = entry.studentId;
-                const userObj = userToStudentMap[sid];
-                const resolvedStudentId = userObj?.studentId || sid;
-                const student = studentsMap[resolvedStudentId] || studentsMap[sid] || {};
-
-                const rollNumber = student.rollNumber || student.rollNo || student.admissionNumber || student.loginUsername || userObj?.username || userObj?.loginUsername || sid;
-
-                let studentName = "";
-                if (student.firstName) {
-                    studentName = `${student.firstName} ${student.lastName || ""}`.trim();
-                } else if (student.fullName) {
-                    studentName = student.fullName;
-                } else if (student.name) {
-                    studentName = student.name;
-                } else if (userObj?.name) {
-                    studentName = userObj.name;
-                } else {
-                    studentName = sid ? `Student (${sid})` : "Unknown Student";
-                }
-
                 return {
                     ...entry,
-                    studentName,
-                    rollNumber
+                    studentName: entry.studentName || entry.displayName || (entry.studentId ? `Student (${entry.studentId.substring(0, 8)})` : "Unknown Student"),
+                    rollNumber: entry.rollNumber || "N/A"
                 };
             });
 
-            // Sort in memory by rank asc
-            enrichedEntries.sort((a: any, b: any) => (a.rank || 0) - (b.rank || 0));
+            // Sort by obtainedMarks desc, then by updatedAt asc to compute live dynamic ranks
+            enrichedEntries.sort((a: any, b: any) => {
+                if (b.obtainedMarks !== a.obtainedMarks) {
+                    return b.obtainedMarks - a.obtainedMarks;
+                }
+                const timeA = a.updatedAt ? (a.updatedAt.toDate ? a.updatedAt.toDate().getTime() : new Date(a.updatedAt).getTime()) : 0;
+                const timeB = b.updatedAt ? (b.updatedAt.toDate ? b.updatedAt.toDate().getTime() : new Date(b.updatedAt).getTime()) : 0;
+                return timeA - timeB;
+            });
+
+            // Assign ranks sequentially in memory (O(1) database cost)
+            enrichedEntries.forEach((entry, index) => {
+                entry.rank = index + 1;
+            });
 
             return res.status(200).json({
                 success: true,
@@ -803,24 +782,7 @@ export class ReviewController {
 
             const allResults = resultsSnapshot.docs.map(doc => doc.data()) as any[];
 
-            // 3. Fetch all students for roll-number/name lookup
-            const usersSnapshot = await db.collection("users").get();
-            const userToStudentMap: { [userId: string]: string } = {};
-            usersSnapshot.docs.forEach(doc => {
-                const u = doc.data();
-                if (u.studentId) {
-                    userToStudentMap[u.id || doc.id] = u.studentId;
-                }
-            });
-
-            const studentsSnapshot = await db.collection("students").get();
-            const studentsMap: { [id: string]: any } = {};
-            studentsSnapshot.docs.forEach(doc => {
-                const s = doc.data();
-                studentsMap[s.id || doc.id] = s;
-            });
-
-            // 4. Build per-test leaderboard entries
+            // 4. Build per-test leaderboard entries directly using denormalized records (0 extra reads)
             const testResultsLog: any[] = [];
 
             for (const test of allTests) {
@@ -845,12 +807,8 @@ export class ReviewController {
 
                 // Build ranked entries with correct/wrong counts
                 const entries = testResults.map((r, idx) => {
-                    const resolvedStudentId = userToStudentMap[r.studentId] || r.studentId;
-                    const student = studentsMap[resolvedStudentId] || {};
-                    const rollNumber = student.rollNumber || student.rollNo || r.studentId || `STU-${idx + 1}`;
-                    const studentName = student.firstName
-                        ? `${student.firstName} ${student.lastName || ""}`.trim()
-                        : (student.name || r.studentId || "Unknown");
+                    const rollNumber = r.rollNumber || r.studentId || `STU-${idx + 1}`;
+                    const studentName = r.studentName || r.studentId || "Unknown";
 
                     // Compute correct/wrong from questionDetails
                     const details = r.questionDetails || [];

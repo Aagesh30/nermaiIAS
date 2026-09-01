@@ -6,6 +6,11 @@ import { getAuth } from 'firebase-admin/auth';
 import { db } from '../../infrastructure/firebase';
 import { redisClient } from '../../infrastructure/redis';
 import { invalidateAccessCache } from '../../core/security/AccessCache';
+import { generalCache } from '../../shared/utils/cache';
+
+const invalidateDashboardCache = (userId: string, tenantId: string = 'default') => {
+  generalCache.delete(`dashboard_${tenantId}_${userId}`);
+};
 
 const normalizeMobile = (mobile: string) => mobile.replace(/\D/g, '');
 
@@ -265,6 +270,7 @@ export class StudentService {
     await this.batchRepo.update(batchId, { currentEnrollment: batch.currentEnrollment + 1 }, adminId);
     // Invalidate access cache — student's batchIds must update on next resource/video request
     await invalidateAccessCache(studentId);
+    invalidateDashboardCache(studentId, tenantId);
     return { success: true };
   }
 
@@ -287,6 +293,7 @@ export class StudentService {
     await this.batchRepo.update(batchId, { currentEnrollment: Math.max(0, batch.currentEnrollment - 1) }, adminId);
     // Invalidate access cache — revoked batch access must take effect immediately
     await invalidateAccessCache(studentId);
+    invalidateDashboardCache(studentId, tenantId);
     return { success: true };
   }
 

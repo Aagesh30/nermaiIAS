@@ -3,7 +3,7 @@ import { UserPlus, Users, Search, Mail, Phone, Shield } from 'lucide-react';
 import { AdminTable, AdminModal, AdminInput, AdminButton, DeleteConfirm } from '../components/admin-ui';
 import api from '../core/api';
 
-export const TeachersPage = () => {
+export const TeachersPage = ({ permission = 'edit_direct', executeEditOrApproval }: { permission?: string; executeEditOrApproval?: any }) => {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -75,36 +75,56 @@ export const TeachersPage = () => {
       return;
     }
 
-    try {
-      const payload = {
-        ...formData,
-        designation: 'Teacher',
-        department: 'Academics',
-        role: 'teacher',
-      };
+    const payload = {
+      ...formData,
+      designation: 'Teacher',
+      department: 'Academics',
+      role: 'teacher',
+    };
 
-      if (editingTeacher) {
-        await api.put(`/erp/staff/${editingTeacher.id}`, payload);
-      } else {
-        await api.post('/erp/staff', payload);
+    const saveAction = async () => {
+      try {
+        if (editingTeacher) {
+          await api.put(`/erp/staff/${editingTeacher.id}`, payload);
+        } else {
+          await api.post('/erp/staff', payload);
+        }
+        setIsModalOpen(false);
+        fetchTeachers();
+      } catch (error: any) {
+        alert(error.response?.data?.message || 'Error saving teacher account');
       }
+    };
+
+    if (executeEditOrApproval) {
+      const actionType = editingTeacher ? 'edit' : 'create';
+      executeEditOrApproval('lms_teachers', actionType, payload, saveAction, 'staff', editingTeacher?.id);
       setIsModalOpen(false);
-      fetchTeachers();
-    } catch (error: any) {
-      alert(error.response?.data?.message || 'Error saving teacher account');
+    } else {
+      await saveAction();
     }
   };
 
   const performDelete = async (id: string) => {
     setIsDeleting(true);
-    try {
-      await api.delete(`/erp/staff/${id}`);
-      fetchTeachers();
-    } catch (error) {
-      alert('Failed to delete teacher account');
-    } finally {
+    const deleteAction = async () => {
+      try {
+        await api.delete(`/erp/staff/${id}`);
+        fetchTeachers();
+      } catch (error) {
+        alert('Failed to delete teacher account');
+      } finally {
+        setIsDeleting(false);
+        setDeleteConfirm(null);
+      }
+    };
+
+    if (executeEditOrApproval) {
+      executeEditOrApproval('lms_teachers', 'delete', null, deleteAction, 'staff', id);
       setIsDeleting(false);
       setDeleteConfirm(null);
+    } else {
+      await deleteAction();
     }
   };
 
@@ -187,9 +207,11 @@ export const TeachersPage = () => {
             Create teacher profiles and manage academic staff login credentials.
           </p>
         </div>
-        <AdminButton onClick={() => handleOpenModal()}>
-          <UserPlus className="w-4 h-4" /> Create Teacher
-        </AdminButton>
+        {permission !== 'view' && (
+          <AdminButton onClick={() => handleOpenModal()}>
+            <UserPlus className="w-4 h-4" /> Create Teacher
+          </AdminButton>
+        )}
       </div>
 
       {/* Search Bar */}
@@ -214,8 +236,8 @@ export const TeachersPage = () => {
         columns={columns}
         data={filteredTeachers}
         isLoading={isLoading}
-        onEdit={handleOpenModal}
-        onDelete={(t) => setDeleteConfirm(t.id)}
+        onEdit={permission !== 'view' ? handleOpenModal : undefined}
+        onDelete={permission !== 'view' ? (t) => setDeleteConfirm(t.id) : undefined}
       />
 
       {/* Create / Edit Modal */}

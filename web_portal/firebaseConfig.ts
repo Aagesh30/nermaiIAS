@@ -37,15 +37,11 @@ const firebaseConfig = {
   measurementId: "G-K2L1JCLKP6"
 };
 
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
-});
+export const db = getFirestore(app);
 
 // Initialize Auth with AsyncStorage persistence for React Native to resolve memory persistence warnings
 export const auth = (() => {

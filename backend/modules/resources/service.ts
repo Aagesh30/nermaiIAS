@@ -28,7 +28,7 @@ export class ResourceService {
     let checksum = '';
     let fileSize = data.fileSize ? parseInt(data.fileSize) : 0;
     let resolvedProvider = 'firebase_storage';
-    
+
     // 1. Direct Local File Upload (Multipart)
     if (file) {
       fileSize = file.size;
@@ -64,7 +64,7 @@ export class ResourceService {
         finalStoragePath = destPath;
         resolvedProvider = 'firebase_storage';
       }
-    } 
+    }
     // 2. Google Drive Import (admin pastes a Drive link)
     else if (data.googleDriveUrl) {
       const gDriveMatch = data.googleDriveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
@@ -73,10 +73,10 @@ export class ResourceService {
       } else {
         finalStoragePath = data.googleDriveUrl;
       }
-      
+
       // Compute a fake checksum for Google Drive based on fileId if we don't download it
       checksum = crypto.createHash('sha256').update(finalStoragePath).digest('hex');
-    } 
+    }
     // 3. Existing Firebase Asset or External Link
     else if (data.externalUrl || data.sourceUrl) {
       finalStoragePath = data.externalUrl || data.sourceUrl;
@@ -85,7 +85,7 @@ export class ResourceService {
       throw new AppError('Must provide a file, googleDriveUrl, or externalUrl', 400);
     }
 
-      const provider = resolvedProvider || data.provider || (data.googleDriveUrl ? 'google_drive' : 'firebase_storage');
+    const provider = resolvedProvider || data.provider || (data.googleDriveUrl ? 'google_drive' : 'firebase_storage');
 
     const resourceData: IResource = {
       tenantId,
@@ -102,25 +102,25 @@ export class ResourceService {
       pageCount: data.pageCount ? parseInt(data.pageCount) : undefined,
       thumbnail: data.thumbnail,
       tags: data.tags,
-      
+
       // Extended Metadata
       author: data.author,
       language: data.language,
       readingTimeMins: data.readingTimeMins ? parseInt(data.readingTimeMins) : undefined,
       publishedDate: data.publishedDate,
-      
+
       // Publishing Workflow & Scheduling
       status: data.status || 'draft',
       publishAt: data.publishAt,
       hideAfter: data.hideAfter,
-      
+
       // Offline Policy
       offlineAvailable: data.offlineAvailable !== undefined ? data.offlineAvailable === 'true' || data.offlineAvailable === true : true,
       isSecure: data.isSecure !== undefined ? data.isSecure === 'true' || data.isSecure === true : true,
 
       // Collections
       collectionItemIds: data.collectionItemIds || [],
-      
+
       // Category & Display
       categoryId: data.categoryId,
       displayOrder: data.displayOrder || 99,
@@ -135,7 +135,7 @@ export class ResourceService {
       classIds: data.classIds || [],
       batchIds: data.batchIds || [],
       isGeneral: data.isGeneral || false,
-      
+
       // Access Targets
       targetBatchIds: data.targetBatchIds || [],
       targetStudentIds: data.targetStudentIds || [],
@@ -173,7 +173,7 @@ export class ResourceService {
     if (cached) return cached;
 
     const list = await this.repo.list(filters);
-    
+
     // Lazy load repositories to avoid circular dependency
     const { CourseRepository, SubjectRepository, TopicRepository, ClassRepository } = require('../courses/repository');
     const courseRepo = new CourseRepository();
@@ -192,7 +192,7 @@ export class ResourceService {
           namesCache[id] = doc.name || doc.title;
           return namesCache[id];
         }
-      } catch (e) {}
+      } catch (e) { }
       return 'Unknown';
     };
 
@@ -216,7 +216,7 @@ export class ResourceService {
         try {
           const doc = await repo.findById(id);
           if (doc) namesCache[id] = doc.name || doc.title;
-        } catch (e) {}
+        } catch (e) { }
       }));
     };
 
@@ -267,14 +267,14 @@ export class ResourceService {
       return finalRes;
     }));
 
-    generalCache.set(cacheKey, populatedList, 600); // Cache for 10 minutes
+    generalCache.set(cacheKey, populatedList, 3600); // Cache for 1 hour — resource listings change infrequently
     return populatedList;
   }
 
   async deleteResource(id: string) {
     const resource = await this.repo.findById(id);
     if (!resource) throw new AppError('Resource not found', 404);
-    
+
     // FIX (Bug 4): Only attempt Firebase Storage deletion for firebase_storage provider.
     // For google_drive / external_link / firebase_asset, storagePath is a URL — calling
     // storage.bucket().file(url).delete() would always fail with a cryptic error.
@@ -294,10 +294,10 @@ export class ResourceService {
   async getResourceAccess(resourceId: string, user: any, protocol?: string, host?: string) {
     const resource = await this.repo.findById(resourceId);
     if (!resource) throw new AppError('Resource not found', 404);
-    
+
     // Evaluate Access via Shared Engine
     const decryptedPath = decrypt(resource.storagePath);
-    
+
     const access = await AccessEngine.evaluateAccess({
       userId: user.userId,
       tenantId: user.tenantId,
@@ -353,10 +353,10 @@ export class ResourceService {
       offlineAllowed: resource.offlineAvailable !== false,
       isSecure: resource.isSecure !== false,
       provider: resource.provider,
-      
+
       // Access engine fields (contains studentName, expiresAt, etc.)
       ...access,
-      
+
       // Delivery fields
       viewerUrl,
       viewerType,
@@ -374,21 +374,21 @@ export class ResourceService {
   async streamResource(resourceId: string, req: any, res: any) {
     console.log("[STREAM] Request received");
     console.log("[STREAM] Range:", req.headers.range);
-    
+
     const startTime = Date.now();
     const user = req.user;
-    
+
     // Use studentName if available, else fallback to ID
     const studentName = user.studentName || user.userId;
     const logger = new StreamLogger(resourceId, user.userId, studentName);
-    
+
     const resource = await this.repo.findById(resourceId);
     if (!resource) throw new AppError('Resource not found', 404);
-    
+
     logger.recordTiming('Lookup', Date.now() - startTime);
     const timeAfterLookup = Date.now();
 
-    
+
     // Validate access (this will throw if not allowed)
     const decryptedPath = decrypt(resource.storagePath);
     await AccessEngine.evaluateAccess({
@@ -409,7 +409,7 @@ export class ResourceService {
 
     const provider = this.getProvider(resource.provider);
     const rangeHeader = req.headers.range;
-    
+
     let streamOptions: any = {};
     const fileSize = resource.fileSize;
     let start = 0;
@@ -481,7 +481,7 @@ YES
       logger.recordChunk(chunk.length, now - lastChunkTime);
       lastChunkTime = now;
     });
-    
+
     stream.on('end', () => {
       logger.complete();
     });
@@ -499,24 +499,24 @@ YES
     // We fetch all resources for the tenant, then group them in memory.
     // This minimizes Firestore reads for LMS platforms since resources per tenant are typically < 10,000.
     const allResources = await this.repo.list({ tenantId });
-    
+
     // We also need the course syllabus tree to know which subjects/topics/classes belong to this course.
     const { CourseService } = require('../courses/service'); // Lazy load to avoid circular dependency
     const courseService = new CourseService();
-    
+
     // Fetch course syllabus
     const subjects = await courseService.listSubjectsByCourse(courseId, tenantId);
     const subjectIds = new Set(subjects.map((s: any) => s.id));
-    
+
     const topicIds = new Set<string>();
     const classIds = new Set<string>();
-    
+
     await Promise.all(subjects.map(async (subj: any) => {
       const topics = await courseService.listTopicsBySubject(subj.id, tenantId);
       topics.forEach((t: any) => {
         topicIds.add(t.id);
       });
-      
+
       await Promise.all(topics.map(async (topic: any) => {
         const classes = await courseService.listClassesByTopic(topic.id, tenantId);
         classes.forEach((c: any) => classIds.add(c.id));
@@ -532,7 +532,7 @@ YES
     const addedResourceIds = new Set<string>();
 
     // We process in priority order: Class -> Topic -> Subject -> Course -> General
-    
+
     // 1. Class
     allResources.forEach(res => {
       if (res.classIds?.some(id => classIds.has(id)) && !addedResourceIds.has(res.id!)) {
@@ -612,7 +612,7 @@ YES
       targetBatchIds: data.targetBatchIds,
       targetPrograms: data.targetPrograms,
       targetStudentIds: data.targetStudentIds,
-      
+
       // Extended Metadata
       author: data.author,
       language: data.language,
@@ -695,13 +695,13 @@ YES
 
     await this.repo.update(resourceId, updateData, userId);
     generalCache.invalidatePrefix('resources_list_');
-    
+
     // Attempt to delete old file only if it was in Firebase Storage
     if (existing.provider === 'firebase_storage') {
       try {
         const oldPath = decrypt(existing.storagePath);
         await this.getBucket().file(oldPath).delete();
-      } catch(e) {}
+      } catch (e) { }
     }
 
     return { ...existing, ...updateData };

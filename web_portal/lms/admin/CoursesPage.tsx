@@ -3,7 +3,7 @@ import { Plus, BookOpen, Search, Sparkles } from 'lucide-react';
 import { AdminTable, AdminModal, AdminInput, AdminSelect, AdminButton, DeleteConfirm } from '../components/admin-ui';
 import { CourseApi } from '../core/services';
 
-export const CoursesPage = () => {
+export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval }: { permission?: string; executeEditOrApproval?: any }) => {
   const [courses, setCourses] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,11 +29,21 @@ export const CoursesPage = () => {
 
   const performDelete = async (id: string) => {
     setIsDeleting(true);
-    try {
-      await CourseApi.deleteCourse(id);
-      fetchCourses();
-    } catch (error) { alert('Failed to delete course'); }
-    finally { setIsDeleting(false); setDeleteConfirm(null); }
+    const deleteAction = async () => {
+      try {
+        await CourseApi.deleteCourse(id);
+        fetchCourses();
+      } catch (error) { alert('Failed to delete course'); }
+      finally { setIsDeleting(false); setDeleteConfirm(null); }
+    };
+
+    if (executeEditOrApproval) {
+      executeEditOrApproval('lms_courses', 'delete', null, deleteAction, 'courses', id);
+      setIsDeleting(false);
+      setDeleteConfirm(null);
+    } else {
+      await deleteAction();
+    }
   };
 
   const handleOpenModal = (course: any = null) => {
@@ -49,13 +59,23 @@ export const CoursesPage = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const payload = { ...formData, tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean), price: Number(formData.price) };
-      if (editingCourse) { await CourseApi.updateCourse(editingCourse.id, payload); }
-      else { await CourseApi.createCourse(payload); }
+    const payload = { ...formData, tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean), price: Number(formData.price) };
+    const saveAction = async () => {
+      try {
+        if (editingCourse) { await CourseApi.updateCourse(editingCourse.id, payload); }
+        else { await CourseApi.createCourse(payload); }
+        setIsModalOpen(false);
+        fetchCourses();
+      } catch (error) { alert('Error saving course. Check console.'); }
+    };
+
+    if (executeEditOrApproval) {
+      const actionType = editingCourse ? 'edit' : 'create';
+      executeEditOrApproval('lms_courses', actionType, payload, saveAction, 'courses', editingCourse?.id);
       setIsModalOpen(false);
-      fetchCourses();
-    } catch (error) { alert('Error saving course. Check console.'); }
+    } else {
+      await saveAction();
+    }
   };
 
   const filteredCourses = useMemo(() => {
@@ -119,9 +139,11 @@ export const CoursesPage = () => {
           </div>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage master academy courses, offerings, and pricing.</p>
         </div>
-        <AdminButton onClick={() => handleOpenModal()}>
-          <Plus className="w-4 h-4" /> Create Course
-        </AdminButton>
+        {permission !== 'view' && (
+          <AdminButton onClick={() => handleOpenModal()}>
+            <Plus className="w-4 h-4" /> Create Course
+          </AdminButton>
+        )}
       </div>
 
       {/* Search Bar */}
@@ -142,7 +164,7 @@ export const CoursesPage = () => {
       </div>
 
       {/* Courses Table */}
-      <AdminTable columns={columns} data={filteredCourses} isLoading={isLoading} onEdit={handleOpenModal} onDelete={handleDelete} />
+      <AdminTable columns={columns} data={filteredCourses} isLoading={isLoading} onEdit={permission !== 'view' ? handleOpenModal : undefined} onDelete={permission !== 'view' ? handleDelete : undefined} />
 
       {/* Create / Edit Modal */}
       <AdminModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingCourse ? 'Edit Course' : 'Create New Course'}>

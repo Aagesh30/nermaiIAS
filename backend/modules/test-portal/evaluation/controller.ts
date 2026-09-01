@@ -16,7 +16,83 @@ export class EvaluationController {
         return String(str || "").trim().toLowerCase();
     }
 
-    private static async recalculateRanksAndPercentiles(testId: string) {
+    private static async recalculateSingleStudentRank(
+        testId: string, 
+        studentId: string, 
+        attemptId: string, 
+        score: number, 
+        resultPayload: any
+    ) {
+        // Standard Competition Rank: Count of scores strictly higher than current + 1
+        const rankSnap = await db.collection("results")
+            .where("testId", "==", testId)
+            .where("isDeleted", "==", false)
+            .where("obtainedMarks", ">", score)
+            .count()
+            .get();
+        const rank = rankSnap.data().count + 1;
+
+        // Total count of results for this test
+        const totalSnap = await db.collection("results")
+            .where("testId", "==", testId)
+            .where("isDeleted", "==", false)
+            .count()
+            .get();
+        const total = totalSnap.data().count;
+
+        // Percentile: (Count of scores strictly less than S) / (N - 1) * 100
+        const lessSnap = await db.collection("results")
+            .where("testId", "==", testId)
+            .where("isDeleted", "==", false)
+            .where("obtainedMarks", "<", score)
+            .count()
+            .get();
+        const countLess = lessSnap.data().count;
+        const percentile = total > 1 ? Math.round((countLess / (total - 1)) * 10000) / 100 : 100;
+
+        // Update the submitting student's result doc with rank & percentile
+        await db.collection("results").doc(attemptId).update({
+            rank,
+            percentile,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update only this student's leaderboard entry if it is their best score
+        const leaderboardDocId = `${testId}_${studentId}`;
+        const leaderboardRef = db.collection("leaderboards").doc(leaderboardDocId);
+        const leaderboardSnap = await leaderboardRef.get();
+        
+        let shouldUpdateLeaderboard = true;
+        if (leaderboardSnap.exists) {
+            const existing = leaderboardSnap.data()!;
+            if ((existing.obtainedMarks || 0) >= score) {
+                shouldUpdateLeaderboard = false;
+            }
+        }
+
+        if (shouldUpdateLeaderboard) {
+            await leaderboardRef.set({
+                id: leaderboardDocId,
+                testId,
+                studentId,
+                attemptId,
+                obtainedMarks: score,
+                totalMarks: resultPayload.totalMarks,
+                percentage: resultPayload.percentage,
+                rank,
+                percentile,
+                status: resultPayload.status,
+                correct: resultPayload.correct ?? 0,
+                wrong: resultPayload.wrong ?? 0,
+                skipped: resultPayload.skipped ?? 0,
+                studentName: resultPayload.studentName || "Student",
+                rollNumber: resultPayload.rollNumber || "N/A",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+    }
+
+    private static async recalculateAllRanksForTest(testId: string) {
         const resultsSnapshot = await db.collection("results")
             .where("testId", "==", testId)
             .where("isDeleted", "==", false)
@@ -42,7 +118,7 @@ export class EvaluationController {
             ...doc.data()
         })) as any[];
 
-        // Sort by obtainedMarks desc, then by updatedAt asc
+        // Sort by obtainedMarks desc
         results.sort((a, b) => b.obtainedMarks - a.obtainedMarks);
 
         const N = results.length;
@@ -53,10 +129,7 @@ export class EvaluationController {
             const currentResult = results[i];
             const score = currentResult.obtainedMarks;
 
-            // Standard Competition Rank: Number of scores strictly higher than current + 1
             const rank = results.filter(r => r.obtainedMarks > score).length + 1;
-
-            // Percentile: (Count of scores strictly less than S) / N * 100
             const countLess = results.filter(r => r.obtainedMarks < score).length;
             const percentile = N > 1 ? Math.round((countLess / (N - 1)) * 10000) / 100 : 100;
 
@@ -67,7 +140,6 @@ export class EvaluationController {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Keep only the best score of each student for the leaderboard
             const studentId = currentResult.studentId;
             if (!bestStudentScores[studentId] || score > bestStudentScores[studentId].obtainedMarks) {
                 bestStudentScores[studentId] = {
@@ -87,12 +159,10 @@ export class EvaluationController {
 
         const leaderboardBatch = db.batch();
 
-        // Delete existing leaderboard entries for this test first to prevent stale records
         leaderboardSnapshot.docs.forEach(doc => {
             leaderboardBatch.delete(doc.ref);
         });
 
-        // Insert fresh best scores
         for (const studentId of Object.keys(bestStudentScores)) {
             const best = bestStudentScores[studentId];
             const leaderboardDocId = `${testId}_${studentId}`;
@@ -112,6 +182,8 @@ export class EvaluationController {
                 correct: best.correct ?? 0,
                 wrong: best.wrong ?? 0,
                 skipped: best.skipped ?? 0,
+                studentName: best.studentName || "Student",
+                rollNumber: best.rollNumber || "N/A",
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
         }
@@ -163,11 +235,10 @@ export class EvaluationController {
                     .map(doc => ({ id: doc.id, ...doc.data() }));
             }
 
-            const answersSnapshot = await db.collection("student_answers")
-                .where("attemptId", "==", attemptId)
-                .get();
-
-            const studentAnswers = answersSnapshot.docs.map(doc => doc.data());
+            const studentAnswers = Object.entries(attempt.answers || {}).map(([qId, val]) => ({
+                questionId: qId,
+                selectedAnswer: val
+            }));
 
             // ─────────────────────────────────────────────────────────────
             // MARKS LOGIC:
@@ -267,11 +338,37 @@ export class EvaluationController {
             const wrongCount    = questionDetails.filter(qd => !qd.isCorrect && qd.selectedAnswer !== null && qd.selectedAnswer !== undefined && qd.selectedAnswer !== "").length;
             const skippedCount  = questionDetails.filter(qd => qd.selectedAnswer === null || qd.selectedAnswer === undefined || qd.selectedAnswer === "").length;
 
+            // Resolve student name and roll number for O(1) reads later
+            let studentName = "";
+            let rollNumber = "";
+            try {
+                const studentDoc = await db.collection("students").doc(attempt.studentId).get();
+                if (studentDoc.exists) {
+                    const sData = studentDoc.data()!;
+                    studentName = `${sData.firstName || ""} ${sData.lastName || ""}`.trim() || sData.fullName || sData.name || "";
+                    rollNumber = sData.rollNumber || sData.rollNo || sData.admissionNumber || sData.loginUsername || "";
+                }
+                if (!studentName) {
+                    const userDoc = await db.collection("users").doc(attempt.studentId).get();
+                    if (userDoc.exists) {
+                        const uData = userDoc.data()!;
+                        studentName = uData.name || "";
+                        rollNumber = uData.username || uData.loginUsername || "";
+                    }
+                }
+            } catch (e) {
+                console.log("Error loading student profile during evaluation:", e);
+            }
+            if (!studentName) studentName = "Student";
+            if (!rollNumber) rollNumber = "N/A";
+
             const resultPayload = {
                 id: attemptId,
                 attemptId,
                 testId: attempt.testId,
                 studentId: attempt.studentId,
+                studentName,
+                rollNumber,
                 totalMarks,
                 obtainedMarks: finalObtainedMarks,
                 percentage: Math.round(percentage * 100) / 100,
@@ -297,8 +394,8 @@ export class EvaluationController {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Recalculate ranks and percentiles for this test
-            await EvaluationController.recalculateRanksAndPercentiles(attempt.testId);
+            // Recalculate ranks and percentiles for this test using single student method
+            await EvaluationController.recalculateSingleStudentRank(attempt.testId, attempt.studentId, attemptId, finalObtainedMarks, resultPayload);
 
             // Retrieve updated result with rank & percentile
             const updatedDoc = await db.collection("results").doc(attemptId).get();
@@ -536,7 +633,7 @@ export class EvaluationController {
             });
 
             // Recalculate ranks & percentiles for remaining results of the test
-            await EvaluationController.recalculateRanksAndPercentiles(result.testId);
+            await EvaluationController.recalculateAllRanksForTest(result.testId);
 
             return res.status(200).json({
                 success: true,

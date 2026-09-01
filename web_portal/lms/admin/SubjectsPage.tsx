@@ -4,7 +4,7 @@ import { AdminTable, AdminModal, AdminInput, AdminSelect, AdminButton, DeleteCon
 import { CourseApi } from '../core/services';
 import api from '../core/api';
 
-export const SubjectsPage = () => {
+export const SubjectsPage = ({ permission = 'edit_direct', executeEditOrApproval }: { permission?: string; executeEditOrApproval?: any }) => {
   const [subjects, setSubjects] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -65,19 +65,39 @@ export const SubjectsPage = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.courseId) { alert('Please select a course.'); return; }
-    try {
-      if (editingSubject) { await CourseApi.updateSubject(editingSubject.id, formData); }
-      else { await CourseApi.createSubject(formData.courseId, formData); }
+    const saveAction = async () => {
+      try {
+        if (editingSubject) { await CourseApi.updateSubject(editingSubject.id, formData); }
+        else { await CourseApi.createSubject(formData.courseId, formData); }
+        setIsModalOpen(false);
+        fetchData();
+      } catch (error) { alert('Error saving subject.'); }
+    };
+
+    if (executeEditOrApproval) {
+      const actionType = editingSubject ? 'edit' : 'create';
+      executeEditOrApproval('lms_subjects', actionType, formData, saveAction, 'subjects', editingSubject?.id);
       setIsModalOpen(false);
-      fetchData();
-    } catch (error) { alert('Error saving subject.'); }
+    } else {
+      await saveAction();
+    }
   };
 
   const performDelete = async (id: string) => {
     setIsDeleting(true);
-    try { await CourseApi.deleteSubject(id); fetchData(); }
-    catch { alert('Failed to delete subject'); }
-    finally { setIsDeleting(false); setDeleteConfirm(null); }
+    const deleteAction = async () => {
+      try { await CourseApi.deleteSubject(id); fetchData(); }
+      catch { alert('Failed to delete subject'); }
+      finally { setIsDeleting(false); setDeleteConfirm(null); }
+    };
+
+    if (executeEditOrApproval) {
+      executeEditOrApproval('lms_subjects', 'delete', null, deleteAction, 'subjects', id);
+      setIsDeleting(false);
+      setDeleteConfirm(null);
+    } else {
+      await deleteAction();
+    }
   };
 
   // Filter by Course and search query
@@ -166,9 +186,11 @@ export const SubjectsPage = () => {
           </div>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage subjects structured inside courses.</p>
         </div>
-        <AdminButton onClick={() => handleOpenModal()}>
-          <Plus className="w-4 h-4" /> Create Subject
-        </AdminButton>
+        {permission !== 'view' && (
+          <AdminButton onClick={() => handleOpenModal()}>
+            <Plus className="w-4 h-4" /> Create Subject
+          </AdminButton>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -210,7 +232,7 @@ export const SubjectsPage = () => {
       </div>
 
       {/* Subjects Table */}
-      <AdminTable columns={columns} data={filteredSubjects} isLoading={isLoading} onEdit={handleOpenModal} onDelete={(s) => setDeleteConfirm(s.id)} />
+      <AdminTable columns={columns} data={filteredSubjects} isLoading={isLoading} onEdit={permission !== 'view' ? handleOpenModal : undefined} onDelete={permission !== 'view' ? (s) => setDeleteConfirm(s.id) : undefined} />
 
       {/* Create / Edit Modal */}
       <AdminModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingSubject ? 'Edit Subject' : 'Create New Subject'}>

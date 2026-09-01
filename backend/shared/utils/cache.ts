@@ -93,8 +93,13 @@ class MemoryCache {
 }
 
 // Global cache instances for Test Portal
-export const testQuestionsCache = new MemoryCache(900); // 15 minutes TTL for cleaned questions
-export const testDetailsCache = new MemoryCache(600);   // 10 minutes TTL for published test metadata
-export const attemptCache = new MemoryCache(15);         // 15 seconds TTL for student attempts metadata during exam
-export const generalCache = new MemoryCache(300);       // 5 minutes TTL for general cached payloads
+// TTLs tuned for cost-efficiency:
+//   - testQuestionsCache: 1 hour — questions never change mid-test
+//   - testDetailsCache: 30 min — test config is stable
+//   - attemptCache: 15 sec — kept short for live attempt accuracy
+//   - generalCache: 1 hour — resource listings, batch info, course data
+export const testQuestionsCache = new MemoryCache(3600);  // 1 hour TTL
+export const testDetailsCache   = new MemoryCache(1800);  // 30 min TTL
+export const attemptCache       = new MemoryCache(15);    // 15 sec TTL
+export const generalCache       = new MemoryCache(3600);  // 1 hour TTL
 

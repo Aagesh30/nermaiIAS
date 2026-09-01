@@ -107,7 +107,7 @@ export const requireAuthOrQueryToken = async (
 };
 
 export const requireRole = (allowedRoles: string[]) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return next(new AppError('Forbidden: User not authenticated', 403));
     }
@@ -115,6 +115,15 @@ export const requireRole = (allowedRoles: string[]) => {
     // allow super_admin to access anything, or check if role is in allowed list
     if (req.user.role === 'super_admin' || req.user.role === 'developer' || allowedRoles.includes(req.user.role)) {
       return next();
+    }
+
+    try {
+      const doc = await db.collection('role_permissions').doc(req.user.role).get();
+      if (doc.exists) {
+        return next();
+      }
+    } catch (err) {
+      logger.error('Error checking role permissions in requireRole', err);
     }
     
     return next(new AppError(`Forbidden: Requires one of roles [${allowedRoles.join(', ')}]`, 403));
@@ -193,51 +202,71 @@ export const requirePermission = (featureKey: string, action: 'C' | 'R' | 'U' | 
 
       // Block direct writes for other permission levels (e.g., 'view', 'edit_on_approval')
       if (perm === 'edit_on_approval') {
-        const actionType = action === 'C' ? 'create' : action === 'D' ? 'delete' : 'edit';
+        const actionType: 'create' | 'edit' | 'delete' = action === 'C' ? 'create' : action === 'D' ? 'delete' : 'edit';
         
         let targetCollection = featureKey;
         const pathLower = req.originalUrl.toLowerCase();
         if (pathLower.includes('/erp/student')) targetCollection = 'students';
         else if (pathLower.includes('/erp/batch')) targetCollection = 'batches';
         else if (pathLower.includes('/erp/staff')) targetCollection = 'staff';
+        else if (pathLower.includes('/erp/fees')) targetCollection = 'students';
+        else if (pathLower.includes('/erp/marks')) targetCollection = 'students';
+        else if (pathLower.includes('/erp/id-card')) targetCollection = 'students';
         else if (pathLower.includes('/lms/daily-content')) targetCollection = 'daily-content';
         else if (pathLower.includes('/lms/daily-quiz')) targetCollection = 'daily-quiz';
         else if (pathLower.includes('/resources')) targetCollection = 'resources';
         else if (pathLower.includes('/classes')) targetCollection = 'classes';
         else if (pathLower.includes('/live-sessions')) targetCollection = 'live-sessions';
         else if (pathLower.includes('/crm/campaigns')) targetCollection = 'campaigns';
+        else if (pathLower.includes('/crm/leads')) targetCollection = 'leads';
+        else if (pathLower.includes('/crm/admission')) targetCollection = 'admissions';
+        else if (pathLower.includes('/crm/fee-reminders')) targetCollection = 'fee_reminders';
+        else if (pathLower.includes('/crm/freebies')) targetCollection = 'freebies';
+        else if (pathLower.includes('/crm/courses')) targetCollection = 'crm_courses';
+        else if (pathLower.includes('/crm/inquiry')) targetCollection = 'inquiries';
+        else if (pathLower.includes('/crm/guest-posters')) targetCollection = 'guest_posters';
+        else if (pathLower.includes('/crm/alumni-feedback')) targetCollection = 'alumni_feedback';
         else if (pathLower.includes('/announcement')) targetCollection = 'announcements';
         else if (pathLower.includes('/notification')) targetCollection = 'notifications';
         else if (pathLower.includes('/test-portal/test-creation')) targetCollection = 'tests';
-        
-        let docId = req.params.id || req.params.docId || req.body.id || req.body._id;
+        else if (pathLower.includes('/test-portal/question-bank')) targetCollection = 'questions';
+
+        let docId: string | null = req.params.id || req.params.docId || req.body?.id || req.body?._id || null;
         if (!docId) {
           const parts = req.originalUrl.split('?')[0].split('/');
           const lastSegment = parts[parts.length - 1];
-          if (lastSegment && lastSegment !== 'student' && lastSegment !== 'batch' && lastSegment !== 'staff' && lastSegment !== 'daily-content' && lastSegment !== 'daily-quiz' && lastSegment !== 'test-creation') {
+          const knownEndpoints = ['student', 'batch', 'staff', 'fees', 'marks', 'id-card',
+            'test-creation', 'question-bank', 'campaigns', 'leads', 'admission', 'daily-content', 'daily-quiz'];
+          if (lastSegment && !knownEndpoints.includes(lastSegment) && lastSegment.length > 5) {
             docId = lastSegment;
-          } else {
-            docId = 'new_document';
           }
         }
         
-        await db.collection('notifications').add({
-          type: actionType === 'delete' ? 'delete_approval' : actionType === 'create' ? 'create_approval' : 'edit_approval',
-          feature: featureKey,
-          targetCollection: targetCollection,
-          docId: docId,
-          proposedPayload: req.body || {},
-          requestedBy: req.user.name || req.user.username || 'Staff',
-          requestedByUserId: req.user.userId,
-          status: 'pending',
-          createdAt: new Date().toISOString()
-        });
+        try {
+          // Use AdminApprovalService so the frontend can listen via Firestore real-time on requestId
+          const { AdminApprovalService } = await import('../../modules/admin-approvals/service');
+          const approvalService = new AdminApprovalService();
+          const approvalRequest = await approvalService.submitRequest({
+            featureKey,
+            actionType,
+            targetCollection,
+            docId,
+            proposedPayload: req.body || {},
+            requestedBy: req.user!.name || req.user!.username || req.user!.userId,
+            requestedByUserId: req.user!.userId,
+            requestedByRole: req.user!.role || 'unknown',
+          });
 
-        return res.status(202).json({
-          success: true,
-          approvalRequired: true,
-          message: 'Your request has been submitted to the Super Admin for approval.'
-        });
+          return res.status(202).json({
+            success: true,
+            approvalRequired: true,
+            requestId: approvalRequest.id,
+            message: 'Your request has been submitted to the Super Admin for approval.',
+          });
+        } catch (approvalErr: any) {
+          logger.error('Failed to submit admin approval request', { error: approvalErr.message });
+          return next(new AppError(`Failed to submit approval request: ${approvalErr.message}`, 500));
+        }
       }
 
       return next(new AppError(`Forbidden: Direct edit permission denied for ${featureKey}. Access level: ${perm}`, 403));

@@ -7,4 +7,4 @@ import app from "./app";
  */
 export const api = onRequest({ region: "asia-south1", timeoutSeconds: 300, memory: "1GiB" }, app);
 export default app;
-
+// Force deploy update - Redis removed and performance optimizations applied.

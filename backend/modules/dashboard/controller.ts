@@ -258,7 +258,7 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
       }
     };
 
-    generalCache.set(cacheKey, responsePayload, 300); // Cache for 5 minutes
+    generalCache.set(cacheKey, responsePayload, 1800); // Cache for 30 minutes
     res.status(200).json(responsePayload);
 
   } catch (error: any) {

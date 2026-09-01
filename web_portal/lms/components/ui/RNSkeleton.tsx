@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Animated, ViewStyle } from 'react-native';
+import { View, Animated, ViewStyle, Platform } from 'react-native';
 
 interface RNSkeletonProps {
   style?: ViewStyle | ViewStyle[];

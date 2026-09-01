@@ -177,10 +177,36 @@ export class ExaminationController {
 
             const remainingSeconds = Math.max(0, Math.floor((finalEndTime.getTime() - now) / 1000));
 
+            // Resolve student name and roll number for O(1) reads later
+            let studentName = "";
+            let rollNumber = "";
+            try {
+                const studentDoc = await db.collection("students").doc(studentId).get();
+                if (studentDoc.exists) {
+                    const sData = studentDoc.data()!;
+                    studentName = `${sData.firstName || ""} ${sData.lastName || ""}`.trim() || sData.fullName || sData.name || "";
+                    rollNumber = sData.rollNumber || sData.rollNo || sData.admissionNumber || sData.loginUsername || "";
+                }
+                if (!studentName) {
+                    const userDoc = await db.collection("users").doc(studentId).get();
+                    if (userDoc.exists) {
+                        const uData = userDoc.data()!;
+                        studentName = uData.name || "";
+                        rollNumber = uData.username || uData.loginUsername || "";
+                    }
+                }
+            } catch (e) {
+                console.log("Error loading student profile during startTest:", e);
+            }
+            if (!studentName) studentName = "Student";
+            if (!rollNumber) rollNumber = "N/A";
+
             const attemptPayload = {
                 id: attemptId,
                 testId,
                 studentId,
+                studentName,
+                rollNumber,
                 status: "started",
                 isSubmitted: false,
                 submittedAt: null,
@@ -299,20 +325,16 @@ export class ExaminationController {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Find last answered question: use simple where (no orderBy) to avoid
-            // requiring a composite Firestore index while it is still building.
-            // The frontend fetches the full answer list via /progress anyway.
+            // Find last answered question directly from local answers map (zero database cost)
             let lastAnsweredQuestionId = null;
             try {
-                const answersSnapshot = await db.collection("student_answers")
-                    .where("attemptId", "==", attemptId)
-                    .limit(1)
-                    .get();
-                if (!answersSnapshot.empty) {
-                    lastAnsweredQuestionId = answersSnapshot.docs[0].data().questionId;
+                const answers = attempt.answers || {};
+                const keys = Object.keys(answers);
+                if (keys.length > 0) {
+                    lastAnsweredQuestionId = keys[keys.length - 1];
                 }
             } catch (_) {
-                // Non-critical — frontend will recover progress via /progress endpoint
+                // Non-critical
             }
 
             return res.status(200).json({
@@ -563,25 +585,14 @@ export class ExaminationController {
                 });
             }
 
-            const answerDocId = `${attemptId}_${questionId}`;
-            const answerRef = db.collection("student_answers").doc(answerDocId);
-
-            const payload = {
-                id: answerDocId,
-                attemptId,
-                studentId,
-                testId: attempt.testId,
-                questionId,
-                selectedAnswer: answer !== undefined ? answer : null,
-                savedAt: admin.firestore.FieldValue.serverTimestamp()
+            const answersUpdate: Record<string, any> = {
+                lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                [`answers.${questionId}`]: answer !== undefined ? answer : null
             };
 
-            await answerRef.set(payload, { merge: true });
-
-            await db.collection("student_attempts").doc(attemptId).update({
-                lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
+            attemptCache.delete(`attempt_${attemptId}`); // Invalidate cache so progress/resume load fresh answers map
+            await db.collection("student_attempts").doc(attemptId).update(answersUpdate);
 
             return res.status(200).json({
                 success: true,
@@ -654,29 +665,23 @@ export class ExaminationController {
                 });
             }
 
+            attemptCache.delete(`attempt_${attemptId}`); // Invalidate cache so progress/resume load fresh answers map
             if (answers.length > 0) {
-                const batch = db.batch();
+                const updatePayload: Record<string, any> = {
+                    lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                };
                 for (const item of answers) {
                     if (!item.questionId) continue;
-                    const answerDocId = `${attemptId}_${item.questionId}`;
-                    const answerRef = db.collection("student_answers").doc(answerDocId);
-                    batch.set(answerRef, {
-                        id: answerDocId,
-                        attemptId,
-                        studentId,
-                        testId: attempt.testId,
-                        questionId: item.questionId,
-                        selectedAnswer: item.answer !== undefined ? item.answer : null,
-                        savedAt: admin.firestore.FieldValue.serverTimestamp()
-                    }, { merge: true });
+                    updatePayload[`answers.${item.questionId}`] = item.answer !== undefined ? item.answer : null;
                 }
-                await batch.commit();
+                await db.collection("student_attempts").doc(attemptId).update(updatePayload);
+            } else {
+                await db.collection("student_attempts").doc(attemptId).update({
+                    lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
             }
-
-            await db.collection("student_attempts").doc(attemptId).update({
-                lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
 
             return res.status(200).json({
                 success: true,
@@ -735,13 +740,10 @@ export class ExaminationController {
             const test = testDoc.data()!;
             const totalQuestions = test.questionIds ? test.questionIds.length : 0;
 
-            const answersSnapshot = await db.collection("student_answers")
-                .where("attemptId", "==", attemptId)
-                .get();
-
-            const answeredQuestionIds = answersSnapshot.docs
-                .filter(doc => doc.data().selectedAnswer !== null && doc.data().selectedAnswer !== undefined && doc.data().selectedAnswer !== "")
-                .map(doc => doc.data().questionId);
+            const answers = attempt.answers || {};
+            const answeredQuestionIds = Object.entries(answers)
+                .filter(([_, val]) => val !== null && val !== undefined && val !== "")
+                .map(([qId, _]) => qId);
 
             const answeredCount = answeredQuestionIds.length;
             const remainingCount = Math.max(0, totalQuestions - answeredCount);
@@ -919,46 +921,14 @@ export class ExaminationController {
                 return d.isSubmitted || d.status === "submitted" || d.status === "evaluated";
             }).length;
 
-            // Lookup maps for user & student details
-            const usersSnapshot = await db.collection("users").get();
-            const userToStudentMap: { [userId: string]: any } = {};
-            usersSnapshot.docs.forEach(doc => {
-                const u = doc.data();
-                userToStudentMap[u.id || doc.id] = u;
-            });
-
-            const studentsSnapshot = await db.collection("students").get();
-            const studentsMap: { [id: string]: any } = {};
-            studentsSnapshot.docs.forEach(doc => {
-                const s = doc.data();
-                studentsMap[s.id || doc.id] = s;
-            });
-
+            // Read pre-saved student details directly from active attempts (0 extra reads)
             const activeStudents = activeAttempts.map(doc => {
                 const d = doc.data();
-                const sid = d.studentId;
-                const userObj = userToStudentMap[sid];
-                const resolvedStudentId = userObj?.studentId || sid;
-                const student = studentsMap[resolvedStudentId] || studentsMap[sid] || {};
-
-                const rollNumber = student.rollNumber || student.rollNo || student.admissionNumber || student.loginUsername || userObj?.username || userObj?.loginUsername || sid;
-
-                let studentName = "";
-                if (student.firstName) {
-                    studentName = `${student.firstName} ${student.lastName || ""}`.trim();
-                } else if (student.fullName || student.name) {
-                    studentName = student.fullName || student.name;
-                } else if (userObj?.name) {
-                    studentName = userObj.name;
-                } else {
-                    studentName = sid ? `Student (${sid})` : "Unknown Student";
-                }
-
                 return {
                     attemptId: d.id || doc.id,
-                    studentId: sid,
-                    studentName,
-                    rollNumber
+                    studentId: d.studentId,
+                    studentName: d.studentName || `Student (${d.studentId.substring(0, 8)})`,
+                    rollNumber: d.rollNumber || "N/A"
                 };
             });
 
