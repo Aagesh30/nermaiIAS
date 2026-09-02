@@ -1,0 +1,472 @@
+# LMS Frontend Bugs — Deep Implementation Plan
+
+> [!IMPORTANT]
+> **Scope: FRONTEND ONLY.** Zero backend changes. Zero ERP/CRM/Test/Staff/Admin module changes.
+> Only files inside `web_portal/lms/` are modified.
+
+---
+
+## 📸 Screenshots Analysis
+
+From the 3 screenshots provided:
+1. **SACS Permanent tab** — Shows `Analytics` + `Templates` tabs that need removal
+2. **Revert Modal (History tab)** — Modal opens correctly but **has no "Confirm" button visible** (cut off or CSS bug)
+3. **SACS Permanent tab again** — "Revoke" button on the grant row is **a blank red box** — no text visible
+
+---
+
+## 🔍 Full Bug Inventory — All 4 LMS Pages
+
+---
+
+### 📄 PAGE 1: SACS Access Control — [`AccessControlPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/admin/AccessControlPage.tsx)
+
+#### 🔴 BUG #1 — "Analytics" and "Templates" tabs must be removed
+
+**Location:** Lines 12–19
+```ts
+const SUB_TABS = [
+  { key: 'permissions', label: 'Permissions', Icon: ShieldCheck },
+  { key: 'requests',    label: 'Requests',    Icon: Clock       },
+  { key: 'history',    label: 'History',     Icon: History     },
+  { key: 'permanent',  label: 'Permanent',   Icon: Lock        },
+  { key: 'analytics',  label: 'Analytics',   Icon: Grid3X3     },  // ← REMOVE
+  { key: 'templates',  label: 'Templates',   Icon: BookTemplate }, // ← REMOVE
+];
+```
+
+**Fix:** Remove the `analytics` and `templates` entries from the `SUB_TABS` array.
+Also remove corresponding unused imports: `Grid3X3`, `BookTemplate` from lucide-react at Line 3.
+Also remove the two dead `{activeTab === 'analytics' ...}` and `{activeTab === 'templates' ...}` render blocks at Lines 520–521.
+
+---
+
+#### 🔴 BUG #2 — "Revoke" button in Permanent Grants tab shows BLANK red box (no text)
+
+**Location:** Line 1041
+```tsx
+<Button variant="danger" className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700" onClick={...}>
+  Revoke   {/* ← text exists but Button component likely has `text-white` missing from variant="danger" */}
+</Button>
+```
+
+**Root cause:** The `AdminButton` component imported as `Button` from `../components/admin-ui` — when `variant="danger"` is used with a `className` override, the text color is **not being applied** (likely `text-white` is not in the danger variant's default classes, and the override className doesn't include it).
+
+**Fix:** Add `text-white` explicitly:
+```tsx
+<Button variant="danger" className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white">
+  Revoke
+</Button>
+```
+
+---
+
+#### 🔴 BUG #3 — Revert Modal "Confirm Revert" button NOT visible in screenshot
+
+**Location:** Lines 340–350 (RevertModal component)
+```tsx
+<button
+  onClick={async () => { setLoading(true); try { await onConfirm(reason); onClose(); } finally { setLoading(false); } }}
+  disabled={loading || !reason.trim()}
+  className="flex-1 py-2 text-sm font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-xl ..."
+>
+  <RotateCcw size={14} />
+  {loading ? 'Reverting...' : 'Confirm Revert'}
+</button>
+```
+
+The code looks correct, but from the screenshot the modal only shows the "Cancel" button, and there's **no Confirm Revert button visible**. The issue is a **CSS flex layout overflow** — the dialog container `max-w-md w-full` is probably being cut off on smaller screens or the button flex children are not wrapping correctly.
+
+**Fix:** Change the button container from `flex gap-3` to ensure both buttons always wrap properly:
+```tsx
+{/* From */}
+<div className="flex gap-3">
+  <button ...>Cancel</button>
+  <button ...>Confirm Revert</button>
+</div>
+
+{/* To */}
+<div className="flex flex-col sm:flex-row gap-3 mt-2">
+  <button className="flex-1 ...">Cancel</button>
+  <button className="flex-1 ...">Confirm Revert</button>
+</div>
+```
+
+---
+
+#### 🔴 BUG #4 — Requests Tab: `requestedAt` field fallback shows invalid dates
+
+**Location:** Line 738–742
+```tsx
+{req.requestedAt && (
+  <span>{new Date(req.requestedAt).toLocaleDateString(...)}</span>
+)}
+```
+
+If `req.requestedAt` is `undefined` but `req.createdAt` or `req.updatedAt` exists, **no date is shown**. The filter function at Line 470 already handles multiple timestamp fields but the display does not.
+
+**Fix:**
+```tsx
+{(req.requestedAt || req.createdAt) && (
+  <span>
+    {new Date(req.requestedAt || req.createdAt).toLocaleDateString([], {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    })}
+  </span>
+)}
+```
+
+---
+
+#### 🔴 BUG #5 — Permanent Grants Tab: No empty state message
+
+**Location:** Lines 1013–1051 (PermanentGrantsTab)
+
+When `grants.length === 0`, the tab shows **nothing at all** — completely blank after the spinner. No empty state is rendered.
+
+**Fix:** Add empty state after `if (loading)` check:
+```tsx
+if (loading) return <div>Loading...</div>;
+
+if (grants.length === 0) return (
+  <div className="p-12 text-center border border-dashed border-gray-200 dark:border-white/10 rounded-2xl bg-white dark:bg-[#1a1a2e] text-gray-500 dark:text-gray-400">
+    <Lock className="mx-auto mb-3 opacity-40" size={36} />
+    <p className="font-semibold">No permanent grants</p>
+    <p className="text-xs mt-1">Approved permanent access requests will appear here.</p>
+  </div>
+);
+```
+
+---
+
+#### 🟡 BUG #6 — History Tab: `grantedAt` field uses wrong key on permanent grants
+
+**Location:** Lines 964–967
+```tsx
+{item.grantExpiresAt && (
+  <span>Expires: {new Date(item.grantExpiresAt).toLocaleDateString()}</span>
+)}
+```
+
+Permanent grants will have `grantExpiresAt = null/undefined`, so the "Expires" line correctly disappears. But the date display at Line 970 uses `item.updatedAt || item.requestedAt` — but for approved grants the correct field is likely `item.grantedAt` or `item.resolvedAt`.
+
+**Fix:**
+```tsx
+<span className="text-xs text-gray-400 dark:text-gray-500">
+  {new Date(item.grantedAt || item.updatedAt || item.requestedAt).toLocaleString([], { 
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+  })}
+</span>
+```
+
+---
+
+#### 🟡 BUG #7 — Permissions tab shows generic placeholder instead of useful content
+
+**Location:** Line 516
+```tsx
+{activeTab === 'permissions' && (
+  <div>Select an entity from LMS to manage its permissions.</div>
+)}
+```
+
+This is a dead placeholder with no guidance on HOW to navigate to an entity. The Permissions tab is the default-adjacent experience and shows nothing useful.
+
+**Fix:** Add a meaningful call-to-action panel:
+```tsx
+{activeTab === 'permissions' && (
+  <div className="p-12 text-center border border-dashed rounded-xl bg-white dark:bg-[#1a1a2e] border-gray-200 dark:border-[#8B0000]/30">
+    <ShieldCheck className="mx-auto mb-3 text-[#8B0000] dark:text-[#ff8a80] opacity-60" size={40} />
+    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Manage Content Permissions</h3>
+    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+      Navigate to any Course, Subject, Topic, or Class in the LMS and use the 
+      <strong> 🔒 Permissions</strong> button to configure access rules for that content.
+    </p>
+  </div>
+)}
+```
+
+---
+
+### 📄 PAGE 2: Student Live Classes — [`StudentLiveClassesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentLiveClassesPage.tsx)
+
+#### 🔴 BUG #8 — `handleJoinClass` called with wrong arg order on ended unassigned classes
+
+**Location:** Line 1095
+```tsx
+onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id)}
+// ↑ Missing 3rd arg `cls` — so attendance recordJoin never fires for unassigned classes
+```
+
+All other `onJoin` calls at Lines 994, 1013, 1065 include `cls` as the 3rd argument:
+```tsx
+onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
+```
+
+**Fix:** Line 1095 — add the third argument `cls`:
+```tsx
+onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
+```
+
+---
+
+#### 🔴 BUG #9 — `PriorAccessRequestModal` submits `requestedDays` but `requestTemporaryAccess` checks `data.requestedDays` correctly, however the reason prefix format could break parsing
+
+**Location:** Lines 749–760 (handlePriorAccessSubmit)
+```tsx
+await LiveClassesApi.requestTemporaryAccess({
+  requestType: 'LIVE_SESSION',
+  contentId: 'general',
+  contentName: 'General Live Class Access',
+  reason: data.reason,
+  requestedDays: data.days,
+});
+```
+
+In `services.ts` at Lines 108–120, this becomes:
+```
+reason: `[TEMPORARY ACCESS REQUEST - ${data.requestedDays} day(s)] ${data.reason}`
+```
+
+**Problem:** `data.requestedDays` maps correctly. No code bug — but `data.days` → `requestedDays` mapping is correct ✅.
+
+---
+
+#### 🔴 BUG #10 — Session card `key` uses array index `i` instead of stable ID on live/upcoming tabs
+
+**Location:** Lines 990–991, 1008–1009
+```tsx
+live.map((cls: any, i: number) => (
+  <SessionCard key={i} .../>   // ← index key causes re-mount flicker when list changes
+))
+```
+
+**Fix:** Use stable ID:
+```tsx
+<SessionCard key={cls.classId || cls.id || i} .../>
+```
+Apply same fix to upcoming list at Line 1009.
+
+---
+
+#### 🟡 BUG #11 — `startTime` display: all 3 time fields used inconsistently
+
+**Location:** Line 384
+```tsx
+const startTime = cls.startTime || cls.scheduledAt || cls.scheduledStartTime || null;
+```
+
+But at Line 441 (countdown target):
+```tsx
+const scheduledMs = cls.scheduledStartTime || cls.startTime || cls.scheduledAt
+```
+
+Order differs between startTime display and countdown. If `cls.startTime` is the actual session start (not scheduled), countdown runs against the wrong value.
+
+**Fix:** Normalize to consistent priority:
+```tsx
+const startTime = cls.scheduledStartTime || cls.scheduledAt || cls.startTime || null;
+// Apply same order to countdown in isTimedOutCard logic
+```
+
+---
+
+### 📄 PAGE 3: Student Attendance — [`StudentAttendancePage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentAttendancePage.tsx)
+
+#### 🟡 BUG #12 — `summary.totalHours` displays raw number but data returns minutes
+
+**Location:** Line 190
+```tsx
+<p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+  {summary.totalHours ?? 0}h
+</p>
+<p className="text-xs text-gray-500 mt-1">Total hours</p>
+```
+
+If the API returns `totalMinutes` not `totalHours`, this shows `0h` always. Also the field `summary.totalHours` vs `summary.totalMinutes` needs verification against the backend response. The safe fix is:
+
+**Fix:**
+```tsx
+<p className="text-3xl font-bold">
+  {summary.totalHours != null 
+    ? `${summary.totalHours}h`
+    : summary.totalMinutes != null
+    ? `${Math.floor(summary.totalMinutes / 60)}h`
+    : '0h'}
+</p>
+```
+
+---
+
+#### 🟡 BUG #13 — Table overflow on mobile: no responsive wrapping
+
+**Location:** Lines 210–265
+
+The attendance table has 7 columns (`Class`, `Date`, `Joined`, `Submitted`, `Duration`, `Status`, `Action`) inside `overflow-x-auto`. On mobile this is hidden behind horizontal scroll with no indication to scroll. The `max-w-[220px]` truncation for className is also very aggressive on desktop.
+
+**Fix:** Increase `max-w` on class name column and add a mobile-friendly scroll hint:
+```tsx
+<div className="overflow-x-auto">
+  {/* Add scroll hint on mobile */}
+  <p className="text-xs text-gray-400 text-right mb-1 sm:hidden">← Scroll to see all columns</p>
+  <table className="w-full text-sm min-w-[700px]"> {/* Add min-w */}
+```
+
+---
+
+#### 🟡 BUG #14 — `correctionRequested` field not refreshed after submission
+
+**Location:** Lines 254–256
+```tsx
+{r.correctionRequested && (
+  <span className="text-xs text-gray-400 italic">Requested</span>
+)}
+```
+
+After `handleRequestCorrection` is called, `refetch()` is invoked. But if the API response for `getMyAttendance()` doesn't return the updated `correctionRequested: true` instantly, the "Request Correction" button still shows. The modal doesn't close before `refetch` completes.
+
+**Fix:** After submitting in `CorrectionModal`, the `done` state already shows "Request Submitted!" screen. But `setCorrectionModal(null)` is called when user clicks Close — at this point `refetch()` has already been awaited. This is **logically correct** but the `CorrectionModal.onSubmit` at Line 274 calls `handleRequestCorrection` which does `await refetch()`. The parent modal only closes on `onClose`. This is fine UX-wise but no visual update happens until modal closes. ✅ **Actually OK — no fix needed.**
+
+---
+
+### 📄 PAGE 4: Student Pay Fees — [`StudentPayFeesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentPayFeesPage.tsx)
+
+#### 🔴 BUG #15 — CRITICAL: React Native imports in a web-only page
+
+**Location:** Lines 10–23
+```tsx
+import { Platform, View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, 
+         Image, ActivityIndicator, Alert, Modal } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+```
+
+This file is served as a **web page** (the LMS web portal). These React Native imports will **crash the web build** or cause module resolution errors unless a separate native bundle is used.
+
+The file uses `Platform.OS === 'web'` guards, but the imports themselves will fail at bundle time unless `react-native-web` is configured.
+
+**Fix:** Replace all React Native component usages with web equivalents. The file already uses some web-specific logic (canvas, FileReader, etc.). Need to:
+1. Remove all `react-native`, `expo-image-picker`, `@expo/vector-icons` imports
+2. Use standard HTML/React elements (already done for most logic via `Platform.OS === 'web'` blocks)
+3. Replace `Alert.alert(...)` with `alert(...)` or toast calls
+4. Replace `ActivityIndicator` with a CSS spinner
+5. Replace `Image` from react-native with `<img>` tag
+
+---
+
+#### 🟡 BUG #16 — Payment screenshot size check uses wrong comparison
+
+**Location:** Line 169
+```tsx
+while (compressed.length > 50 * 1024 && quality > 0.1) {
+```
+
+`compressed` is a base64 data URL string. Its `.length` is the **character count**, not bytes. Base64 encodes ~4/3 bytes per character, so 50 * 1024 bytes ≈ 68267 characters. The comparison `> 50 * 1024` (= 51200 characters) is **too strict** — it rejects images well under 50KB.
+
+**Fix:**
+```tsx
+// Base64 string length ≈ (bytes * 4/3), so 50KB ≈ 68267 chars
+const MAX_B64_CHARS = Math.ceil(50 * 1024 * (4/3));
+while (compressed.length > MAX_B64_CHARS && quality > 0.1) {
+```
+
+---
+
+#### 🟡 BUG #17 — Timer countdown shows wrong format when > 1 hour
+
+The timer renders `timeLeft` in seconds but the UI display code is missing (not seen in first 200 lines). Need to verify the timer display doesn't just show raw seconds number.
+
+---
+
+### 📄 PAGE 5 (Student Courses) — [`StudentCoursesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentCoursesPage.tsx)
+
+#### 🟡 BUG #18 — `border-gray-255` is an invalid Tailwind class
+
+**Location:** Line 30
+```tsx
+<div className="p-8 border border-dashed border-gray-255 dark:border-gray-700 rounded-xl text-center">
+```
+
+`gray-255` does not exist in Tailwind's color palette (valid range is 50–900). This will be silently ignored, leaving the dashed border invisible in light mode.
+
+**Fix:**
+```tsx
+<div className="p-8 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl text-center">
+```
+
+---
+
+#### 🟡 BUG #19 — Course cards are not clickable/navigable
+
+**Location:** Lines 38–50
+```tsx
+<Card key={course.id} className="hover:border-primary/50 transition-colors cursor-pointer">
+```
+
+The card has `cursor-pointer` but **no `onClick` handler** and no navigation. Clicking a course does nothing. The student needs to navigate to `CoursePlayer` or a detailed view.
+
+**Fix:** Add navigation on click:
+```tsx
+import { useNavigate } from 'react-router-dom';
+const navigate = useNavigate();
+
+<Card 
+  key={course.id} 
+  className="hover:border-primary/50 transition-colors cursor-pointer"
+  onClick={() => navigate(`/lms/course/${course.id}`)}  // adjust route as needed
+>
+```
+
+---
+
+## 📋 Summary Table
+
+| # | Page | Bug | Severity | Type |
+|---|---|---|---|---|
+| 1 | SACS | Remove Analytics + Templates tabs | 🔴 Critical | UI Removal |
+| 2 | SACS | Revoke button blank (no text visible) | 🔴 Critical | CSS Bug |
+| 3 | SACS | Revert modal "Confirm" button not visible | 🔴 Critical | Layout Bug |
+| 4 | SACS | Request date field fallback missing | 🟡 Medium | Data Bug |
+| 5 | SACS | No empty state for Permanent Grants | 🟡 Medium | UX Gap |
+| 6 | SACS | History tab uses wrong date field | 🟡 Medium | Data Bug |
+| 7 | SACS | Permissions tab: blank/no guidance | 🟡 Medium | UX Gap |
+| 8 | Live Classes | Unassigned class join: missing `cls` arg → attendance not tracked | 🔴 Critical | Logic Bug |
+| 9 | Live Classes | Session key uses index → re-mount flicker | 🟡 Medium | Perf Bug |
+| 10 | Live Classes | startTime field priority inconsistency | 🟡 Medium | Logic Bug |
+| 11 | Attendance | `totalHours` may show 0 if API sends `totalMinutes` | 🟡 Medium | Data Bug |
+| 12 | Attendance | Table overflow not handled on mobile | 🟡 Medium | Responsive |
+| 13 | Pay Fees | React Native imports crash web build | 🔴 Critical | Fatal Error |
+| 14 | Pay Fees | Screenshot size comparison wrong (chars vs bytes) | 🟡 Medium | Logic Bug |
+| 15 | Courses | `border-gray-255` invalid Tailwind class | 🟡 Medium | CSS Bug |
+| 16 | Courses | Course cards not navigable (cursor-pointer, no onClick) | 🟡 Medium | UX Gap |
+
+---
+
+## 🗂️ Files to Modify (Frontend Only)
+
+| File | Changes |
+|---|---|
+| [`AccessControlPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/admin/AccessControlPage.tsx) | Bugs #1–7: Remove tabs, fix button text, modal layout, empty state, date fields |
+| [`StudentLiveClassesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentLiveClassesPage.tsx) | Bugs #8–10: Fix join arg, key prop, startTime priority |
+| [`StudentAttendancePage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentAttendancePage.tsx) | Bugs #11–12: totalHours fallback, mobile table hint |
+| [`StudentPayFeesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentPayFeesPage.tsx) | Bugs #13–14: Remove RN imports, fix size comparison |
+| [`StudentCoursesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentCoursesPage.tsx) | Bugs #15–16: Fix invalid class, add navigation |
+
+---
+
+## ⚡ Execution Order
+
+1. **SACS** — Fix bugs #1 first (remove tabs) since screenshot confirms it's visible
+2. **SACS** — Fix bugs #2 (Revoke text) and #3 (modal layout)
+3. **SACS** — Fix bugs #4–7 (data/UX improvements)
+4. **Pay Fees** — Fix bug #13 FIRST (critical build crash) — remove all RN imports
+5. **Live Classes** — Fix bug #8 (join arg missing — attendance bug)
+6. **Live Classes** — Fix bugs #9–10 (key, startTime)
+7. **Attendance** — Fix bugs #11–12
+8. **Courses** — Fix bugs #15–16
+
+> [!WARNING]
+> **Bug #13 (React Native imports in StudentPayFeesPage.tsx)** must be fixed before the web build can succeed. It's a fatal build error in web context.
+
+> [!NOTE]
+> ERP, CRM, Test Portal, Staff modules are completely untouched. All changes are strictly inside `web_portal/lms/`.

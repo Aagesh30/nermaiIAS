@@ -988,7 +988,7 @@ export const StudentLiveClassesPage = () => {
                 ) : (
                   live.map((cls: any, i: number) => (
                     <SessionCard
-                      key={i}
+                      key={cls.classId || cls.id || cls.sessionId || i}
                       cls={cls}
                       myRequests={myRequests}
                       onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
@@ -1007,7 +1007,7 @@ export const StudentLiveClassesPage = () => {
                 ) : (
                   upcoming.map((cls: any, i: number) => (
                     <SessionCard
-                      key={i}
+                      key={cls.classId || cls.id || cls.sessionId || i}
                       cls={cls}
                       myRequests={myRequests}
                       onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
@@ -1092,7 +1092,7 @@ export const StudentLiveClassesPage = () => {
                               key={cls.id}
                               cls={cls}
                               myRequests={myRequests}
-                              onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id)}
+                              onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
                               onRequestAccess={(c) => setRequestModal({ cls: c })}
                               onAttendanceSubmitted={setAttPopup}
                             />

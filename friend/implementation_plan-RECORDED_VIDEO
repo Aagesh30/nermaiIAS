@@ -1,0 +1,345 @@
+# Fix: Stop All Attendance API Calls for YouTube/Recorded Videos
+
+## Problem Summary
+
+From the console screenshot, two clear bugs exist for `youtube_recorded` (and `recorded`) class types:
+
+1. **Unnecessary Attendance API calls** — `JOIN`, `PLAY`, `HEARTBEAT`, `BACKGROUND`, `PAUSE` events are being fired by `useAttendanceHeartbeat.ts` even when the provider is `youtube_recorded`. Recorded videos can be watched any number of times and at any time — no attendance tracking is needed.
+2. **Video not playing after closing the player** — When the player modal is closed and reopened, the `YoutubePlayer.tsx` (student side) fires a new token expiry timer on every open cycle but also has a lingering state issue (`tokenExpired`, `sessionEnded` not reset when `playerToken` changes).
+
+The fix must **only touch the LMS module** (files under `web_portal/lms/`). No other modules or Firebase should be changed.
+
+---
+
+## Root Cause Analysis
+
+### Bug 1: Unnecessary Attendance Calls
+
+| File | Line | Issue |
+|------|------|-------|
+| [`useAttendanceHeartbeat.ts`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/hooks/useAttendanceHeartbeat.ts) | L13–L104 | The entire hook fires `JOIN`, `HEARTBEAT`, `BACKGROUND`, `FOREGROUND`, `LEAVE` events for **all** providers including `youtube_recorded` and `recorded`. There is no early-return guard. |
+| [`CoursePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/CoursePlayer.tsx) | L40–L62 | Polls `/api/v1/attendance/status/${activeVideo.id}` every 30 seconds whenever `activeVideo.classType?.includes('recorded')`. This is a read call that populates the progress bar — but it's using the attendance system for what is really watch-progress, creating unnecessary attendance API load. |
+| [`AttendanceStatusBadge.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/components/AttendanceStatusBadge.tsx) | L12–L31 | Polls `/api/v1/attendance/status/${classId}` every 30 seconds. This badge is rendered from `CoursePlayer.tsx` inside the right sidebar for **all** `activeVideo` types via `realtimeLiveSessions` check — it could be shown for non-live sessions. |
+| [`StudentLiveClassesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentLiveClassesPage.tsx) | L392–L401 | `SessionCard` calls `LmsAttendanceApi.getClassAttendance(classId)` on mount for ALL session types. The `classType` of a recorded session must exclude this call. |
+
+### Bug 2: Video Not Playing After Closing Player
+
+| File | Line | Issue |
+|------|------|-------|
+| [`YoutubePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/YoutubePlayer.tsx) | L11–L24 | `tokenExpired` and `sessionEnded` are initialized to `false` but **never reset** when `playerToken` prop changes. So when the modal is closed and re-opened with a new token, the component still has the old stale state from a previous session. The `useEffect` only sets timers but never clears the boolean states. |
+
+---
+
+## Proposed Changes
+
+### File 1: `useAttendanceHeartbeat.ts` — Add guard to skip all recorded providers
+
+#### [MODIFY] [`useAttendanceHeartbeat.ts`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/hooks/useAttendanceHeartbeat.ts)
+
+**Lines 4–6** — Expand the provider type to make `isRecorded` detection possible:
+
+```diff
+ interface UseAttendanceProps {
+   classId: string;
+-  provider: 'youtube_recorded' | 'youtube_live' | 'zoom_live' | 'recorded';
++  provider: 'youtube_recorded' | 'youtube_live' | 'zoom_live' | 'recorded' | string;
+   playerJwt: string;
+   playerRef?: any;
+ }
+```
+
+**Lines 13–15** — Add an early return at the very top of the hook body when the provider is recorded:
+
+```diff
+ export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef }: UseAttendanceProps) => {
++  // ── RECORDED CONTENT: No attendance tracking. Return early with no-op. ──────
++  // YouTube recorded and all recorded class types can be watched any number of
++  // times at any time with batch access permission. Attendance is not applicable.
++  const isRecordedProvider =
++    provider === 'youtube_recorded' ||
++    provider === 'recorded' ||
++    provider === 'youtube'; // 'youtube' is the legacy alias for youtube_recorded
++
++  const sendEvent = useCallback(async (event: AttendanceEvent, position?: number) => {
++    // Guard: never fire for recorded content
++    if (isRecordedProvider) return;
+   ...
+```
+
+> **Safest approach**: Instead of complex conditional hooks (which breaks Rules of Hooks), the guard is placed **inside** `sendEvent` (no API call) and the `useEffect` is gated with an `if (!isRecordedProvider)` check so no listeners are ever attached.
+
+**Full corrected hook body** (lines 13–104 — the entire export):
+
+```typescript
+export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef }: UseAttendanceProps) => {
+  // ── RECORDED CONTENT: No attendance tracking needed ──────────────────────────
+  // Recorded/YouTube videos can be watched any number of times at any time with
+  // the required batch access permission. No attendance events should be fired.
+  const isRecordedProvider =
+    provider === 'youtube_recorded' ||
+    provider === 'recorded' ||
+    provider === 'youtube';
+
+  const isLive = provider.includes('live');
+  const heartbeatInterval = isLive ? 300000 : 90000;
+  const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const isBackgroundRef = useRef(false);
+
+  const sendEvent = useCallback(async (event: AttendanceEvent, position?: number) => {
+    // Guard: skip ALL attendance events for recorded content
+    if (isRecordedProvider) return;
+    try {
+      await AttendanceApi.sendAttendanceEvent({
+        classId,
+        event,
+        position,
+        provider,
+        timestamp: new Date().toISOString()
+      }, playerJwt);
+    } catch (error) {
+      console.error(`Failed to send attendance event ${event}:`, error);
+    }
+  }, [classId, provider, playerJwt, isRecordedProvider]);
+
+  const startHeartbeat = useCallback(() => {
+    // Guard: no heartbeat for recorded content
+    if (isRecordedProvider) return;
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      if (!isBackgroundRef.current) {
+        sendEvent('HEARTBEAT');
+      }
+    }, heartbeatInterval);
+  }, [sendEvent, heartbeatInterval, isRecordedProvider]);
+
+  const stopHeartbeat = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+    }
+  }, []);
+
+  useEffect(() => {
+    // Guard: attach NO listeners and fire NO events for recorded content
+    if (isRecordedProvider) return;
+
+    sendEvent('JOIN');
+    startHeartbeat();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        isBackgroundRef.current = true;
+        sendEvent('BACKGROUND');
+        stopHeartbeat();
+      } else {
+        isBackgroundRef.current = false;
+        sendEvent('FOREGROUND');
+        startHeartbeat();
+      }
+    };
+
+    const handleFocus = () => {
+      if (isBackgroundRef.current) {
+        isBackgroundRef.current = false;
+        sendEvent('FOREGROUND');
+        startHeartbeat();
+      }
+    };
+
+    const handleBlur = () => {
+      if (!isBackgroundRef.current) {
+        isBackgroundRef.current = true;
+        sendEvent('BACKGROUND');
+        stopHeartbeat();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      sendEvent('LEAVE');
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      sendEvent('LEAVE');
+      stopHeartbeat();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isRecordedProvider, sendEvent, startHeartbeat, stopHeartbeat]);
+
+  return {
+    sendEvent // Exposed for manual player events — no-op for recorded content
+  };
+};
+```
+
+---
+
+### File 2: `YoutubePlayer.tsx` (student) — Fix stale state bug causing video not to play on reopen
+
+#### [MODIFY] [`YoutubePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/YoutubePlayer.tsx)
+
+**Bug**: `tokenExpired` and `sessionEnded` states are **never reset** when `playerToken` changes. When the user closes the player and reopens it with a fresh token, the old expired state remains.
+
+**Line 14–24** — Reset states when `playerToken` changes. Change the single `useEffect` to also reset both booleans:
+
+```diff
+   useEffect(() => {
++    // Reset expiry states whenever a new token is provided (e.g., after reopening)
++    setTokenExpired(false);
++    setSessionEnded(false);
++
+     // Show expiry warning after 115 seconds (assuming 120s TTL or 5 minutes TTL)
+     // We'll use 4 minutes 55 seconds as warning if TTL is 5 minutes
+     const warningTimer = setTimeout(() => setTokenExpired(true), 295000);
+     const expiredTimer = setTimeout(() => setSessionEnded(true), 300000);
+
+     return () => {
+       clearTimeout(warningTimer);
+       clearTimeout(expiredTimer);
+     };
+   }, [playerToken]);
+```
+
+---
+
+### File 3: `CoursePlayer.tsx` — Stop polling attendance/status for recorded videos
+
+#### [MODIFY] [`CoursePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/CoursePlayer.tsx)
+
+**Lines 40–62** — The `useEffect` that polls `/api/v1/attendance/status/${activeVideo.id}` every 30s is used only to show a progress bar, but it unnecessarily hammers the attendance system. For `youtube_recorded` and `recorded`, remove this polling entirely (set progress to 0, or remove the progress bar for recorded content since there's no attendance).
+
+```diff
+   useEffect(() => {
+     let interval: NodeJS.Timeout;
+-    if (activeVideo?.id && activeVideo.classType?.includes('recorded')) {
+-      const fetchProgress = async () => {
+-         try {
+-           const response = await fetch(`/api/v1/attendance/status/${activeVideo.id}`, {
+-             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+-           });
+-           const res = await response.json();
+-           if (res.data && typeof res.data.percentage === 'number') {
+-             setActiveVideoProgress(Math.min(100, Math.max(0, res.data.percentage)));
+-           }
+-         } catch (e) {}
+-      };
+-      fetchProgress();
+-      interval = setInterval(fetchProgress, 30000); // sync every 30s
+-    } else {
+-      setActiveVideoProgress(0);
+-    }
++    // Recorded (youtube_recorded / recorded) classes do not use attendance tracking.
++    // No progress polling is needed for recorded content.
++    setActiveVideoProgress(0);
+     return () => {
+       if (interval) clearInterval(interval);
+     }
+   }, [activeVideo?.id]);
+```
+
+> **Note**: The progress bar in the sidebar will simply show 0% for recorded content, which is correct since there's no attendance concept for recorded videos.
+
+---
+
+### File 4: `AttendanceStatusBadge.tsx` — Guard against non-live class types
+
+#### [MODIFY] [`AttendanceStatusBadge.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/components/AttendanceStatusBadge.tsx)
+
+The badge is only rendered from `CoursePlayer.tsx` in the `realtimeLiveSessions.some(s => s.classId === activeVideo?.id)` branch — meaning it only shows when there is an **active live session** for that class. This is already reasonably guarded, but the internal polling hits the attendance API every 30 seconds unnecessarily.
+
+**Lines 12–31** — Add a `classType` prop and guard:
+
+```diff
+ interface Props {
+   classId: string;
++  classType?: string; // If provided, skip polling for recorded types
+ }
+
+-export const AttendanceStatusBadge: React.FC<Props> = ({ classId }) => {
++export const AttendanceStatusBadge: React.FC<Props> = ({ classId, classType }) => {
++  // Recorded content does not use attendance — skip entirely
++  const isRecorded =
++    classType === 'youtube_recorded' ||
++    classType === 'recorded' ||
++    classType === 'youtube';
+
+   const [statusData, setStatusData] = useState<any>(null);
+
+   useEffect(() => {
++    if (isRecorded) return; // No attendance polling for recorded content
+     let mounted = true;
+     ...
+   }, [classId]);
++
++  if (isRecorded) return null; // Don't render attendance badge for recorded content
+```
+
+And update the call site in `CoursePlayer.tsx` **line 340**:
+
+```diff
+-<AttendanceStatusBadge classId={activeVideo?.id} />
++<AttendanceStatusBadge classId={activeVideo?.id} classType={activeVideo?.classType} />
+```
+
+---
+
+### File 5: `StudentLiveClassesPage.tsx` — Guard `getClassAttendance` in `SessionCard`
+
+#### [MODIFY] [`StudentLiveClassesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentLiveClassesPage.tsx)
+
+**Lines 392–401** — The `SessionCard` calls `LmsAttendanceApi.getClassAttendance(classId)` on every mount for every class card regardless of class type. If a `youtube_recorded` session appears in the live classes page (which could happen for sessions with recordings), this should be skipped.
+
+```diff
+   React.useEffect(() => {
+     const classId = cls.classId || cls.id;
+     if (!classId) return;
++    // Recorded content does not use attendance — skip the API call
++    const classType = cls.classType || cls.provider || '';
++    const isRecorded =
++      classType === 'youtube_recorded' ||
++      classType === 'recorded';
++    if (isRecorded) return;
+     LmsAttendanceApi.getClassAttendance(classId)
+       .then((res: any) => {
+         const rec = res?.data?.data || res?.data || null;
+         setAttRecord(rec);
+         if (rec?.joinedAt) setHasJoined(true);
+       })
+       .catch(() => {});
+   }, [cls.classId, cls.id]);
+```
+
+---
+
+## Summary of All Changes
+
+| File | Lines Changed | What Changes |
+|------|---------------|--------------|
+| [`useAttendanceHeartbeat.ts`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/hooks/useAttendanceHeartbeat.ts) | L13–L104 | Add `isRecordedProvider` guard in `sendEvent`, `startHeartbeat`, and `useEffect` — completely stops all attendance API calls for `youtube_recorded`/`recorded`/`youtube` providers |
+| [`YoutubePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/YoutubePlayer.tsx) | L14–L24 | Reset `tokenExpired` and `sessionEnded` to `false` at the start of the `useEffect` whenever `playerToken` changes — fixes video not playing on reopen |
+| [`CoursePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/CoursePlayer.tsx) | L40–L62 | Remove attendance/status polling entirely for recorded content; set progress to 0 |
+| [`AttendanceStatusBadge.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/components/AttendanceStatusBadge.tsx) | L5–L31 | Add `classType` prop; return `null` and skip polling for recorded types |
+| [`CoursePlayer.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/CoursePlayer.tsx) | L340 | Pass `classType={activeVideo?.classType}` to `AttendanceStatusBadge` |
+| [`StudentLiveClassesPage.tsx`](file:///c:/Users/ASUS/OneDrive/Pictures/NERMAI_NEW/web_portal/lms/student/StudentLiveClassesPage.tsx) | L392–L401 | Guard `getClassAttendance` call in `SessionCard` — skip for `youtube_recorded` and `recorded` class types |
+
+> [!IMPORTANT]
+> The `useAttendanceHeartbeat.ts` hook is **not actually imported anywhere** in the current codebase (grep confirmed zero usages outside the file itself). It was likely part of a planned integration but never wired up. All active attendance calls come directly from `StudentLiveClassesPage.tsx`, `CoursePlayer.tsx`, and `AttendanceStatusBadge.tsx`. The hook fix is still important as a safety net to prevent future misuse.
+
+> [!NOTE]
+> The `AdminAttendancePage.tsx`, `LiveSessionsPage.tsx`, and `LiveAttendanceControlScreen.tsx` are **not touched** — they deal exclusively with live session attendance management from the admin side, which is correct behavior.
+
+## Verification Plan
+
+### After Changes
+- Open any `youtube_recorded` or recorded class video — confirm **zero** attendance API calls in the browser Network tab
+- Close the player and reopen it — video should play from the beginning without the "Session Expired" overlay
+- Open a **live (Zoom/YouTube Live)** class — confirm attendance events (`JOIN`, `HEARTBEAT`) still fire normally
+- Admin attendance page should still show data for live classes only
+

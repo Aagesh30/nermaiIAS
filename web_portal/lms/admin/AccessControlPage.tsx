@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ShieldCheck, Clock, History, Lock, Grid3X3, BookTemplate,
+  ShieldCheck, Clock, History, Lock,
   CheckCircle2, XCircle, Search, SlidersHorizontal, X, ChevronDown,
   RotateCcw, Ban, Filter, Radio, Video, Calendar, Users, RefreshCw
 } from 'lucide-react';
@@ -14,8 +14,6 @@ const SUB_TABS = [
   { key: 'requests',    label: 'Requests',    Icon: Clock       },
   { key: 'history',    label: 'History',     Icon: History     },
   { key: 'permanent',  label: 'Permanent',   Icon: Lock        },
-  { key: 'analytics',  label: 'Analytics',   Icon: Grid3X3     },
-  { key: 'templates',  label: 'Templates',   Icon: BookTemplate },
 ];
 
 /* ─── Premium Day Picker ─────────────────────────────────────────────────────── */
@@ -173,16 +171,23 @@ const ApproveModal = ({
         </div>
 
         <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors font-medium">
+          <button
+            onClick={onClose}
+            style={{ backgroundColor: '#f3f4f6', color: '#374151', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm dark:bg-white/10 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/20 rounded-xl transition-colors font-medium"
+          >
             Cancel
           </button>
           <button
             onClick={handleApprove}
             disabled={loading || (days === '' || isNaN(parseInt(days)))}
-            className="flex-1 py-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ backgroundColor: '#059669', color: '#ffffff', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm font-bold hover:bg-emerald-700 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-sm"
           >
-            <CheckCircle2 size={14} />
-            {loading ? 'Approving...' : days === '0' ? 'Grant Permanent' : `Approve (${days} day${parseInt(days) > 1 ? 's' : ''})`}
+            <CheckCircle2 size={15} color="#ffffff" />
+            <span style={{ color: '#ffffff', fontWeight: 'bold' }}>
+              {loading ? 'Approving...' : days === '0' ? 'Grant Permanent' : `Approve (${days} day${parseInt(days) > 1 ? 's' : ''})`}
+            </span>
           </button>
         </div>
       </div>
@@ -228,16 +233,21 @@ const RejectModal = ({
         />
 
         <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors font-medium">
+          <button
+            onClick={onClose}
+            style={{ backgroundColor: '#f3f4f6', color: '#374151', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm dark:bg-white/10 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/20 rounded-xl transition-colors font-medium"
+          >
             Cancel
           </button>
           <button
             onClick={async () => { setLoading(true); try { await onConfirm(reason); onClose(); } finally { setLoading(false); } }}
             disabled={loading || !reason.trim()}
-            className="flex-1 py-2 text-sm font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ backgroundColor: '#e11d48', color: '#ffffff', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm font-bold hover:bg-rose-700 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-sm"
           >
-            <XCircle size={14} />
-            {loading ? 'Rejecting...' : 'Confirm Reject'}
+            <XCircle size={15} color="#ffffff" />
+            <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{loading ? 'Rejecting...' : 'Confirm Reject'}</span>
           </button>
         </div>
       </div>
@@ -286,14 +296,21 @@ const BulkApproveModal = ({
         </div>
 
         <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors font-medium">Cancel</button>
+          <button
+            onClick={onClose}
+            style={{ backgroundColor: '#f3f4f6', color: '#374151', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm dark:bg-white/10 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/20 rounded-xl transition-colors font-medium"
+          >
+            Cancel
+          </button>
           <button
             onClick={async () => { setLoading(true); try { await onConfirm(days, overrideLimit); onClose(); } finally { setLoading(false); } }}
             disabled={loading || days === '' || isNaN(parseInt(days))}
-            className="flex-1 py-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ backgroundColor: '#059669', color: '#ffffff', minHeight: '38px' }}
+            className="flex-1 py-2 text-sm font-bold hover:bg-emerald-700 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-sm"
           >
-            <CheckCircle2 size={14} />
-            {loading ? 'Approving...' : `Approve All (${count})`}
+            <CheckCircle2 size={15} color="#ffffff" />
+            <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{loading ? 'Approving...' : `Approve All (${count})`}</span>
           </button>
         </div>
       </div>
@@ -338,15 +355,22 @@ const RevertModal = ({
           onChange={e => setReason(e.target.value)}
         />
 
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 rounded-xl transition-colors font-medium">Cancel</button>
+        <div className="flex flex-col sm:flex-row gap-3 mt-4">
+          <button
+            onClick={onClose}
+            style={{ backgroundColor: '#f3f4f6', color: '#374151', minHeight: '40px' }}
+            className="flex-1 py-2 px-4 text-sm dark:bg-white/10 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/20 rounded-xl transition-colors font-semibold"
+          >
+            Cancel
+          </button>
           <button
             onClick={async () => { setLoading(true); try { await onConfirm(reason); onClose(); } finally { setLoading(false); } }}
             disabled={loading || !reason.trim()}
-            className="flex-1 py-2 text-sm font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ backgroundColor: '#ea580c', color: '#ffffff', minHeight: '40px' }}
+            className="flex-1 py-2 px-4 text-sm font-bold hover:bg-orange-600 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
           >
-            <RotateCcw size={14} />
-            {loading ? 'Reverting...' : 'Confirm Revert'}
+            <RotateCcw size={15} color="#ffffff" />
+            <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{loading ? 'Reverting...' : 'Confirm Revert'}</span>
           </button>
         </div>
       </div>
@@ -370,45 +394,48 @@ const FilterBar = ({
   batches: string[];
   extraSlot?: React.ReactNode;
 }) => (
-  <div className="flex flex-wrap gap-2 items-center mb-4">
+  <div className="flex flex-wrap gap-3 items-center mb-5 py-1">
     {/* Search */}
-    <div className="relative flex-1 min-w-[180px] max-w-xs">
-      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+    <div className="relative flex-1 min-w-[200px] max-w-xs">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
       <input
         type="text"
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Search student, content..."
-        className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#8B0000]/30"
+        style={{ paddingLeft: '36px', paddingRight: '28px', height: '38px', boxSizing: 'border-box' }}
+        className="w-full text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#8B0000]/30 shadow-sm"
       />
       {search && (
-        <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2">
-          <X size={12} className="text-gray-400 hover:text-gray-700 dark:hover:text-white" />
+        <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2">
+          <X size={13} className="text-gray-400 hover:text-gray-700 dark:hover:text-white" />
         </button>
       )}
     </div>
 
     {/* Batch */}
     <div className="relative">
-      <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <Users size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
       <select
         value={filterBatch}
         onChange={e => setFilterBatch(e.target.value)}
-        className="pl-7 pr-7 py-2 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none"
+        style={{ paddingLeft: '34px', paddingRight: '30px', height: '38px', minWidth: '130px', boxSizing: 'border-box' }}
+        className="text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none shadow-sm font-medium"
       >
         <option value="">All Batches</option>
         {batches.map(b => <option key={b} value={b}>{b}</option>)}
       </select>
-      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
     </div>
 
     {/* Request Type */}
     <div className="relative">
-      <Filter size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
       <select
         value={filterRequestType}
         onChange={e => setFilterRequestType(e.target.value)}
-        className="pl-7 pr-7 py-2 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none"
+        style={{ paddingLeft: '34px', paddingRight: '30px', height: '38px', minWidth: '120px', boxSizing: 'border-box' }}
+        className="text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none shadow-sm font-medium"
       >
         <option value="">All Types</option>
         <option value="LIVE_SESSION">Live Class</option>
@@ -418,23 +445,24 @@ const FilterBar = ({
         <option value="SUBJECT">Subject</option>
         <option value="RESOURCE">Resource</option>
       </select>
-      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
     </div>
 
     {/* Time */}
     <div className="relative">
-      <Calendar size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
       <select
         value={filterTime}
         onChange={e => setFilterTime(e.target.value)}
-        className="pl-7 pr-7 py-2 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none"
+        style={{ paddingLeft: '34px', paddingRight: '30px', height: '38px', minWidth: '115px', boxSizing: 'border-box' }}
+        className="text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none shadow-sm font-medium"
       >
         <option value="">All Time</option>
         <option value="today">Today</option>
         <option value="week">This Week</option>
         <option value="month">This Month</option>
       </select>
-      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
     </div>
 
     {extraSlot}
@@ -513,12 +541,18 @@ export const AccessControlPage: React.FC = () => {
 
       {/* Tab Content */}
       <div className="pb-20">
-        {activeTab === 'permissions' && <div className="p-8 text-center text-gray-500 dark:text-gray-400 border border-dashed border-gray-200 dark:border-white/10 rounded-xl bg-white dark:bg-[#1a1a2e]">Select an entity from LMS to manage its permissions.</div>}
+        {activeTab === 'permissions' && (
+          <div className="p-12 text-center border border-dashed rounded-xl bg-white dark:bg-[#1a1a2e] border-gray-200 dark:border-[#8B0000]/30">
+            <ShieldCheck className="mx-auto mb-3 text-[#8B0000] dark:text-[#ff8a80] opacity-60" size={40} />
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-2">Manage Content Permissions</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+              Navigate to any Course, Subject, Topic, or Class in the LMS and use the <strong>🔒 Permissions</strong> button to configure access rules for that content.
+            </p>
+          </div>
+        )}
         {activeTab === 'requests'    && <RequestsTab />}
         {activeTab === 'history'     && <HistoryTab />}
         {activeTab === 'permanent'   && <PermanentGrantsTab />}
-        {activeTab === 'analytics'   && <div className="p-8 text-center text-gray-500 dark:text-gray-400 border border-dashed border-gray-200 dark:border-white/10 rounded-xl bg-white dark:bg-[#1a1a2e]">Analytics module coming soon.</div>}
-        {activeTab === 'templates'   && <div className="p-8 text-center text-gray-500 dark:text-gray-400 border border-dashed border-gray-200 dark:border-white/10 rounded-xl bg-white dark:bg-[#1a1a2e]">Templates module coming soon.</div>}
       </div>
     </div>
   );
@@ -735,9 +769,9 @@ const RequestsTab: React.FC = () => {
                       {reqType === 'LIVE_SESSION' ? <Radio size={10} /> : <Video size={10} />}
                       {reqType === 'LIVE_SESSION' ? 'Live Session' : reqType}
                     </span>
-                    {req.requestedAt && (
+                    {(req.requestedAt || req.createdAt) && (
                       <span className="text-xs text-gray-400 dark:text-gray-500">
-                        {new Date(req.requestedAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(req.requestedAt || req.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     )}
                   </div>
@@ -896,17 +930,18 @@ const HistoryTab: React.FC = () => {
         batches={batches}
         extraSlot={
           <div className="relative">
-            <SlidersHorizontal size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <SlidersHorizontal size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
-              className="pl-7 pr-7 py-2 text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none"
+              style={{ paddingLeft: '34px', paddingRight: '30px', height: '38px', minWidth: '125px', boxSizing: 'border-box' }}
+              className="text-xs rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a2e] text-gray-900 dark:text-white focus:outline-none cursor-pointer appearance-none shadow-sm font-medium"
             >
               <option value="">All Status</option>
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
             </select>
-            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
         }
       />
@@ -967,7 +1002,7 @@ const HistoryTab: React.FC = () => {
                       </span>
                     )}
                     <span className="text-xs text-gray-400 dark:text-gray-500">
-                      {new Date(item.updatedAt || item.requestedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(item.grantedAt || item.updatedAt || item.requestedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 </div>
@@ -1024,6 +1059,14 @@ const PermanentGrantsTab: React.FC = () => {
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400 p-4 font-medium flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Loading permanent grants...</div>;
 
+  if (grants.length === 0) return (
+    <div className="p-12 text-center border border-dashed border-gray-200 dark:border-white/10 rounded-2xl bg-white dark:bg-[#1a1a2e] text-gray-500 dark:text-gray-400">
+      <Lock className="mx-auto mb-3 opacity-40" size={36} />
+      <p className="font-semibold text-sm">No permanent grants</p>
+      <p className="text-xs mt-1">Approved permanent access requests will appear here.</p>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {grants.map((grant, i) => (
@@ -1038,7 +1081,7 @@ const PermanentGrantsTab: React.FC = () => {
               </div>
               <div className="text-xs text-gray-400 dark:text-gray-500 mt-2 font-medium">Granted: {new Date(grant.grantedAt).toLocaleDateString()}</div>
             </div>
-            <Button variant="danger" className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700" onClick={async () => {
+            <Button variant="danger" className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white" onClick={async () => {
               if (window.confirm('Permanently revoke this grant?')) {
                 await AccessRulesApi.revokeGrant(grant.id, 'Revoked by admin');
                 setGrants(prev => prev.filter(g => g.id !== grant.id));

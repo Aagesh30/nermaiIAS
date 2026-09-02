@@ -8093,6 +8093,7 @@ function MainApp() {
           await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user?.name || user?.username || "Super Admin", createdByAdmin: user?.username || user?.name || "Super Admin" });
           Alert.alert("Success", "Student created successfully.");
           setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
+          setShowStudentForm(false);
           loadStudents(true);
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to save student profile.");
@@ -19138,26 +19139,81 @@ function MainApp() {
                           {!isReadOnly("student_management") && (
                             <TouchableOpacity
                               onPress={() => {
-                                if (showStudentForm) {
-                                  setEditingStudent(null);
-                                  setShowStudentForm(false);
-                                } else {
-                                  setShowStudentForm(true);
-                                }
+                                setEditingStudent(null);
+                                setShowStudentForm(true);
                               }}
-                              style={[styles.primaryBtn, { minWidth: 150, marginVertical: 0, height: 36, paddingVertical: 0, justifyContent: "center" }]}
+                              style={[styles.primaryBtn, { minWidth: 170, marginVertical: 0, height: 38, paddingVertical: 0, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 6 }]}
                             >
+                              <Ionicons name="person-add-outline" size={16} color="#fff" />
                               <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
-                                {showStudentForm ? "Close Form" : "Create New Student"}
+                                Register New Student
                               </Text>
                             </TouchableOpacity>
                           )}
                         </View>
 
                         {showStudentForm && (
-                          <View style={[styles.formCard, darkMode && styles.formCardDark, { borderLeftWidth: 4, borderLeftColor: editingStudent ? "#0288d1" : "#c62828" }]}>
-                            <Text style={[styles.sectionTitle, { fontSize: 15, marginBottom: 12 }]}>{editingStudent ? "Edit Student Profile" : "Register New Student"}</Text>
-                            {editingStudent ? (
+                          <Modal
+                            visible={showStudentForm}
+                            transparent
+                            animationType="fade"
+                            onRequestClose={() => { setEditingStudent(null); setShowStudentForm(false); }}
+                          >
+                            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 16, zIndex: 9999 }}>
+                              <View style={{
+                                width: "100%",
+                                maxWidth: 640,
+                                maxHeight: "90%",
+                                backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+                                borderRadius: 16,
+                                borderWidth: 1,
+                                borderColor: darkMode ? "#333" : "#e0e0e0",
+                                shadowColor: "#000",
+                                shadowOffset: { width: 0, height: 10 },
+                                shadowOpacity: 0.3,
+                                shadowRadius: 15,
+                                elevation: 12,
+                                overflow: "hidden"
+                              }}>
+                                {/* Modal Header */}
+                                <View style={{
+                                  flexDirection: "row",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  paddingHorizontal: 20,
+                                  paddingVertical: 14,
+                                  borderBottomWidth: 1,
+                                  borderBottomColor: darkMode ? "#333" : "#f0f0f0",
+                                  backgroundColor: darkMode ? "#252525" : "#fafafa",
+                                  borderLeftWidth: 4,
+                                  borderLeftColor: editingStudent ? "#0288d1" : "#c62828"
+                                }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                    <Ionicons
+                                      name={editingStudent ? "create-outline" : "person-add-outline"}
+                                      size={20}
+                                      color={editingStudent ? "#0288d1" : "#c62828"}
+                                    />
+                                    <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#fff" : (editingStudent ? "#0288d1" : "#c62828") }}>
+                                      {editingStudent ? "Edit Student Profile" : "Register New Student"}
+                                    </Text>
+                                  </View>
+                                  <TouchableOpacity
+                                    onPress={() => { setEditingStudent(null); setShowStudentForm(false); }}
+                                    style={{ padding: 4, borderRadius: 6, backgroundColor: darkMode ? "#333" : "#eee" }}
+                                  >
+                                    <Ionicons name="close" size={20} color={darkMode ? "#ccc" : "#666"} />
+                                  </TouchableOpacity>
+                                </View>
+
+                                {/* Scrollable Form Body */}
+                                <ScrollView
+                                  style={{ padding: 20 }}
+                                  contentContainerStyle={{ paddingBottom: 24 }}
+                                  showsVerticalScrollIndicator={true}
+                                  keyboardShouldPersistTaps="handled"
+                                >
+                                  {editingStudent ? (
                               <>
                                 {/* Account Credentials */}
                                 <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, fontSize: 13 }}>Login Credentials</Text>
@@ -19538,10 +19594,19 @@ function MainApp() {
                                     <Text style={styles.primaryBtnTxt}>Create Student Account</Text>
                                   )}
                                 </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={() => { setEditingStudent(null); setShowStudentForm(false); }}
+                                  style={[styles.outlineBtn, { marginTop: 8, justifyContent: "center" }]}
+                                >
+                                  <Text style={styles.outlineBtnTxt}>Cancel</Text>
+                                </TouchableOpacity>
                               </>
                             )}
-                          </View>
-                        )}
+                          </ScrollView>
+                        </View>
+                      </View>
+                    </Modal>
+                  )}
 
                         <View style={styles.card}>
                           <Text style={styles.sectionTitle}>Registered Student Directory ({students.length})</Text>
