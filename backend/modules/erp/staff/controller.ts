@@ -12,6 +12,21 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const COLLECTION = "staff";
 
+function parseTimestamp(val: any): string | null {
+    if (!val) return null;
+    if (typeof val.toDate === "function") {
+        try {
+            return val.toDate().toISOString();
+        } catch (_) {}
+    }
+    if (val instanceof Date) return val.toISOString();
+    try {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (_) {}
+    return typeof val === "string" ? val : null;
+}
+
 export class StaffController {
     /**
      * CREATE STAFF / ADMIN
@@ -266,9 +281,9 @@ export class StaffController {
                 data: {
                     ...data,
                     id: data.id || doc.id,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    deletedAt: data.deletedAt ? (data.deletedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt),
+                    deletedAt: parseTimestamp(data.deletedAt)
                 }
             });
         } catch (error: any) {

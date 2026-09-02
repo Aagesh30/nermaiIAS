@@ -1707,6 +1707,7 @@ function MainApp() {
 
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
+  const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [isProcessingProfile, setIsProcessingProfile] = useState<string | null>(null);
@@ -2490,6 +2491,7 @@ function MainApp() {
   const [showBulkBatchDropdown, setShowBulkBatchDropdown] = useState<boolean>(false);
   const [profileRequestsTab, setProfileRequestsTab] = useState<"incomplete" | "requests">("incomplete");
   const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [viewingApprovalItem, setViewingApprovalItem] = useState<any>(null);
   const [rolePermissions, setRolePermissions] = useState<any>({});
   const [oneTimePermissions, setOneTimePermissions] = useState<Record<string, number>>({});
   // Approval-workflow states: track which featureKeys are being submitted or are pending super admin approval
@@ -3181,6 +3183,7 @@ function MainApp() {
   const [attemptQuestions, setAttemptQuestions] = useState<any[]>([]);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [selectedAlertIds, setSelectedAlertIds] = useState<string[]>([]);
   const [notifyMsg, setNotifyMsg] = useState({ title: "", message: "" });
   const [feedbackRating, setFeedbackRating] = useState(5);
   const [feedbackText, setFeedbackText] = useState("");
@@ -3333,18 +3336,25 @@ function MainApp() {
     if (!studentId && !username) return;
 
     const loggedInStudent = getLoggedInStudent(user, students);
-    const sId = loggedInStudent?.id || studentId;
+    const sId = loggedInStudent?.id || studentId || "";
 
+    const targetIds = Array.from(new Set([
+      sId,
+      user?.userId,
+      user?.username,
+      loggedInStudent?.rollNumber
+    ].filter(Boolean) as string[]));
+
+    if (targetIds.length === 0) return;
+
+    // Filter by studentId so student only syncs their own documents (0 unnecessary reads)
     const q = query(
       collection(db, "offlineTestPermissionRequests"),
-      where("status", "==", "pending")
+      where("studentId", "in", targetIds)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
-      const reqs = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() as any }))
-        .filter(r => r.studentId === sId || r.username === username);
-
+      const reqs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
       setOfflineTestRequests(reqs);
       try {
         if (typeof localStorage !== "undefined") {
@@ -3353,6 +3363,7 @@ function MainApp() {
       } catch (storageErr) {}
     }, (err) => {
       console.log("Student offline request listener error:", err);
+      loadOfflineTestRequests();
     });
 
     return () => unsub();
@@ -3440,29 +3451,40 @@ function MainApp() {
   // Load offline test permission requests from backend
   const loadOfflineTestRequests = async () => {
     try {
-      const res = await api.get("/test-portal/test-creation/permission-requests");
+      const loggedInStudent = getLoggedInStudent(user, students);
+      const sId = loggedInStudent?.id || user?.userId || user?.username || "";
+      const sUname = user?.username || "";
+      const url = isAdmin
+        ? "/test-portal/test-creation/permission-requests"
+        : `/test-portal/test-creation/permission-requests?studentId=${encodeURIComponent(sId)}&username=${encodeURIComponent(sUname)}`;
+      const res = await api.get(url);
       const data = res?.data || res || [];
       if (Array.isArray(data)) {
         const activeRequests = data.filter((req: any) => {
           const invalidOrCompleted = isRequestInvalidOrCompleted(req);
-          if (invalidOrCompleted && req.id) {
+          if (invalidOrCompleted && req.id && isAdmin) {
             api.delete(`/test-portal/test-creation/permission-requests/${req.id}`).catch(() => {});
             return false;
           }
-          return true;
+          return !invalidOrCompleted;
         });
         setOfflineTestRequests(activeRequests);
+        try {
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem("nermai_offline_test_requests", JSON.stringify(activeRequests));
+          }
+        } catch (_) {}
       }
     } catch (e) {
       // silently ignore
     }
   };
+
   useEffect(() => {
     if (!isAdmin) return;
 
     const q = query(
-      collection(db, "offlineTestPermissionRequests"),
-      where("status", "==", "pending")
+      collection(db, "offlineTestPermissionRequests")
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
@@ -3476,6 +3498,12 @@ function MainApp() {
 
     return () => unsub();
   }, [isAdmin]);
+
+  // Initial load of offline test requests when entering test tab (real-time is handled by onSnapshot)
+  useEffect(() => {
+    if (!user || activeTab !== "test") return;
+    loadOfflineTestRequests();
+  }, [user, activeTab]);
 
   const saveOfflineTestRequests = async (newList: any[]) => {
     setOfflineTestRequests(newList);
@@ -3517,8 +3545,6 @@ function MainApp() {
   useEffect(() => {
     loadPageLocks();
     loadDriveConfig();
-    const interval = setInterval(loadPageLocks, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   const isPageLocked = (tabKey: string): boolean => {
@@ -4808,6 +4834,8 @@ function MainApp() {
   // Guard ref — prevents duplicate loads when component re-renders
   // without user or hostIp actually changing
   const loadedForUserRef = useRef<string | null>(null);
+  const lastFocusSyncRef = useRef<number>(0);
+  const loadedCollectionsRef = useRef<Set<string>>(new Set());
 
 
 
@@ -5091,35 +5119,15 @@ function MainApp() {
       loadNotifications();
       loadBatches();
       loadTodayQuiz();
-      loadAllQuizzes();
-      loadCampaigns();
-      
-      // Load student data (which handles student vs admin URL internally)
-      loadStudents();
+      loadCourses();
+      loadLmsDailyContent();
 
-      // Only load administrative datasets for admin/staff/developer roles
-      if (user.role && ["super_admin", "admin", "staff", "editor", "contributor", "developer"].includes(user.role)) {
-        loadProfileRequests();
-        loadStaff();
-        loadFees();
-        loadAdmissions();
-        loadEnquiries();
-        loadLeads();
+      // Only load initial data required for student vs admin role
+      if (user.role === "student") {
+        loadStudents();
         loadTests();
-        loadQuestions();
-        loadFeedback();
-        loadTestFeedbacks();
       } else {
-        // Students still need to load available mock tests
-        loadTests();
-      }
-
-      // Load role permissions for non-student staff
-      if (user && user.role !== "student" && user.role !== "guest") {
         loadRolePermissions();
-      }
-
-      if (user && user.role !== "student" && user.role !== "guest") {
         loadPendingApprovals();
         loadOneTimePermissions();
       }
@@ -5131,8 +5139,6 @@ function MainApp() {
       loadTests();
       loadGuestPosters();
     }
-    loadCourses();
-    loadLmsDailyContent();
     setIsInitialLoading(false);
   }, [user, hostIp]);
 
@@ -5187,9 +5193,9 @@ function MainApp() {
 
     let unsub: (() => void) | undefined;
     try {
-      // Listen to notifications that belong to this user
-      const notificationsRef = collection(db, "notifications");
-      unsub = onSnapshot(notificationsRef, (snapshot) => {
+      // Listen to notifications that belong strictly to this user
+      const qUserNotifs = query(collection(db, "notifications"), where("requestedByUserId", "==", userId));
+      unsub = onSnapshot(qUserNotifs, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type !== "modified") return;
           const data = change.doc.data();
@@ -5299,6 +5305,11 @@ function MainApp() {
   useEffect(() => {
     if (Platform.OS === "web" && typeof window !== "undefined") {
       const syncOnFocus = () => {
+        const now = Date.now();
+        // Throttle focus sync to at most once every 5 minutes (300,000 ms)
+        if (now - lastFocusSyncRef.current < 300000) return;
+        lastFocusSyncRef.current = now;
+
         if (user) {
           loadNotifications();
           loadAnnouncements();
@@ -5372,16 +5383,10 @@ function MainApp() {
     return () => clearInterval(clockTick);
   }, []);
 
-  // Poll for new tests when student/guest is active on the available tests tab (Issue 2)
+  // Reload tests when student/guest navigates to the available tests tab
   useEffect(() => {
     if (!user || activeTab !== "test" || testSub !== "available") return;
-    loadTests(true); // Silent reload initially on focus
-    const interval = setInterval(() => {
-      // Do not poll if the tab is hidden
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      loadTests(true);
-    }, 60000); // 60 seconds
-    return () => clearInterval(interval);
+    loadTests(true); // Silent load on tab focus
   }, [user, activeTab, testSub]);
 
   // ── Session revocation check on tab visibility (single-device policy) ─────────
@@ -5791,11 +5796,17 @@ function MainApp() {
     }
   };
 
-  const loadStudents = async () => {
+  const loadStudents = async (force: boolean = false) => {
+    if (force) {
+      loadedCollectionsRef.current.delete("students");
+    } else if (loadedCollectionsRef.current.has("students")) {
+      return;
+    }
     try {
       const endpoint = user?.role === "student" ? "/erp/student/profile/me" : "/erp/student";
       const res = await api.get(endpoint);
       setStudents(res?.data || res || []);
+      loadedCollectionsRef.current.add("students");
     } catch (e) {
       console.log("Failed loading students:", e);
       setStudents([]);
@@ -5856,6 +5867,76 @@ function MainApp() {
     } catch (e) {
       console.log("Failed loading role permissions:", e);
     }
+  };
+
+  const parseApprovalPayload = (item: any) => {
+    if (!item) return { fields: [], reason: "", raw: null };
+    const rawPayload = item.proposedPayload || item.payload;
+    if (!rawPayload) return { fields: [], reason: item.reason || "", raw: null };
+
+    let obj = rawPayload;
+    if (typeof rawPayload === "string") {
+      try {
+        obj = JSON.parse(rawPayload);
+      } catch (_) {
+        return { fields: [], reason: item.reason || rawPayload, raw: rawPayload };
+      }
+    }
+
+    const reason = obj?.reason || item?.reason || obj?.rejectionReason || obj?.note || "";
+    let changes = obj?.changes || obj?.proposedPayload || obj?.payload || obj;
+
+    if (typeof changes === "string") {
+      try { changes = JSON.parse(changes); } catch (_) {}
+    }
+
+    const fields: { key: string; label: string; value: string }[] = [];
+    if (typeof changes === "object" && changes !== null) {
+      Object.keys(changes).forEach(k => {
+        if (["updatedAt", "updatedBy", "id", "_id", "createdAt", "createdBy", "reason"].includes(k)) return;
+        const val = changes[k];
+        let displayVal = "";
+        if (val === null || val === undefined) displayVal = "N/A";
+        else if (typeof val === "boolean") displayVal = val ? "True / Yes" : "False / No";
+        else if (typeof val === "object") {
+          if (Array.isArray(val)) displayVal = val.map(v => (typeof v === "object" ? JSON.stringify(v) : String(v))).join(", ");
+          else displayVal = JSON.stringify(val);
+        } else {
+          displayVal = String(val);
+        }
+
+        const label = k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        fields.push({ key: k, label, value: displayVal });
+      });
+    }
+
+    return { fields, reason, raw: obj };
+  };
+
+  const getTargetName = (item: any) => {
+    if (!item) return "N/A";
+    const isOneTime = item.type === "one_time_upload_request";
+    if (isOneTime) return "JIT Single-Use Upload Request";
+    if (!item.docId) return "New Record";
+    const isStudentRelated = ["student_management", "fees_management", "marks_management", "id_card", "hall_ticket"].includes(item.feature || item.featureKey);
+    if (isStudentRelated) {
+      const studentObj = students.find((s: any) => s.id === item.docId);
+      if (studentObj) {
+        const fullName = `${studentObj.firstName || ""} ${studentObj.lastName || ""}`.trim() || studentObj.loginUsername || studentObj.rollNumber;
+        return `${fullName} (Roll: ${studentObj.rollNumber || "N/A"})`;
+      }
+    }
+    if ((item.feature || item.featureKey) === "staff_management") {
+      const staffObj = staff.find((s: any) => s.id === item.docId);
+      if (staffObj) {
+        return `${staffObj.firstName || staffObj.name || ""} ${staffObj.lastName || ""} (${staffObj.email || "N/A"})`.trim();
+      }
+    }
+    if ((item.feature || item.featureKey) === "test_creation") {
+      const testObj = tests.find((t: any) => t.id === item.docId);
+      if (testObj) return testObj.title;
+    }
+    return item.docId;
   };
 
   const loadPendingApprovals = async () => {
@@ -6015,20 +6096,24 @@ function MainApp() {
     );
   };
 
-  const loadStaff = async () => {
+  const loadStaff = async (force: boolean = false) => {
+    if (!force && loadedCollectionsRef.current.has("staff")) return;
     try {
       const res = await api.get("/erp/staff");
       setStaff(res?.data || res || []);
+      loadedCollectionsRef.current.add("staff");
     } catch (e) {
       console.log("Failed loading staff:", e);
       setStaff([]);
     }
   };
 
-  const loadFees = async () => {
+  const loadFees = async (force: boolean = false) => {
+    if (!force && loadedCollectionsRef.current.has("fees")) return;
     try {
       const res = await api.get("/erp/fees/payments");
       setFees(res?.data || res || []);
+      loadedCollectionsRef.current.add("fees");
     } catch (e) {
       console.log("Failed loading fees ledger:", e);
       setFees([]);
@@ -6129,10 +6214,16 @@ function MainApp() {
     }
   };
 
-  const loadLeads = async () => {
+  const loadLeads = async (force: boolean = false) => {
+    if (force) {
+      loadedCollectionsRef.current.delete("leads");
+    } else if (loadedCollectionsRef.current.has("leads")) {
+      return;
+    }
     try {
       const res = await api.get("/crm/leads");
       setLeads(res?.data || res || []);
+      loadedCollectionsRef.current.add("leads");
     } catch (e) {
       console.log("Failed loading leads:", e);
       setLeads([]);
@@ -8002,7 +8093,7 @@ function MainApp() {
           await api.post("/erp/student", { ...studentToSave, profileEditPermission: true, isProfileSubmitted: false, createdBy: user?.name || user?.username || "Super Admin", createdByAdmin: user?.username || user?.name || "Super Admin" });
           Alert.alert("Success", "Student created successfully.");
           setNewStudent({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [], batchModes: {} });
-          loadStudents();
+          loadStudents(true);
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to save student profile.");
         } finally {
@@ -8399,7 +8490,7 @@ function MainApp() {
     try {
       await api.put(`/erp/student/${studentId}`, { profileEditPermission: !currentVal, updatedBy: user?.name || "admin" });
       Alert.alert("Updated", !currentVal ? "Profile edit has been ENABLED for this student." : "Profile edit has been DISABLED for this student.");
-      loadStudents();
+      loadStudents(true);
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to update permission.");
     }
@@ -8417,7 +8508,7 @@ function MainApp() {
           Alert.alert("Success", "Profile request approved successfully.");
           setViewingProfileReqId(null);
           loadProfileRequests();
-          loadStudents();
+          loadStudents(true);
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to approve.");
         } finally {
@@ -8440,7 +8531,7 @@ function MainApp() {
           Alert.alert("Success", "Profile request rejected successfully.");
           setViewingProfileReqId(null);
           loadProfileRequests();
-          loadStudents();
+          loadStudents(true);
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to reject.");
         } finally {
@@ -8463,7 +8554,7 @@ function MainApp() {
           await api.post("/erp/staff", payload);
           Alert.alert("Success", "Admin record saved successfully.");
           setNewStaff({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin" });
-          loadStaff();
+          loadStaff(true);
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to save admin record.");
         } finally {
@@ -8494,19 +8585,26 @@ function MainApp() {
       return;
     }
 
+    setIsUpdatingStudent(true);
     executeEditOrApproval(
       "student_management",
       "edit",
       editingStudent,
       async () => {
         try {
-          await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
+          const res = await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
+          const updatedObj = res?.data || res?.student || { ...editingStudent };
+          
+          setStudents(prev => prev.map(s => (s.id === editingStudent.id ? { ...s, ...editingStudent, ...updatedObj } : s)));
+          setSelectedDirectoryStudent(prev => (prev && prev.id === editingStudent.id ? { ...prev, ...editingStudent, ...updatedObj } : prev));
+          
           Alert.alert("Success", "Student record updated!");
           setEditingStudent(null);
           setShowStudentForm(false);
-          loadStudents();
         } catch (e: any) {
           Alert.alert("Error", e.message || "Failed to update student profile.");
+        } finally {
+          setIsUpdatingStudent(false);
         }
       },
       "students",
@@ -8518,8 +8616,9 @@ function MainApp() {
     const performDelete = async () => {
       try {
         await api.delete(`/erp/student/${id}`);
+        setStudents(prev => prev.filter(s => s.id !== id));
         Alert.alert("Success", "Student record deleted.");
-        loadStudents();
+        loadStudents(true);
       } catch (e: any) {
         Alert.alert("Error", e.message || "Failed to delete student record.");
       }
@@ -9108,6 +9207,9 @@ function MainApp() {
 
   const monitorTest = async (testId: string) => {
     setSelectedMonitorTestId(testId);
+    if (students.length === 0) {
+      loadStudents();
+    }
     try {
       const liveRes = await api.get(`/test-portal/examination/live-count/${testId}`);
       setLiveCount(liveRes?.data || liveRes);
@@ -9990,8 +10092,8 @@ function MainApp() {
               <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Pending Delete Approvals Manager</Text>
-                    <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>Review and approve deletion requests submitted by Editors / Contributors</Text>
+                    <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Pending Approvals Queue</Text>
+                    <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>Review, inspect diffs, and approve requests submitted by Editors / Contributors</Text>
                   </View>
                   <TouchableOpacity
                     onPress={loadPendingApprovals}
@@ -10002,46 +10104,116 @@ function MainApp() {
                 </View>
 
                 <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", overflow: "hidden" }}>
-                  <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }}>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>COLLECTION / FEATURE</Text>
-                    <Text style={{ flex: 2.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>DOCUMENT ID</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>REQUESTED BY</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold" }}>DATE REQUESTED</Text>
-                    <Text style={{ flex: 1.5, color: darkMode ? "#ef9a9a" : "#37474f", fontSize: 11, fontWeight: "bold", textAlign: "center" }}>ACTIONS</Text>
-                  </View>
-
-                  {pendingApprovals.length === 0 ? (
-                    <View style={{ padding: 40, alignItems: "center" }}>
-                      <Ionicons name="checkmark-circle-outline" size={32} color="#2e7d32" />
-                      <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12, marginTop: 8, fontWeight: "bold" }}>All requests cleared!</Text>
-                      <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11, marginTop: 2 }}>No pending deletion requests need approval.</Text>
-                    </View>
-                  ) : (
-                    pendingApprovals.map((item, idx) => (
-                      <View key={item._id} style={{ flexDirection: "row", paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: idx === pendingApprovals.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#f0f0f0", alignItems: "center" }}>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12, textTransform: "capitalize", fontWeight: "600" }}>{item.feature}</Text>
-                        <Text style={{ flex: 2.5, color: item.type === "one_time_upload_request" ? "#1976d2" : "#c62828", fontSize: 11, fontFamily: "monospace" }} selectable>
-                          {item.type === "one_time_upload_request" ? "JIT Single-Use Upload" : item.docId}
-                        </Text>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#e0e0e0" : "#212121", fontSize: 12 }} numberOfLines={1}>{item.requestedBy}</Text>
-                        <Text style={{ flex: 1.5, color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "N/A"}</Text>
-                        <View style={{ flex: 1.5, flexDirection: "row", justifyContent: "center", gap: 6 }}>
-                          <TouchableOpacity
-                            onPress={() => handleApproveRequest(item, loadPendingApprovals)}
-                            style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#2e7d32", borderRadius: 4 }}
-                          >
-                            <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            onPress={() => handleRejectRequest(item, loadPendingApprovals)}
-                            style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#c62828", borderRadius: 4 }}
-                          >
-                            <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
-                          </TouchableOpacity>
-                        </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                    <View style={{ minWidth: 1060, width: "100%" }}>
+                      {/* Header */}
+                      <View style={[styles.tableRow, { backgroundColor: darkMode ? "#1a1a1a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0" }]}>
+                        <Text style={[styles.th, { width: 95, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Type</Text>
+                        <Text style={[styles.th, { width: 160, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Feature / Module</Text>
+                        <Text style={[styles.th, { width: 290, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Document / Details</Text>
+                        <Text style={[styles.th, { width: 150, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Requested By</Text>
+                        <Text style={[styles.th, { width: 145, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Date</Text>
+                        <Text style={[styles.th, { width: 220, fontWeight: "bold", textAlign: "center", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Actions</Text>
                       </View>
-                    ))
-                  )}
+
+                      {pendingApprovals.length === 0 ? (
+                        <View style={{ padding: 40, alignItems: "center" }}>
+                          <Ionicons name="checkmark-circle-outline" size={36} color="#2e7d32" />
+                          <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13, marginTop: 10, fontWeight: "bold" }}>All requests cleared!</Text>
+                          <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12, marginTop: 2 }}>No pending approval requests need approval.</Text>
+                        </View>
+                      ) : (
+                        pendingApprovals.map((item, idx) => {
+                          const isDelete = item.type === "delete_approval";
+                          const isCreate = item.type === "create_approval";
+                          const isOneTime = item.type === "one_time_upload_request";
+                          const typeBadgeBg = isDelete ? "#ffebee" : isCreate ? "#e3f2fd" : isOneTime ? "#e8f5e9" : "#fff8e1";
+                          const typeBadgeColor = isDelete ? "#c62828" : isCreate ? "#1565c0" : isOneTime ? "#2e7d32" : "#f57f17";
+                          const typeLabel = isDelete ? "DELETE" : isCreate ? "CREATE" : isOneTime ? "ONE-TIME" : "EDIT";
+
+                          const formattedFeature = String(item.feature || item.featureKey || "")
+                            .replace(/_/g, " ")
+                            .replace(/\b\w/g, c => c.toUpperCase());
+
+                          const parsed = parseApprovalPayload(item);
+
+                          return (
+                            <View key={item._id || item.id || idx} style={[styles.tableRow, { borderBottomWidth: idx === pendingApprovals.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#eeeeee", paddingVertical: 12, paddingHorizontal: 12, backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#242424" : "#fafafa"), alignItems: "center" }]}>
+                              {/* Cell 1: Type */}
+                              <View style={{ width: 95, paddingRight: 6 }}>
+                                <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: typeBadgeBg }}>
+                                  <Text style={{ fontSize: 10, fontWeight: "bold", color: typeBadgeColor }}>{typeLabel}</Text>
+                                </View>
+                              </View>
+
+                              {/* Cell 2: Feature */}
+                              <View style={{ width: 160, paddingRight: 8 }}>
+                                <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontWeight: "600", fontSize: 12 }} numberOfLines={2}>{formattedFeature}</Text>
+                              </View>
+
+                              {/* Cell 3: Document / Details */}
+                              <View style={{ width: 290, paddingRight: 10, gap: 3 }}>
+                                <Text style={{ color: darkMode ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 12 }} numberOfLines={1}>
+                                  {getTargetName(item)}
+                                </Text>
+                                {!isOneTime && item.docId && (
+                                  <Text style={{ color: darkMode ? "#888" : "#777", fontSize: 9, fontFamily: "monospace" }} numberOfLines={1} selectable>
+                                    ID: {item.docId}
+                                  </Text>
+                                )}
+
+                                {/* Payload Field Chips Summary */}
+                                {parsed.fields.length > 0 && (
+                                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
+                                    {parsed.fields.slice(0, 2).map((f, fIdx) => (
+                                      <View key={fIdx} style={{ backgroundColor: darkMode ? "#2e2e2e" : "#f0f4f8", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: darkMode ? "#444" : "#d0d7de" }}>
+                                        <Text style={{ fontSize: 9, color: darkMode ? "#bbb" : "#444" }}>
+                                          <Text style={{ fontWeight: "bold" }}>{f.label}:</Text> {f.value.length > 18 ? f.value.substring(0, 18) + '…' : f.value}
+                                        </Text>
+                                      </View>
+                                    ))}
+                                    {parsed.fields.length > 2 && (
+                                      <Text style={{ fontSize: 9, color: "#888", alignSelf: "center" }}>+{parsed.fields.length - 2} more</Text>
+                                    )}
+                                  </View>
+                                )}
+
+                                {/* View Details Link */}
+                                <TouchableOpacity
+                                  onPress={() => setViewingApprovalItem(item)}
+                                  style={{ alignSelf: "flex-start", marginTop: 2 }}
+                                >
+                                  <Text style={{ fontSize: 10, color: "#1976d2", fontWeight: "bold" }}>🔍 View Full Details</Text>
+                                </TouchableOpacity>
+                              </View>
+
+                              {/* Cell 4: Requested By */}
+                              <View style={{ width: 150, paddingRight: 8 }}>
+                                <Text style={{ color: darkMode ? "#e0e0e0" : "#424242", fontSize: 12, fontWeight: "500" }} numberOfLines={2}>{item.requestedBy}</Text>
+                              </View>
+
+                              {/* Cell 5: Date */}
+                              <View style={{ width: 145, paddingRight: 8 }}>
+                                <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A"}</Text>
+                              </View>
+
+                              {/* Cell 6: Actions */}
+                              <View style={{ width: 220, flexDirection: "row", justifyContent: "center", gap: 6 }}>
+                                <TouchableOpacity onPress={() => handleApproveRequest(item, loadPendingApprovals)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#2e7d32", borderRadius: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                  <Ionicons name="checkmark-circle-outline" size={13} color="#fff" />
+                                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve & Apply</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => handleRejectRequest(item, loadPendingApprovals)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#c62828", borderRadius: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                  <Ionicons name="close-circle-outline" size={13} color="#fff" />
+                                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          );
+                        })
+                      )}
+                    </View>
+                  </ScrollView>
                 </View>
               </ScrollView>
             )}
@@ -16783,63 +16955,106 @@ function MainApp() {
                                   </View>
                                 </View>
 
-                                {offlineTestRequests.filter((req: any) => !isRequestInvalidOrCompleted(req)).length === 0 ? (
-                                  <Text style={{ fontSize: 12, color: "#9e9e9e", fontStyle: "italic" }}>No offline student permission requests yet.</Text>
-                                ) : (
-                                  <View style={{ gap: 8, marginTop: 6 }}>
-                                    {offlineTestRequests.filter((req: any) => !isRequestInvalidOrCompleted(req)).map((req: any) => (
-                                      <View key={req.id} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 10, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#eee" }}>
-                                        <View style={{ flex: 1, paddingRight: 10 }}>
-                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                                            <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>{req.studentName}</Text>
-                                            <Text style={{ fontSize: 11, color: "#757575" }}>(Roll: {req.rollNumber})</Text>
-                                            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: req.status === "approved" ? "#e8f5e9" : req.status === "rejected" ? "#ffebee" : "#fff3e0" }}>
-                                              <Text style={{ fontSize: 9, fontWeight: "bold", color: req.status === "approved" ? "#2e7d32" : req.status === "rejected" ? "#c62828" : "#e65100", textTransform: "uppercase" }}>{req.status}</Text>
-                                            </View>
-                                          </View>
-                                          <Text style={{ fontSize: 11, color: "#9e9e9e", marginTop: 2 }}>
-                                            Test: <Text style={{ fontWeight: "600", color: darkMode ? "#ccc" : "#444" }}>{req.testTitle}</Text> • Batch: {req.batch}
-                                          </Text>
-                                        </View>
+                                {(() => {
+                                  const validRequests = offlineTestRequests.filter((req: any) => !isRequestInvalidOrCompleted(req));
+                                  if (validRequests.length === 0) {
+                                    return <Text style={{ fontSize: 12, color: "#9e9e9e", fontStyle: "italic" }}>No offline student permission requests yet.</Text>;
+                                  }
 
-                                        <View style={{ flexDirection: "row", gap: 6 }}>
-                                          {req.status !== "approved" && (
-                                            <TouchableOpacity
-                                              onPress={async () => {
-                                                try {
-                                                  await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "approved" });
-                                                  setOfflineTestRequests(prev => prev.map((r: any) => r.id === req.id ? { ...r, status: "approved" } : r));
-                                                  Alert.alert("Permission Granted", `Granted test access to ${req.studentName}.`);
-                                                } catch (e: any) {
-                                                  Alert.alert("Error", e.message || "Failed to approve request");
-                                                }
-                                              }}
-                                              style={{ backgroundColor: "#2e7d32", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
-                                            >
-                                              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve</Text>
-                                            </TouchableOpacity>
-                                          )}
-                                          {req.status !== "rejected" && (
-                                            <TouchableOpacity
-                                              onPress={async () => {
-                                                try {
-                                                  await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "rejected" });
-                                                  setOfflineTestRequests(prev => prev.map((r: any) => r.id === req.id ? { ...r, status: "rejected" } : r));
-                                                  Alert.alert("Request Rejected", `Rejected test request for ${req.studentName}.`);
-                                                } catch (e: any) {
-                                                  Alert.alert("Error", e.message || "Failed to reject request");
-                                                }
-                                              }}
-                                              style={{ backgroundColor: "#c62828", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
-                                            >
-                                              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
-                                            </TouchableOpacity>
-                                          )}
+                                  // Deduplicate requests so each student has exactly one consolidated row per test
+                                  const uniqueRequestsMap = new Map();
+                                  validRequests.forEach((req: any) => {
+                                    const studentKey = String(req.studentId || req.rollNumber || req.username || "").toLowerCase();
+                                    const testKey = String(req.testId || "").toLowerCase();
+                                    const mapKey = `${testKey}_${studentKey}`;
+                                    const existing = uniqueRequestsMap.get(mapKey);
+                                    if (!existing) {
+                                      uniqueRequestsMap.set(mapKey, req);
+                                    } else {
+                                      if (req.status === "approved" || (existing.status !== "approved" && new Date(req.requestedAt || 0) > new Date(existing.requestedAt || 0))) {
+                                        uniqueRequestsMap.set(mapKey, req);
+                                      }
+                                    }
+                                  });
+                                  const deduplicatedRequests = Array.from(uniqueRequestsMap.values());
+
+                                  return (
+                                    <View style={{ gap: 8, marginTop: 6 }}>
+                                      {deduplicatedRequests.map((req: any) => (
+                                        <View key={req.id || `${req.testId}_${req.studentId}`} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 10, borderRadius: 8, backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9", borderWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#eee" }}>
+                                          <View style={{ flex: 1, paddingRight: 10 }}>
+                                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                              <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#111" }}>{req.studentName}</Text>
+                                              <Text style={{ fontSize: 11, color: "#757575" }}>(Roll: {req.rollNumber})</Text>
+                                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: req.status === "approved" ? "#e8f5e9" : req.status === "rejected" ? "#ffebee" : "#fff3e0" }}>
+                                                <Text style={{ fontSize: 9, fontWeight: "bold", color: req.status === "approved" ? "#2e7d32" : req.status === "rejected" ? "#c62828" : "#e65100", textTransform: "uppercase" }}>{req.status}</Text>
+                                              </View>
+                                            </View>
+                                            <Text style={{ fontSize: 11, color: "#9e9e9e", marginTop: 2 }}>
+                                              Test: <Text style={{ fontWeight: "600", color: darkMode ? "#ccc" : "#444" }}>{req.testTitle}</Text> • Batch: {req.batch}
+                                            </Text>
+                                          </View>
+
+                                          <View style={{ flexDirection: "row", gap: 6 }}>
+                                            {req.status !== "approved" && (
+                                              <TouchableOpacity
+                                                onPress={async () => {
+                                                  try {
+                                                    await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "approved" });
+                                                    try {
+                                                      await setDoc(doc(db, "offlineTestPermissionRequests", req.id), { ...req, status: "approved", updatedAt: new Date().toISOString() }, { merge: true });
+                                                    } catch (_) {}
+                                                    // Also update matching requests for this test & student in state
+                                                    setOfflineTestRequests(prev => prev.map((r: any) => {
+                                                      const matchTest = String(r.testId || '') === String(req.testId || '');
+                                                      const matchStudent = (r.studentId && r.studentId === req.studentId) || (r.rollNumber && r.rollNumber === req.rollNumber) || (r.id === req.id);
+                                                      if (matchTest && matchStudent) {
+                                                        return { ...r, status: "approved" };
+                                                      }
+                                                      return r;
+                                                    }));
+                                                    Alert.alert("Permission Granted", `Granted test access to ${req.studentName}.`);
+                                                  } catch (e: any) {
+                                                    Alert.alert("Error", e.message || "Failed to approve request");
+                                                  }
+                                                }}
+                                                style={{ backgroundColor: "#2e7d32", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
+                                              >
+                                                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve</Text>
+                                              </TouchableOpacity>
+                                            )}
+                                            {req.status !== "rejected" && (
+                                              <TouchableOpacity
+                                                onPress={async () => {
+                                                  try {
+                                                    await api.patch(`/test-portal/test-creation/permission-requests/${req.id}`, { status: "rejected" });
+                                                    try {
+                                                      await setDoc(doc(db, "offlineTestPermissionRequests", req.id), { ...req, status: "rejected", updatedAt: new Date().toISOString() }, { merge: true });
+                                                    } catch (_) {}
+                                                    setOfflineTestRequests(prev => prev.map((r: any) => {
+                                                      const matchTest = String(r.testId || '') === String(req.testId || '');
+                                                      const matchStudent = (r.studentId && r.studentId === req.studentId) || (r.rollNumber && r.rollNumber === req.rollNumber) || (r.id === req.id);
+                                                      if (matchTest && matchStudent) {
+                                                        return { ...r, status: "rejected" };
+                                                      }
+                                                      return r;
+                                                    }));
+                                                    Alert.alert("Request Rejected", `Rejected test request for ${req.studentName}.`);
+                                                  } catch (e: any) {
+                                                    Alert.alert("Error", e.message || "Failed to reject request");
+                                                  }
+                                                }}
+                                                style={{ backgroundColor: "#c62828", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 }}
+                                              >
+                                                <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
+                                              </TouchableOpacity>
+                                            )}
+                                          </View>
                                         </View>
-                                      </View>
-                                    ))}
-                                  </View>
-                                )}
+                                      ))}
+                                    </View>
+                                  );
+                                })()}
                               </View>
                             )}
 
@@ -16878,8 +17093,40 @@ function MainApp() {
                                   const bypassOfflineRequest = !!t.allowOfflineDirectly;
                                   const requiresPermissionRequest = isOfflineForThisTest && !bypassOfflineRequest;
 
-                                  const req = requiresPermissionRequest
-                                    ? offlineTestRequests.find((r: any) => r.testId === t.id && (r.studentId === myStudent?.id || r.rollNumber === myStudent?.rollNumber || r.username === user?.username))
+                                  const matchingReqs = requiresPermissionRequest
+                                    ? offlineTestRequests.filter((r: any) => {
+                                        const rTestId = String(r.testId || "").trim();
+                                        const tId = String(t.id || t._id || "").trim();
+                                        if (rTestId !== tId) return false;
+
+                                        const rSId = String(r.studentId || "").trim().toLowerCase();
+                                        const rRoll = String(r.rollNumber || "").trim().toLowerCase();
+                                        const rUname = String(r.username || "").trim().toLowerCase();
+
+                                        const mySId = String(myStudent?.id || "").trim().toLowerCase();
+                                        const myRoll = String(myStudent?.rollNumber || "").trim().toLowerCase();
+                                        const myUId = String(user?.userId || "").trim().toLowerCase();
+                                        const myUname = String(user?.username || "").trim().toLowerCase();
+
+                                        return (
+                                          (mySId && rSId === mySId) ||
+                                          (myUId && rSId === myUId) ||
+                                          (myRoll && (rRoll === myRoll || rSId === myRoll)) ||
+                                          (myUname && (rUname === myUname || rSId === myUname || rRoll === myUname))
+                                        );
+                                      })
+                                    : [];
+
+                                  const hasApprovedReq = matchingReqs.some((r: any) => r.status === "approved");
+                                  const hasPendingReq = !hasApprovedReq && matchingReqs.some((r: any) => r.status === "pending");
+                                  const hasRejectedReq = !hasApprovedReq && !hasPendingReq && matchingReqs.some((r: any) => r.status === "rejected");
+
+                                  const req = hasApprovedReq
+                                    ? { status: "approved" }
+                                    : hasPendingReq
+                                    ? { status: "pending" }
+                                    : hasRejectedReq
+                                    ? { status: "rejected" }
                                     : null;
 
                                   return (
@@ -16941,11 +17188,14 @@ function MainApp() {
                                         ) : (
                                           <TouchableOpacity
                                             onPress={async () => {
+                                              const cleanSId = String(myStudent?.id || user?.userId || user?.username || "std").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+                                              const reqDocId = `req_${t.id}_${cleanSId}`;
+
                                               const reqObj = {
-                                                id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                                                id: reqDocId,
                                                 testId: t.id,
                                                 testTitle: t.title,
-                                                studentId: myStudent?.id || user?.userId || user?.username,
+                                                studentId: myStudent?.id || user?.userId || user?.username || cleanSId,
                                                 studentName: getStudentName(myStudent) || user?.fullName || user?.username || "Offline Student",
                                                 rollNumber: myStudent?.rollNumber || user?.username || "—",
                                                 batch: myStudent?.batch || myStudent?.batchName || "Offline",
@@ -16955,7 +17205,10 @@ function MainApp() {
                                               };
                                               try {
                                                 await api.post("/test-portal/test-creation/permission-requests", reqObj);
-                                                setOfflineTestRequests(prev => [reqObj, ...prev.filter((r: any) => !(r.testId === t.id && (r.studentId === reqObj.studentId || r.rollNumber === reqObj.rollNumber)))]);
+                                                try {
+                                                  await setDoc(doc(db, "offlineTestPermissionRequests", reqDocId), reqObj, { merge: true });
+                                                } catch (_) {}
+                                                setOfflineTestRequests(prev => [reqObj, ...prev.filter((r: any) => !(String(r.testId || '') === String(t.id || '') && (r.studentId === reqObj.studentId || r.rollNumber === reqObj.rollNumber || r.id === reqDocId)))]);
                                                 Alert.alert("Permission Requested", "Your request to attend this test has been sent to Super Admin / Admin for approval.");
                                               } catch (e: any) {
                                                 Alert.alert("Error", e.message || "Failed to send permission request. Please check your connection.");
@@ -18344,9 +18597,48 @@ function MainApp() {
                             {/* Closed Tests — auto-displayed, no button needed */}
                             {closedTests.length > 0 && (
                               <View style={styles.card}>
-                                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#c62828" }} />
-                                  <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Closed Tests ({closedTests.length})</Text>
+                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#c62828" }} />
+                                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Closed Tests ({closedTests.length})</Text>
+                                  </View>
+                                  {isAdmin && closedTests.length > 0 && (
+                                    <TouchableOpacity
+                                      onPress={() => {
+                                        confirmAction(
+                                          `Delete All ${closedTests.length} Closed Tests`,
+                                          `Are you sure you want to permanently delete all ${closedTests.length} closed tests?`,
+                                          async () => {
+                                            try {
+                                              for (const t of closedTests) {
+                                                try { await api.delete(`/test-portal/test-creation/${t.id}`); } catch (_) {}
+                                              }
+                                              loadTests();
+                                              Alert.alert("Success", "All closed tests deleted successfully.");
+                                            } catch (e: any) {
+                                              Alert.alert("Error", e.message || "Failed to delete closed tests.");
+                                            }
+                                          },
+                                          "Delete All",
+                                          false
+                                        );
+                                      }}
+                                      style={{
+                                        backgroundColor: "#ffebee",
+                                        paddingHorizontal: 10,
+                                        paddingVertical: 5,
+                                        borderRadius: 6,
+                                        borderWidth: 1,
+                                        borderColor: "#ef9a9a",
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: 4
+                                      }}
+                                    >
+                                      <Ionicons name="trash-outline" size={14} color="#c62828" />
+                                      <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Clear All Closed Tests</Text>
+                                    </TouchableOpacity>
+                                  )}
                                 </View>
                                 {closedTests.map((t: any) => {
                                   const hasAttempt = studentAttempts.find((a: any) => a.testId === t.id);
@@ -18979,6 +19271,17 @@ function MainApp() {
                                      {editingStudent.course !== "" && editingStudent.course !== undefined && (
                                        <View style={{ backgroundColor: "#e8f5e9", padding: 8, borderRadius: 6, marginBottom: 8 }}>
                                          <Text style={{ color: "#2e7d32", fontSize: 12 }}>Course auto-selected: <Text style={{ fontWeight: "bold" }}>{editingStudent.course}</Text></Text>
+                                         <TouchableOpacity 
+                                           onPress={updateStudentRecord} 
+                                           disabled={isUpdatingStudent}
+                                           style={[styles.primaryBtn, { flex: 1, backgroundColor: isUpdatingStudent ? "#81d4fa" : "#0288d1", justifyContent: "center" }]}
+                                         >
+                                           {isUpdatingStudent ? (
+                                             <ActivityIndicator size="small" color="#ffffff" />
+                                           ) : (
+                                             <Text style={styles.primaryBtnTxt}>Update Record</Text>
+                                           )}
+                                         </TouchableOpacity>
                                        </View>
                                      )}
                                    </>
@@ -19017,8 +19320,16 @@ function MainApp() {
                                   <Ionicons name="calendar-outline" size={18} color="#757575" />
                                 </TouchableOpacity>
                                 <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                                  <TouchableOpacity onPress={updateStudentRecord} style={[styles.primaryBtn, { flex: 1, backgroundColor: "#0288d1", justifyContent: "center" }]}>
-                                    <Text style={styles.primaryBtnTxt}>Update Record</Text>
+                                  <TouchableOpacity 
+                                    onPress={updateStudentRecord} 
+                                    disabled={isUpdatingStudent}
+                                    style={[styles.primaryBtn, { flex: 1, backgroundColor: isUpdatingStudent ? "#81d4fa" : "#0288d1", justifyContent: "center" }]}
+                                  >
+                                    {isUpdatingStudent ? (
+                                      <ActivityIndicator size="small" color="#ffffff" />
+                                    ) : (
+                                      <Text style={styles.primaryBtnTxt}>Update Record</Text>
+                                    )}
                                   </TouchableOpacity>
                                   <TouchableOpacity onPress={() => { setEditingStudent(null); setShowStudentForm(false); }} style={[styles.outlineBtn, { flex: 1, justifyContent: "center" }]}>
                                     <Text style={styles.outlineBtnTxt}>Cancel</Text>
@@ -22435,17 +22746,23 @@ function MainApp() {
 
                         <View style={styles.card}>
                           <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                            <View style={{ minWidth: 780 }}>
-                              <View style={[styles.tableRow, { backgroundColor: "#f5f5f5", paddingVertical: 8, paddingHorizontal: 12 }]}>
-                                <Text style={[styles.th, { flex: 1.2, fontWeight: "bold" }]}>Type</Text>
-                                <Text style={[styles.th, { flex: 1.5, fontWeight: "bold" }]}>Feature / Target</Text>
-                                <Text style={[styles.th, { flex: 2.2, fontWeight: "bold" }]}>Document / Details</Text>
-                                <Text style={[styles.th, { flex: 1.5, fontWeight: "bold" }]}>Requested By</Text>
-                                <Text style={[styles.th, { flex: 1.5, fontWeight: "bold" }]}>Date</Text>
-                                <Text style={[styles.th, { flex: 1.8, fontWeight: "bold", textAlign: "center" }]}>Actions</Text>
+                            <View style={{ minWidth: 1060, width: "100%" }}>
+                              {/* Header */}
+                              <View style={[styles.tableRow, { backgroundColor: darkMode ? "#252525" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: darkMode ? "#333333" : "#e0e0e0" }]}>
+                                <Text style={[styles.th, { width: 95, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Type</Text>
+                                <Text style={[styles.th, { width: 160, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Feature / Module</Text>
+                                <Text style={[styles.th, { width: 290, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Document / Details</Text>
+                                <Text style={[styles.th, { width: 150, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Requested By</Text>
+                                <Text style={[styles.th, { width: 145, fontWeight: "bold", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Date</Text>
+                                <Text style={[styles.th, { width: 220, fontWeight: "bold", textAlign: "center", color: darkMode ? "#ef9a9a" : "#37474f" }]}>Actions</Text>
                               </View>
+
                               {pendingApprovals.length === 0 ? (
-                                <Text style={[styles.emptyText, { padding: 20 }]}>No pending approval requests requiring Super Admin review.</Text>
+                                <View style={{ padding: 40, alignItems: "center" }}>
+                                  <Ionicons name="checkmark-circle-outline" size={36} color="#2e7d32" />
+                                  <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontSize: 13, marginTop: 10, fontWeight: "bold" }}>All requests cleared!</Text>
+                                  <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 12, marginTop: 2 }}>No pending approval requests requiring Super Admin review.</Text>
+                                </View>
                               ) : (
                                 pendingApprovals.map((item, idx) => {
                                   const isDelete = item.type === "delete_approval";
@@ -22455,83 +22772,80 @@ function MainApp() {
                                   const typeBadgeColor = isDelete ? "#c62828" : isCreate ? "#1565c0" : isOneTime ? "#2e7d32" : "#f57f17";
                                   const typeLabel = isDelete ? "DELETE" : isCreate ? "CREATE" : isOneTime ? "ONE-TIME" : "EDIT";
 
-                                  const formattedFeature = String(item.feature || "")
+                                  const formattedFeature = String(item.feature || item.featureKey || "")
                                     .replace(/_/g, " ")
                                     .replace(/\b\w/g, c => c.toUpperCase());
 
-                                  const getTargetName = () => {
-                                    if (isOneTime) return "JIT Single-Use Upload Request";
-                                    if (!item.docId) return "New Record";
-                                    const isStudentRelated = ["student_management", "fees_management", "marks_management", "id_card", "hall_ticket"].includes(item.feature);
-                                    if (isStudentRelated) {
-                                      const studentObj = students.find((s: any) => s.id === item.docId);
-                                      if (studentObj) {
-                                        const fullName = `${studentObj.firstName || ""} ${studentObj.lastName || ""}`.trim() || studentObj.loginUsername || studentObj.rollNumber;
-                                        return `${fullName} (Roll: ${studentObj.rollNumber || "N/A"})`;
-                                      }
-                                    }
-                                    if (item.feature === "staff_management") {
-                                      const staffObj = staff.find((s: any) => s.id === item.docId);
-                                      if (staffObj) {
-                                        return `${staffObj.name || ""} (${staffObj.email || "N/A"})`;
-                                      }
-                                    }
-                                    if (item.feature === "test_creation") {
-                                      const testObj = tests.find((t: any) => t.id === item.docId);
-                                      if (testObj) return testObj.title;
-                                    }
-                                    return item.docId;
-                                  };
-
-                                  const getPayloadSummary = () => {
-                                    if (!item.proposedPayload || isOneTime) return null;
-                                    const keys = Object.keys(item.proposedPayload).filter(k => k !== "updatedAt" && k !== "updatedBy" && k !== "id");
-                                    if (keys.length === 0) return null;
-                                    const formatKey = (k: string) => k.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                                    const summary = keys.map(k => {
-                                      const val = item.proposedPayload[k];
-                                      const displayVal = typeof val === "object" ? "Updated" : String(val);
-                                      return `${formatKey(k)}: ${displayVal}`;
-                                    }).join(", ");
-                                    return (
-                                      <Text style={{ fontSize: 10, color: "#757575", marginTop: 2 }} numberOfLines={2}>
-                                        {summary}
-                                      </Text>
-                                    );
-                                  };
+                                  const parsed = parseApprovalPayload(item);
 
                                   return (
-                                    <View key={item._id || item.id || idx} style={[styles.tableRow, { borderBottomWidth: 1, borderColor: "#eeeeee", paddingVertical: 12, paddingHorizontal: 12, backgroundColor: idx % 2 === 0 ? "#ffffff" : "#fafafa", alignItems: "center" }]}>
-                                      <View style={{ flex: 1.2, paddingRight: 4 }}>
-                                        <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: typeBadgeBg }}>
+                                    <View key={item._id || item.id || idx} style={[styles.tableRow, { borderBottomWidth: idx === pendingApprovals.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#eeeeee", paddingVertical: 12, paddingHorizontal: 12, backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#242424" : "#fafafa"), alignItems: "center" }]}>
+                                      {/* Cell 1: Type */}
+                                      <View style={{ width: 95, paddingRight: 6 }}>
+                                        <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: typeBadgeBg }}>
                                           <Text style={{ fontSize: 10, fontWeight: "bold", color: typeBadgeColor }}>{typeLabel}</Text>
                                         </View>
                                       </View>
-                                      <View style={{ flex: 1.5, paddingRight: 6 }}>
-                                        <Text style={{ color: "#212121", fontWeight: "600", fontSize: 12 }} numberOfLines={2}>{formattedFeature}</Text>
+
+                                      {/* Cell 2: Feature */}
+                                      <View style={{ width: 160, paddingRight: 8 }}>
+                                        <Text style={{ color: darkMode ? "#e0e0e0" : "#212121", fontWeight: "600", fontSize: 12 }} numberOfLines={2}>{formattedFeature}</Text>
                                       </View>
-                                      <View style={{ flex: 2.2, paddingRight: 8 }}>
-                                        <Text style={{ color: "#212121", fontWeight: "bold", fontSize: 12 }} numberOfLines={1}>
-                                          {getTargetName()}
+
+                                      {/* Cell 3: Document / Details */}
+                                      <View style={{ width: 290, paddingRight: 10, gap: 3 }}>
+                                        <Text style={{ color: darkMode ? "#ffffff" : "#212121", fontWeight: "bold", fontSize: 12 }} numberOfLines={1}>
+                                          {getTargetName(item)}
                                         </Text>
                                         {!isOneTime && item.docId && (
-                                          <Text style={{ color: "#888", fontSize: 9, fontFamily: "monospace" }} numberOfLines={1} selectable>
+                                          <Text style={{ color: darkMode ? "#888" : "#777", fontSize: 9, fontFamily: "monospace" }} numberOfLines={1} selectable>
                                             ID: {item.docId}
                                           </Text>
                                         )}
-                                        {getPayloadSummary()}
+
+                                        {/* Payload Field Chips Summary */}
+                                        {parsed.fields.length > 0 && (
+                                          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
+                                            {parsed.fields.slice(0, 2).map((f, fIdx) => (
+                                              <View key={fIdx} style={{ backgroundColor: darkMode ? "#2e2e2e" : "#f0f4f8", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: darkMode ? "#444" : "#d0d7de" }}>
+                                                <Text style={{ fontSize: 9, color: darkMode ? "#bbb" : "#444" }}>
+                                                  <Text style={{ fontWeight: "bold" }}>{f.label}:</Text> {f.value.length > 18 ? f.value.substring(0, 18) + '…' : f.value}
+                                                </Text>
+                                              </View>
+                                            ))}
+                                            {parsed.fields.length > 2 && (
+                                              <Text style={{ fontSize: 9, color: "#888", alignSelf: "center" }}>+{parsed.fields.length - 2} more</Text>
+                                            )}
+                                          </View>
+                                        )}
+
+                                        {/* View Details Link */}
+                                        <TouchableOpacity
+                                          onPress={() => setViewingApprovalItem(item)}
+                                          style={{ alignSelf: "flex-start", marginTop: 2 }}
+                                        >
+                                          <Text style={{ fontSize: 10, color: "#1976d2", fontWeight: "bold" }}>🔍 View Full Details</Text>
+                                        </TouchableOpacity>
                                       </View>
-                                      <View style={{ flex: 1.5, paddingRight: 6 }}>
-                                        <Text style={{ color: "#555", fontSize: 12 }} numberOfLines={2}>{item.requestedBy}</Text>
+
+                                      {/* Cell 4: Requested By */}
+                                      <View style={{ width: 150, paddingRight: 8 }}>
+                                        <Text style={{ color: darkMode ? "#e0e0e0" : "#424242", fontSize: 12, fontWeight: "500" }} numberOfLines={2}>{item.requestedBy}</Text>
                                       </View>
-                                      <View style={{ flex: 1.5, paddingRight: 6 }}>
-                                        <Text style={{ color: "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A"}</Text>
+
+                                      {/* Cell 5: Date */}
+                                      <View style={{ width: 145, paddingRight: 8 }}>
+                                        <Text style={{ color: darkMode ? "#9e9e9e" : "#757575", fontSize: 11 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A"}</Text>
                                       </View>
-                                      <View style={{ flex: 1.8, flexDirection: "row", justifyContent: "center", gap: 6 }}>
-                                        <TouchableOpacity onPress={() => handleApproveRequest(item)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#2e7d32", borderRadius: 4 }}>
+
+                                      {/* Cell 6: Actions */}
+                                      <View style={{ width: 220, flexDirection: "row", justifyContent: "center", gap: 6 }}>
+                                        <TouchableOpacity onPress={() => handleApproveRequest(item)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#2e7d32", borderRadius: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                          <Ionicons name="checkmark-circle-outline" size={13} color="#fff" />
                                           <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Approve & Apply</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity onPress={() => handleRejectRequest(item)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#c62828", borderRadius: 4 }}>
+                                        <TouchableOpacity onPress={() => handleRejectRequest(item)} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: "#c62828", borderRadius: 5, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                          <Ionicons name="close-circle-outline" size={13} color="#fff" />
                                           <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Reject</Text>
                                         </TouchableOpacity>
                                       </View>
@@ -25473,6 +25787,83 @@ function MainApp() {
                           </Text>
                         </View>
 
+                        {/* Select All & Bulk Action Bar */}
+                        {!deviceAlertsLoading && deviceAlerts.length > 0 && (
+                          <View style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            backgroundColor: darkMode ? "#222" : "#fff",
+                            paddingHorizontal: 14,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: darkMode ? "#333" : "#e0e0e0"
+                          }}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                if (selectedAlertIds.length === deviceAlerts.length) {
+                                  setSelectedAlertIds([]);
+                                } else {
+                                  setSelectedAlertIds(deviceAlerts.map((a: any) => a.id));
+                                }
+                              }}
+                              style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+                            >
+                              <Ionicons
+                                name={selectedAlertIds.length === deviceAlerts.length && deviceAlerts.length > 0 ? "checkbox" : selectedAlertIds.length > 0 ? "remove-circle-outline" : "square-outline"}
+                                size={22}
+                                color={selectedAlertIds.length > 0 ? "#e64a19" : (darkMode ? "#aaa" : "#757575")}
+                              />
+                              <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>
+                                {selectedAlertIds.length === deviceAlerts.length ? "Deselect All" : "Select All"} ({selectedAlertIds.length}/{deviceAlerts.length})
+                              </Text>
+                            </TouchableOpacity>
+
+                            {selectedAlertIds.length > 0 && (
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    const count = selectedAlertIds.length;
+                                    confirmAction(
+                                      `Delete ${count} Alert${count > 1 ? "s" : ""}`,
+                                      `Are you sure you want to permanently delete ${count} selected security alert${count > 1 ? "s" : ""}?`,
+                                      async () => {
+                                        try {
+                                          for (const id of selectedAlertIds) {
+                                            try { await api.delete(`/erp/device-alerts/${id}`); } catch (_) {}
+                                          }
+                                          setDeviceAlerts(prev => prev.filter((a: any) => !selectedAlertIds.includes(a.id)));
+                                          setSelectedAlertIds([]);
+                                          showToast(`${count} alert${count > 1 ? "s" : ""} deleted successfully`, "success");
+                                        } catch (e: any) {
+                                          Alert.alert("Error", e.message || "Failed to delete selected alerts.");
+                                        }
+                                      },
+                                      "Delete Selected",
+                                      false
+                                    );
+                                  }}
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    backgroundColor: "#c62828",
+                                    paddingHorizontal: 14,
+                                    paddingVertical: 8,
+                                    borderRadius: 8
+                                  }}
+                                >
+                                  <Ionicons name="trash-outline" size={15} color="#fff" />
+                                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+                                    Delete Selected ({selectedAlertIds.length})
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                          </View>
+                        )}
+
                         {/* Loading State */}
                         {deviceAlertsLoading && (
                           <View style={{ alignItems: "center", paddingVertical: 40 }}>
@@ -25493,6 +25884,7 @@ function MainApp() {
                         {/* Alert Cards */}
                         {!deviceAlertsLoading && deviceAlerts.map((alert: any) => {
                           const isUnread = !alert.acknowledged;
+                          const isSelected = selectedAlertIds.includes(alert.id);
                           const platIcon = platformIcon[alert.loginPlatform] || "phone-portrait-outline";
                           return (
                             <View
@@ -25501,7 +25893,7 @@ function MainApp() {
                                 padding: 0,
                                 overflow: "hidden",
                                 borderWidth: 1,
-                                borderColor: isUnread ? (darkMode ? "#bf360c80" : "#ffab91") : (darkMode ? "#333" : "#e0e0e0"),
+                                borderColor: isSelected ? "#e64a19" : isUnread ? (darkMode ? "#bf360c80" : "#ffab91") : (darkMode ? "#333" : "#e0e0e0"),
                               }]}
                             >
                               {/* Alert Header Row */}
@@ -25510,10 +25902,27 @@ function MainApp() {
                                 alignItems: "center",
                                 gap: 10,
                                 padding: 14,
-                                backgroundColor: isUnread ? (darkMode ? "rgba(191,54,12,0.12)" : "#fff8f5") : (darkMode ? "rgba(255,255,255,0.03)" : "#fafafa"),
+                                backgroundColor: isSelected ? (darkMode ? "rgba(230,74,25,0.18)" : "#fff3e0") : isUnread ? (darkMode ? "rgba(191,54,12,0.12)" : "#fff8f5") : (darkMode ? "rgba(255,255,255,0.03)" : "#fafafa"),
                                 borderBottomWidth: 1,
                                 borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0"
                               }}>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setSelectedAlertIds(prev =>
+                                      prev.includes(alert.id)
+                                        ? prev.filter(id => id !== alert.id)
+                                        : [...prev, alert.id]
+                                    );
+                                  }}
+                                  style={{ padding: 2 }}
+                                >
+                                  <Ionicons
+                                    name={isSelected ? "checkbox" : "square-outline"}
+                                    size={22}
+                                    color={isSelected ? "#e64a19" : (darkMode ? "#888" : "#aaa")}
+                                  />
+                                </TouchableOpacity>
+
                                 <View style={{
                                   width: 38, height: 38, borderRadius: 19,
                                   backgroundColor: isUnread ? "#e64a19" : (darkMode ? "#455a64" : "#90a4ae"),
@@ -29432,8 +29841,10 @@ function MainApp() {
                 <View style={{ borderTopWidth: 1, borderColor: "#eee" }}>
                   {leaderboard.map((entry: any, index: number) => {
                     const resolvedStudent = students.find((s: any) => s.id === entry.studentId || s.userId === entry.studentId);
-                    const studentName = entry.studentName || (resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername) : `Student (${entry.studentId})`);
-                    const rollNo = entry.rollNumber || resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername || "-";
+                    const formattedName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName) : "";
+                    const rawName = entry.studentName && !entry.studentName.startsWith("Student (") ? entry.studentName : "";
+                    const studentName = formattedName || rawName || entry.studentName || `Student (${entry.studentId})`;
+                    const rollNo = resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername || (entry.rollNumber !== "N/A" ? entry.rollNumber : "") || "-";
 
                     return (
                       <View key={entry.id || index} style={{
@@ -30782,8 +31193,152 @@ function MainApp() {
           </View>
         </Modal>
       )}
-    </SafeAreaView>
-  );
+
+        {/* Approval Item Details Modal */}
+        {viewingApprovalItem && (() => {
+          const item = viewingApprovalItem;
+          const isDelete = item.type === "delete_approval";
+          const isCreate = item.type === "create_approval";
+          const isOneTime = item.type === "one_time_upload_request";
+          const typeBadgeBg = isDelete ? "#ffebee" : isCreate ? "#e3f2fd" : isOneTime ? "#e8f5e9" : "#fff8e1";
+          const typeBadgeColor = isDelete ? "#c62828" : isCreate ? "#1565c0" : isOneTime ? "#2e7d32" : "#f57f17";
+          const typeLabel = isDelete ? "DELETE" : isCreate ? "CREATE" : isOneTime ? "ONE-TIME UPLOAD" : "EDIT";
+          const formattedFeature = String(item.feature || item.featureKey || "")
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, c => c.toUpperCase());
+
+          const parsed = parseApprovalPayload(item);
+
+          return (
+            <Modal
+              transparent
+              animationType="fade"
+              visible={!!viewingApprovalItem}
+              onRequestClose={() => setViewingApprovalItem(null)}
+            >
+              <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+                <View style={{ backgroundColor: darkMode ? "#1e1e1e" : "#ffffff", width: "95%", maxWidth: 680, borderRadius: 12, overflow: "hidden", maxHeight: "85%", elevation: 10, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10 }}>
+                  {/* Header */}
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", backgroundColor: darkMode ? "#252525" : "#f9f9f9" }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: typeBadgeBg }}>
+                        <Text style={{ fontSize: 11, fontWeight: "bold", color: typeBadgeColor }}>{typeLabel}</Text>
+                      </View>
+                      <Text style={{ fontSize: 16, fontWeight: "bold", color: darkMode ? "#ffffff" : "#212121" }}>
+                        Approval Request Details
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setViewingApprovalItem(null)} style={{ padding: 4 }}>
+                      <Ionicons name="close" size={24} color={darkMode ? "#aaaaaa" : "#666666"} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Body */}
+                  <ScrollView style={{ padding: 16 }}>
+                    <View style={{ gap: 16 }}>
+                      {/* Summary Metadata Card */}
+                      <View style={{ backgroundColor: darkMode ? "#2a2a2a" : "#f5f7fa", borderRadius: 8, padding: 14, borderWidth: 1, borderColor: darkMode ? "#333333" : "#e4e8f0" }}>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 10, columnGap: 20 }}>
+                          <View style={{ minWidth: 140 }}>
+                            <Text style={{ fontSize: 10, color: "#888888", fontWeight: "bold", textTransform: "uppercase" }}>Feature / Module</Text>
+                            <Text style={{ fontSize: 13, fontWeight: "600", color: darkMode ? "#e0e0e0" : "#212121", marginTop: 2 }}>{formattedFeature}</Text>
+                          </View>
+                          <View style={{ minWidth: 180, flex: 1 }}>
+                            <Text style={{ fontSize: 10, color: "#888888", fontWeight: "bold", textTransform: "uppercase" }}>Target Record / ID</Text>
+                            <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#ffffff" : "#000000", marginTop: 2 }}>{getTargetName(item)}</Text>
+                            {item.docId && (
+                              <Text style={{ fontSize: 10, fontFamily: "monospace", color: "#888888", marginTop: 2 }} selectable>
+                                ID: {item.docId}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 10, columnGap: 20, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: darkMode ? "#3a3a3a" : "#e0e0e0" }}>
+                          <View style={{ minWidth: 140 }}>
+                            <Text style={{ fontSize: 10, color: "#888888", fontWeight: "bold", textTransform: "uppercase" }}>Requested By</Text>
+                            <Text style={{ fontSize: 12, fontWeight: "600", color: darkMode ? "#e0e0e0" : "#333333", marginTop: 2 }}>{item.requestedBy}</Text>
+                          </View>
+                          <View style={{ minWidth: 180 }}>
+                            <Text style={{ fontSize: 10, color: "#888888", fontWeight: "bold", textTransform: "uppercase" }}>Request Date</Text>
+                            <Text style={{ fontSize: 12, color: darkMode ? "#bbbbbb" : "#666666", marginTop: 2 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A"}</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Reason Note (if any) */}
+                      {parsed.reason ? (
+                        <View style={{ backgroundColor: "#fff8e1", borderWidth: 1, borderColor: "#ffe0b2", borderRadius: 8, padding: 12 }}>
+                          <Text style={{ fontSize: 11, fontWeight: "bold", color: "#e65100", marginBottom: 2 }}>Request Reason / Note:</Text>
+                          <Text style={{ fontSize: 12, color: "#424242", fontStyle: "italic" }}>"{parsed.reason}"</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Proposed Payload Field Changes */}
+                      <View>
+                        <Text style={{ fontSize: 13, fontWeight: "bold", color: darkMode ? "#ffffff" : "#212121", marginBottom: 10 }}>
+                          Proposed Field Changes ({parsed.fields.length})
+                        </Text>
+                        {parsed.fields.length === 0 ? (
+                          <View style={{ backgroundColor: darkMode ? "#252525" : "#fafafa", padding: 16, borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#333333" : "#eeeeee", alignItems: "center" }}>
+                            <Text style={{ fontSize: 12, color: darkMode ? "#aaaaaa" : "#757575" }}>
+                              {isDelete ? "Action: Soft/Hard delete target document" : isOneTime ? "Action: Grant single-use upload authorization" : "No specific fields payload attached"}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={{ borderRadius: 8, borderWidth: 1, borderColor: darkMode ? "#333333" : "#e0e0e0", overflow: "hidden" }}>
+                            <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f0f2f5", paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: darkMode ? "#333333" : "#e0e0e0" }}>
+                              <Text style={{ width: 180, fontWeight: "bold", fontSize: 11, color: darkMode ? "#ef9a9a" : "#37474f" }}>FIELD</Text>
+                              <Text style={{ flex: 1, fontWeight: "bold", fontSize: 11, color: darkMode ? "#ef9a9a" : "#37474f" }}>PROPOSED VALUE</Text>
+                            </View>
+                            {parsed.fields.map((f, idx) => (
+                              <View key={f.key || idx} style={{ flexDirection: "row", paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: idx === parsed.fields.length - 1 ? 0 : 1, borderColor: darkMode ? "#2a2a2a" : "#eeeeee", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#242424" : "#fafafa") }}>
+                                <Text style={{ width: 180, fontSize: 12, fontWeight: "600", color: darkMode ? "#e0e0e0" : "#333333", paddingRight: 8 }}>{f.label}</Text>
+                                <Text style={{ flex: 1, fontSize: 12, color: darkMode ? "#4fc3f7" : "#1565c0", fontFamily: "monospace" }} selectable>{f.value}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </ScrollView>
+
+                  {/* Footer Actions */}
+                  <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 10, padding: 16, borderTopWidth: 1, borderColor: darkMode ? "#2a2a2a" : "#e0e0e0", backgroundColor: darkMode ? "#252525" : "#f9f9f9" }}>
+                    <TouchableOpacity
+                      onPress={() => setViewingApprovalItem(null)}
+                      style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, borderWidth: 1, borderColor: darkMode ? "#555" : "#ccc" }}
+                    >
+                      <Text style={{ fontSize: 12, color: darkMode ? "#ccc" : "#555", fontWeight: "600" }}>Close</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const target = viewingApprovalItem;
+                        setViewingApprovalItem(null);
+                        handleRejectRequest(target);
+                      }}
+                      style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6, backgroundColor: "#c62828" }}
+                    >
+                      <Text style={{ fontSize: 12, color: "#fff", fontWeight: "bold" }}>Reject</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const target = viewingApprovalItem;
+                        setViewingApprovalItem(null);
+                        handleApproveRequest(target);
+                      }}
+                      style={{ paddingVertical: 8, paddingHorizontal: 18, borderRadius: 6, backgroundColor: "#2e7d32" }}
+                    >
+                      <Text style={{ fontSize: 12, color: "#fff", fontWeight: "bold" }}>Approve & Apply</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          );
+        })()}
+      </SafeAreaView>
+    );
 }
 
 export default function App() {

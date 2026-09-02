@@ -250,8 +250,7 @@ service cloud.firestore {
 
     // offlineTestPermissionRequests
     match /offlineTestPermissionRequests/{docId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // ─── CATCH-ALL: Deny everything else ────────────────────

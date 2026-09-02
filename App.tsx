@@ -287,6 +287,7 @@ export default function App() {
 
 
   const [isSavingStudent, setIsSavingStudent] = useState(false);
+  const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [isProcessingProfile, setIsProcessingProfile] = useState<string | null>(null);
@@ -2449,14 +2450,18 @@ export default function App() {
       Alert.alert("Error", "Paid fees should not be greater than total fees");
       return;
     }
+    setIsUpdatingStudent(true);
     try {
-      await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
+      const res = await api.put(`/erp/student/${editingStudent.id}`, editingStudent);
+      const updatedObj = res?.data || res?.student || { ...editingStudent };
+      setStudents(prev => prev.map(s => (s.id === editingStudent.id ? { ...s, ...editingStudent, ...updatedObj } : s)));
       Alert.alert("Success", "Student record updated!");
       setEditingStudent(null);
       setShowStudentForm(false);
-      loadStudents();
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to update student profile.");
+    } finally {
+      setIsUpdatingStudent(false);
     }
   };
 
@@ -6348,8 +6353,16 @@ export default function App() {
                               <Ionicons name="calendar-outline" size={18} color="#757575" />
                             </TouchableOpacity>
                             <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-                              <TouchableOpacity onPress={updateStudentRecord} style={[styles.primaryBtn, { flex: 1, backgroundColor: "#0288d1", justifyContent: "center" }]}>
-                                <Text style={styles.primaryBtnTxt}>Update Record</Text>
+                              <TouchableOpacity 
+                                onPress={updateStudentRecord} 
+                                disabled={isUpdatingStudent}
+                                style={[styles.primaryBtn, { flex: 1, backgroundColor: isUpdatingStudent ? "#81d4fa" : "#0288d1", justifyContent: "center" }]}
+                              >
+                                {isUpdatingStudent ? (
+                                  <ActivityIndicator size="small" color="#ffffff" />
+                                ) : (
+                                  <Text style={styles.primaryBtnTxt}>Update Record</Text>
+                                )}
                               </TouchableOpacity>
                               <TouchableOpacity onPress={() => { setEditingStudent(null); setShowStudentForm(false); }} style={[styles.outlineBtn, { flex: 1, justifyContent: "center" }]}>
                                 <Text style={styles.outlineBtnTxt}>Cancel</Text>

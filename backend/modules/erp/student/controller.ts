@@ -13,6 +13,22 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const COLLECTION = "students";
 
+// ─── Timestamp Helper: safely format Firestore Timestamp, Date, or string ───
+function parseTimestamp(val: any): string | null {
+    if (!val) return null;
+    if (typeof val.toDate === "function") {
+        try {
+            return val.toDate().toISOString();
+        } catch (_) {}
+    }
+    if (val instanceof Date) return val.toISOString();
+    try {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (_) {}
+    return typeof val === "string" ? val : null;
+}
+
 // ─── Security: strip sensitive fields before sending to client ───────────────
 function sanitizeStudent(student: any): any {
     const s = { ...student };
@@ -407,10 +423,10 @@ export class StudentController {
                 data: sanitizeStudent({
                     ...data,
                     createdBy: creatorName || "Super Admin",
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    deletedAt: data.deletedAt ? (data.deletedAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    approvedAt: data.approvedAt ? (data.approvedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt),
+                    deletedAt: parseTimestamp(data.deletedAt),
+                    approvedAt: parseTimestamp(data.approvedAt)
                 })
             });
         } catch (error: any) {
@@ -707,9 +723,29 @@ export class StudentController {
                 }
             }
 
+            const updatedDoc = await docRef.get();
+            const updatedData = updatedDoc.data()!;
+            let creatorName = updatedData.createdBy || "";
+            if (creatorName && creatorName.length > 20) {
+                try {
+                    const userDoc = await db.collection("users").doc(creatorName).get();
+                    if (userDoc.exists) {
+                        creatorName = userDoc.data()?.name || userDoc.data()?.username || creatorName;
+                    }
+                } catch (_) {}
+            }
+
             return res.status(200).json({
                 success: true,
-                message: "Student updated successfully"
+                message: "Student updated successfully",
+                data: sanitizeStudent({
+                    ...updatedData,
+                    createdBy: creatorName || "Super Admin",
+                    createdAt: parseTimestamp(updatedData.createdAt),
+                    updatedAt: parseTimestamp(updatedData.updatedAt),
+                    deletedAt: parseTimestamp(updatedData.deletedAt),
+                    approvedAt: parseTimestamp(updatedData.approvedAt)
+                })
             });
         } catch (error: any) {
             return res.status(500).json({

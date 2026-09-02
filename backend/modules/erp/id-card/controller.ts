@@ -12,6 +12,21 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const ID_CARD_COLLECTION = "idCards";
 
+function parseTimestamp(val: any): string | null {
+    if (!val) return null;
+    if (typeof val.toDate === "function") {
+        try {
+            return val.toDate().toISOString();
+        } catch (_) {}
+    }
+    if (val instanceof Date) return val.toISOString();
+    try {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (_) {}
+    return typeof val === "string" ? val : null;
+}
+
 export class IDCardController {
     /**
      * GENERATE ID CARD
@@ -89,8 +104,8 @@ export class IDCardController {
                 const data = doc.data();
                 return {
                     ...data,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt)
                 };
             });
 
@@ -126,8 +141,8 @@ export class IDCardController {
                 const data = doc.data();
                 return {
                     ...data,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt)
                 };
             });
 

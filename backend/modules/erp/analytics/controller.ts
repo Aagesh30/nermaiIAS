@@ -10,6 +10,21 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+function parseTimestamp(val: any): string | null {
+    if (!val) return null;
+    if (typeof val.toDate === "function") {
+        try {
+            return val.toDate().toISOString();
+        } catch (_) {}
+    }
+    if (val instanceof Date) return val.toISOString();
+    try {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (_) {}
+    return typeof val === "string" ? val : null;
+}
+
 export class AnalyticsController {
     /**
      * GET ADMIN DASHBOARD ANALYTICS
@@ -107,12 +122,8 @@ export class AnalyticsController {
             const analytics = {
                 student: {
                     ...studentDoc.data(),
-                    createdAt: studentDoc.data()?.createdAt
-                        ? (studentDoc.data()?.createdAt as admin.firestore.Timestamp).toDate().toISOString()
-                        : null,
-                    updatedAt: studentDoc.data()?.updatedAt
-                        ? (studentDoc.data()?.updatedAt as admin.firestore.Timestamp).toDate().toISOString()
-                        : null
+                    createdAt: parseTimestamp(studentDoc.data()?.createdAt),
+                    updatedAt: parseTimestamp(studentDoc.data()?.updatedAt)
                 },
                 marks: marksData,
                 averagePercentage: avgPercentage.toFixed(2),

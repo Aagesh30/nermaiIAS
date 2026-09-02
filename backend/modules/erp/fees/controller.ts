@@ -14,6 +14,21 @@ const FEES_STRUCTURE_COLLECTION = "feeStructures";
 const FEES_ASSIGNMENT_COLLECTION = "feeAssignments";
 const FEES_PAYMENT_COLLECTION = "feePayments";
 
+function parseTimestamp(val: any): string | null {
+    if (!val) return null;
+    if (typeof val.toDate === "function") {
+        try {
+            return val.toDate().toISOString();
+        } catch (_) {}
+    }
+    if (val instanceof Date) return val.toISOString();
+    try {
+        const d = new Date(val);
+        if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (_) {}
+    return typeof val === "string" ? val : null;
+}
+
 export class FeesController {
     /**
      * CREATE FEE STRUCTURE
@@ -91,8 +106,8 @@ export class FeesController {
                 const data = doc.data();
                 return {
                     ...data,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt)
                 };
             });
 
@@ -189,8 +204,8 @@ export class FeesController {
                 const data = doc.data();
                 return {
                     ...data,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt),
+                    updatedAt: parseTimestamp(data.updatedAt)
                 };
             });
 
@@ -281,7 +296,7 @@ export class FeesController {
                 const data = doc.data();
                 return {
                     ...data,
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    createdAt: parseTimestamp(data.createdAt)
                 };
             });
 

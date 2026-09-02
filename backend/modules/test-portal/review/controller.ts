@@ -593,7 +593,16 @@ export class ReviewController {
                 .where("testId", "==", testId)
                 .get();
 
-            const entries = snapshot.docs.map(doc => doc.data()) as any[];
+            let entries = snapshot.docs.map(doc => doc.data()) as any[];
+
+            // Fallback: If leaderboards collection has no documents for this test, query results collection directly
+            if (entries.length === 0) {
+                const resultsSnapshot = await db.collection("results")
+                    .where("testId", "==", testId)
+                    .where("isDeleted", "==", false)
+                    .get();
+                entries = resultsSnapshot.docs.map(doc => doc.data()) as any[];
+            }
 
             // Read pre-saved student profile details directly (0 extra reads)
             const enrichedEntries = entries.map(entry => {
@@ -645,10 +654,17 @@ export class ReviewController {
                 .where("testId", "==", testId)
                 .get();
 
-            const entries = snapshot.docs.map(doc => doc.data());
+            let entries = snapshot.docs.map(doc => doc.data());
+            if (entries.length === 0) {
+                const resultsSnapshot = await db.collection("results")
+                    .where("testId", "==", testId)
+                    .where("isDeleted", "==", false)
+                    .get();
+                entries = resultsSnapshot.docs.map(doc => doc.data());
+            }
             
             // Sort in memory by rank asc
-            entries.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+            entries.sort((a, b) => (b.obtainedMarks || 0) - (a.obtainedMarks || 0));
             const top10 = entries.slice(0, 10);
 
             return res.status(200).json({
