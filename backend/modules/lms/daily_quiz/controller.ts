@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
+import { generalCache } from "../../../shared/utils/cache";
 
 const db = admin.firestore();
 const QUIZ_COLLECTION = "dailyQuizzes";
@@ -266,32 +267,38 @@ export class DailyQuizController {
 
             const quizId = targetQuiz.id;
 
-            // Fetch stats
-            const attemptsSnapshot = await db.collection(QUIZ_ATTEMPT_COLLECTION)
-                .where("quizId", "==", quizId)
-                .get();
-            const allAttempts = attemptsSnapshot.docs.map(d => d.data());
-            const totalPoolCount = allAttempts.length;
+            // Cache stats computation for 60 seconds to avoid fetching thousands of attempts on every load
+            const cacheKey = `daily_quiz_stats_${quizId}`;
+            let questionsWithStats = generalCache.get<any[]>(cacheKey);
 
-            const questionsWithStats = (targetQuiz.questions || []).map((q: any, idx: number) => {
-                const counts = [0, 0, 0, 0];
-                allAttempts.forEach(attempt => {
-                    const attemptAnswers = attempt.answers || attempt.results;
-                    const ans = Array.isArray(attemptAnswers)
-                        ? attemptAnswers.find((a: any) => a.questionIndex === idx)
-                        : (attemptAnswers && typeof attemptAnswers === "object" ? { selectedOptionIndex: (attemptAnswers as any)[idx] } : null);
-                    if (ans && typeof ans.selectedOptionIndex === "number" && ans.selectedOptionIndex >= 0 && ans.selectedOptionIndex <= 3) {
-                        counts[ans.selectedOptionIndex]++;
-                    }
+            if (!questionsWithStats) {
+                const attemptsSnapshot = await db.collection(QUIZ_ATTEMPT_COLLECTION)
+                    .where("quizId", "==", quizId)
+                    .get();
+                const allAttempts = attemptsSnapshot.docs.map(d => d.data());
+                const totalPoolCount = allAttempts.length;
+
+                questionsWithStats = (targetQuiz.questions || []).map((q: any, idx: number) => {
+                    const counts = [0, 0, 0, 0];
+                    allAttempts.forEach(attempt => {
+                        const attemptAnswers = attempt.answers || attempt.results;
+                        const ans = Array.isArray(attemptAnswers)
+                            ? attemptAnswers.find((a: any) => a.questionIndex === idx)
+                            : (attemptAnswers && typeof attemptAnswers === "object" ? { selectedOptionIndex: (attemptAnswers as any)[idx] } : null);
+                        if (ans && typeof ans.selectedOptionIndex === "number" && ans.selectedOptionIndex >= 0 && ans.selectedOptionIndex <= 3) {
+                            counts[ans.selectedOptionIndex]++;
+                        }
+                    });
+                    const percentages = counts.map(count => totalPoolCount > 0 ? Math.round((count / totalPoolCount) * 100) : 0);
+                    return {
+                        questionText: q.questionText,
+                        options: q.options,
+                        correctOptionIndex: q.correctOptionIndex,
+                        optionPercentages: percentages
+                    };
                 });
-                const percentages = counts.map(count => totalPoolCount > 0 ? Math.round((count / totalPoolCount) * 100) : 0);
-                return {
-                    questionText: q.questionText,
-                    options: q.options,
-                    correctOptionIndex: q.correctOptionIndex,
-                    optionPercentages: percentages
-                };
-            });
+                generalCache.set(cacheKey, questionsWithStats, 60); // 60s cache
+            }
 
             return res.status(200).json({
                 success: true,

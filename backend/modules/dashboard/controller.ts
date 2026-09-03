@@ -94,20 +94,44 @@ export const getStudentDashboardOverview = async (req: Request, res: Response, n
     for (const doc of liveClassesSnapshot.docs) {
       const session = { id: doc.id, ...doc.data() } as any;
       
-      const topicDoc = await db.collection('topics').doc(session.topicId).get();
-      if (!topicDoc.exists || topicDoc.data()?.isDeleted) continue;
+      const topicCacheKey = `doc_topic_${session.topicId}`;
+      let topicData = generalCache.get<any>(topicCacheKey);
+      if (!topicData && session.topicId) {
+        const topicDoc = await db.collection('topics').doc(session.topicId).get();
+        if (topicDoc.exists && !topicDoc.data()?.isDeleted) {
+          topicData = topicDoc.data();
+          generalCache.set(topicCacheKey, topicData, 300);
+        }
+      }
+      if (!topicData) continue;
       
-      const subjectDoc = await db.collection('subjects').doc(topicDoc.data()?.subjectId).get();
-      if (!subjectDoc.exists || subjectDoc.data()?.isDeleted) continue;
+      const subjectCacheKey = `doc_subject_${topicData.subjectId}`;
+      let subjectData = generalCache.get<any>(subjectCacheKey);
+      if (!subjectData && topicData.subjectId) {
+        const subjectDoc = await db.collection('subjects').doc(topicData.subjectId).get();
+        if (subjectDoc.exists && !subjectDoc.data()?.isDeleted) {
+          subjectData = subjectDoc.data();
+          generalCache.set(subjectCacheKey, subjectData, 300);
+        }
+      }
+      if (!subjectData) continue;
       
-      const courseId = subjectDoc.data()?.courseId;
+      const courseId = subjectData.courseId;
       if (!courseId) continue;
 
-      const courseDoc = await db.collection('courses').doc(courseId).get();
-      if (courseDoc.exists && courseDoc.data()?.isDeleted) continue;
-      const isPublic = !courseDoc.exists || courseDoc.data()?.visibility !== 'private';
+      const courseCacheKey = `doc_course_${courseId}`;
+      let courseData = generalCache.get<any>(courseCacheKey);
+      if (!courseData && courseId) {
+        const courseDoc = await db.collection('courses').doc(courseId).get();
+        if (courseDoc.exists) {
+          courseData = { id: courseDoc.id, ...courseDoc.data() };
+          generalCache.set(courseCacheKey, courseData, 300);
+        }
+      }
+      if (courseData && courseData.isDeleted) continue;
+      const isPublic = !courseData || courseData.visibility !== 'private';
       
-      if (isPublic || userCourseIds.includes(courseId) || (courseDoc.exists && Policies.hasBatchAccess(courseDoc.data()?.batchIds || [], userBatchIds))) {
+      if (isPublic || userCourseIds.includes(courseId) || (courseData && Policies.hasBatchAccess(courseData.batchIds || [], userBatchIds))) {
         // Use LiveSessionResolver as single source of truth
         const { LiveSessionResolver } = require('../live-sessions/LiveSessionResolver');
         const resolvedSession = await LiveSessionResolver.resolveActiveSession(session.id, session);

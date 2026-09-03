@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
+import { generalCache } from "../../shared/utils/cache";
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -230,18 +231,24 @@ export class NotificationController {
         try {
             const { role, batch, studentId } = req.query;
 
-            let query = db.collection(COLLECTION).where("isDeleted", "==", false);
-            const snapshot = await query.get();
+            const cacheKey = `all_active_announcements`;
+            let rawAnnouncements = generalCache.get<any[]>(cacheKey);
 
-            let notifications = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    ...data,
-                    message: data.content || data.message || "", // support both content/message fields
-                    createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
-                    publishedAt: data.publishedAt ? (data.publishedAt as admin.firestore.Timestamp).toDate().toISOString() : null
-                };
-            });
+            if (!rawAnnouncements) {
+                const snapshot = await db.collection(COLLECTION).where("isDeleted", "==", false).get();
+                rawAnnouncements = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    return {
+                        ...data,
+                        message: data.content || data.message || "", // support both content/message fields
+                        createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
+                        publishedAt: data.publishedAt ? (data.publishedAt as admin.firestore.Timestamp).toDate().toISOString() : null
+                    };
+                });
+                generalCache.set(cacheKey, rawAnnouncements, 300); // 5 min cache
+            }
+
+            let notifications = [...rawAnnouncements];
 
             // Filter based on user target group
             if (role) {
