@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
+import { generalCache } from "../../../shared/utils/cache";
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -464,48 +465,58 @@ export class EvaluationController {
             };
         }
         
-        try {
-            // First check if r.studentId is a student document ID
-            const studentDoc = await db.collection("students").doc(r.studentId).get();
-            if (studentDoc.exists) {
-                const studentData = studentDoc.data()!;
-                const first = studentData.firstName || "";
-                const last = studentData.lastName || "";
-                const full = (first + " " + last).trim();
-                studentName = full || studentData.fullName || studentData.name || studentName;
-                rollNumber = studentData.rollNumber || "";
-            } else {
-                // If not found in students, check if it is a user UID in users collection
-                const userDoc = await db.collection("users").doc(r.studentId).get();
-                if (userDoc.exists) {
-                    const userData = userDoc.data()!;
-                    studentName = userData.name || studentName;
-                    
-                    if (userData.studentId) {
-                        const studentDoc2 = await db.collection("students").doc(userData.studentId).get();
-                        if (studentDoc2.exists) {
-                            const studentData2 = studentDoc2.data()!;
-                            const first = studentData2.firstName || "";
-                            const last = studentData2.lastName || "";
-                            const full = (first + " " + last).trim();
-                            studentName = full || studentData2.fullName || studentName;
-                            rollNumber = studentData2.rollNumber || "";
+        const profileCacheKey = `student_profile_${r.studentId}`;
+        const cachedProfile = generalCache.get<{ studentName: string; rollNumber: string }>(profileCacheKey);
+        if (cachedProfile) {
+            studentName = cachedProfile.studentName;
+            rollNumber = cachedProfile.rollNumber;
+        } else {
+            try {
+                // First check if r.studentId is a student document ID
+                const studentDoc = await db.collection("students").doc(r.studentId).get();
+                if (studentDoc.exists) {
+                    const studentData = studentDoc.data()!;
+                    const first = studentData.firstName || "";
+                    const last = studentData.lastName || "";
+                    const full = (first + " " + last).trim();
+                    studentName = full || studentData.fullName || studentData.name || studentName;
+                    rollNumber = studentData.rollNumber || "";
+                } else {
+                    // If not found in students, check if it is a user UID in users collection
+                    const userDoc = await db.collection("users").doc(r.studentId).get();
+                    if (userDoc.exists) {
+                        const userData = userDoc.data()!;
+                        studentName = userData.name || studentName;
+                        
+                        if (userData.studentId) {
+                            const studentDoc2 = await db.collection("students").doc(userData.studentId).get();
+                            if (studentDoc2.exists) {
+                                const studentData2 = studentDoc2.data()!;
+                                const first = studentData2.firstName || "";
+                                const last = studentData2.lastName || "";
+                                const full = (first + " " + last).trim();
+                                studentName = full || studentData2.fullName || studentName;
+                                rollNumber = studentData2.rollNumber || "";
+                            }
+                        } else {
+                            rollNumber = userData.username || "";
                         }
                     } else {
-                        rollNumber = userData.username || "";
-                    }
-                } else {
-                    // Try finding in leads (guests)
-                    const leadDoc = await db.collection("leads").doc(r.studentId).get();
-                    if (leadDoc.exists) {
-                        const leadData = leadDoc.data()!;
-                        studentName = leadData.name || studentName;
-                        rollNumber = "Guest";
+                        // Try finding in leads (guests)
+                        const leadDoc = await db.collection("leads").doc(r.studentId).get();
+                        if (leadDoc.exists) {
+                            const leadData = leadDoc.data()!;
+                            studentName = leadData.name || studentName;
+                            rollNumber = "Guest";
+                        }
                     }
                 }
+                if (studentName || rollNumber) {
+                    generalCache.set(profileCacheKey, { studentName, rollNumber }, 300); // 5 min TTL
+                }
+            } catch (err) {
+                console.log("Error enriching result:", err);
             }
-        } catch (err) {
-            console.log("Error enriching result:", err);
         }
         
         if (!studentName) {

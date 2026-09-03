@@ -1,4 +1,4 @@
-﻿import { useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 export interface LiveSessionState {
   id: string;
@@ -18,7 +18,7 @@ export function useLiveSessionsState(api: any, classId?: string) {
       const response = await api.get('/live-sessions');
       return response.data?.data as LiveSessionState[];
     },
-    refetchInterval: 15000,
+    refetchInterval: 30000,
     staleTime: 10000,
   });
 

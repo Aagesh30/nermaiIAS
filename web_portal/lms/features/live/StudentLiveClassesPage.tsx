@@ -136,7 +136,7 @@ export const StudentLiveClassesPage = () => {
       const res = await DashboardApi.getStudentOverview();
       return res.data?.data || res.data;
     },
-    refetchInterval: 15000,
+    refetchInterval: 30000,
   });
 
   const classes = dashboardData?.liveClasses || [];

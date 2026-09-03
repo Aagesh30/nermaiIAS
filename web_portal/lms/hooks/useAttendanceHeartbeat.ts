@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { AttendanceApi } from '../core/services';
 
 interface UseAttendanceProps {
@@ -12,11 +12,12 @@ type AttendanceEvent = "JOIN" | "PLAY" | "PAUSE" | "SEEK" | "HEARTBEAT" | "BACKG
 
 export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef }: UseAttendanceProps) => {
   const isLive = provider.includes('live');
-  const heartbeatInterval = isLive ? 300000 : 90000; // 5 min vs 90 sec
+  const heartbeatInterval = 300000; // 5 min for live sessions
   const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const isBackgroundRef = useRef(false);
 
   const sendEvent = useCallback(async (event: AttendanceEvent, position?: number) => {
+    if (!isLive) return; // Recorded videos do not track attendance
     try {
       await AttendanceApi.sendAttendanceEvent({
         classId,
@@ -28,16 +29,17 @@ export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef
     } catch (error) {
       console.error(`Failed to send attendance event ${event}:`, error);
     }
-  }, [classId, provider, playerJwt]);
+  }, [classId, provider, playerJwt, isLive]);
 
   const startHeartbeat = useCallback(() => {
+    if (!isLive) return;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       if (!isBackgroundRef.current) {
         sendEvent('HEARTBEAT');
       }
     }, heartbeatInterval);
-  }, [sendEvent, heartbeatInterval]);
+  }, [sendEvent, heartbeatInterval, isLive]);
 
   const stopHeartbeat = useCallback(() => {
     if (timerRef.current) {
@@ -47,6 +49,8 @@ export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef
   }, []);
 
   useEffect(() => {
+    if (!isLive) return; // Completely disable heartbeat effect for recorded videos
+
     // Initial join event
     sendEvent('JOIN');
     startHeartbeat();
@@ -96,7 +100,7 @@ export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [sendEvent, startHeartbeat, stopHeartbeat]);
+  }, [sendEvent, startHeartbeat, stopHeartbeat, isLive]);
 
   return {
     sendEvent // Expose for manual player events (PAUSE, SEEK, COMPLETE, PLAY)

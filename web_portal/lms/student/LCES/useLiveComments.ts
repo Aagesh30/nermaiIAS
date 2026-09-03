@@ -56,8 +56,8 @@ export const useLiveComments = (liveSessionId: string) => {
     // Initial fetch
     fetchComments();
 
-    // Poll every 3 seconds for live updates
-    const interval = setInterval(fetchComments, 3000);
+    // Poll every 8 seconds for live updates (cost-optimized while preserving real-time feel)
+    const interval = setInterval(fetchComments, 8000);
 
     return () => {
       mounted.current = false;

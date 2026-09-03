@@ -720,7 +720,7 @@ export const StudentLiveClassesPage = () => {
       const res = await LiveClassesApi.getStudentLiveSessions();
       return { liveClasses: res.data?.data || res.data || [] };
     },
-    refetchInterval: 15000,
+    refetchInterval: 30000,    // Poll every 30s — server cache handles intra-poll freshness
     refetchOnWindowFocus: true,
   });
 

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CourseApi } from '../../core/services';
 import { CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -11,11 +11,21 @@ export const AttendanceStatusBadge: React.FC<Props> = ({ classId }) => {
 
   useEffect(() => {
     let mounted = true;
+    let timerId: NodeJS.Timeout | null = null;
+
     const fetchStatus = async () => {
       try {
         const response = await (CourseApi as any).getAttendanceStatus?.(classId) || await fetch(`/api/v1/attendance/status/${classId}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => res.json());
         if (mounted && response.data) {
           setStatusData(response.data);
+          
+          // Stop polling once attendance status has finalized to save network & DB read operations
+          const st = response.data.status;
+          const fnSt = response.data.finalResult?.status;
+          const isTerminal = st === 'COMPLETED' || st === 'FINALIZED' || st === 'Present' || st === 'Absent' || st === 'Late' || fnSt === 'Present' || fnSt === 'Absent' || fnSt === 'Late';
+          if (isTerminal && timerId) {
+            clearInterval(timerId);
+          }
         }
       } catch (err) {
         // Silent catch for polling
@@ -23,10 +33,10 @@ export const AttendanceStatusBadge: React.FC<Props> = ({ classId }) => {
     };
 
     fetchStatus();
-    const interval = setInterval(fetchStatus, 30000); // poll every 30s
+    timerId = setInterval(fetchStatus, 30000); // poll every 30s until finalized
     return () => {
       mounted = false;
-      clearInterval(interval);
+      if (timerId) clearInterval(timerId);
     };
   }, [classId]);
 

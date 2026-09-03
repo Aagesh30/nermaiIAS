@@ -85,7 +85,7 @@ export class DailyQuizController {
 
             const now = new Date();
 
-            // Check and auto-disable expired quizzes + get attempts
+            // Fetch only this student's attempts (scoped query — O(student's attempts) not O(all attempts))
             const attemptsMap: Record<string, any> = {};
             if (studentId) {
                 const attemptsSnapshot = await db.collection(QUIZ_ATTEMPT_COLLECTION)
@@ -97,18 +97,30 @@ export class DailyQuizController {
                 });
             }
 
-            // OPTIMIZATION: Fetch all attempts in one single query to build count & presence maps
-            const allAttemptsSnapshot = await db.collection(QUIZ_ATTEMPT_COLLECTION).get();
+            // COST OPTIMIZATION: Use Firestore .count() aggregation per quiz instead of
+            // fetching every attempt document ever created. This reads 0 documents and uses
+            // only an aggregation query (1 read-unit per quiz instead of N read-units for N attempts).
+            const quizIds = snapshot.docs.map(d => d.id);
             const attemptCountMap: Record<string, number> = {};
             const hasAttemptsMap: Record<string, boolean> = {};
 
-            allAttemptsSnapshot.docs.forEach(d => {
-                const qId = d.data()?.quizId;
-                if (qId) {
-                    attemptCountMap[qId] = (attemptCountMap[qId] || 0) + 1;
-                    hasAttemptsMap[qId] = true;
-                }
-            });
+            if (quizIds.length > 0) {
+                // Run count aggregations in parallel — one lightweight query per quiz
+                await Promise.all(quizIds.map(async (qId) => {
+                    try {
+                        const countSnap = await db.collection(QUIZ_ATTEMPT_COLLECTION)
+                            .where("quizId", "==", qId)
+                            .count()
+                            .get();
+                        const count = countSnap.data().count;
+                        attemptCountMap[qId] = count;
+                        if (count > 0) hasAttemptsMap[qId] = true;
+                    } catch (_) {
+                        // Graceful fallback: count defaults to 0
+                        attemptCountMap[qId] = 0;
+                    }
+                }));
+            }
 
             const quizzes = await Promise.all(snapshot.docs.map(async doc => {
                 const data = doc.data();

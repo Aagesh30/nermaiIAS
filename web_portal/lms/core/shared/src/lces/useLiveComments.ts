@@ -1,4 +1,4 @@
-﻿import { useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { LiveCommentsApi } from '../../../../core/services';
 
 export interface CommentData {
@@ -28,7 +28,7 @@ export const useLiveComments = (liveSessionId: string) => {
       return res.data.data as CommentData[];
     },
     enabled: !!liveSessionId,
-    refetchInterval: 3000,
+    refetchInterval: 8000,
   });
 
   const allComments = data || [];

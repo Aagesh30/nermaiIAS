@@ -31174,7 +31174,7 @@ function MainApp() {
 
       {/* Video Player Modal */}
       {videoPlayerModal.visible && (
-        <Modal visible={true} transparent animationType="fade">
+        <Modal visible={true} transparent animationType="fade" onRequestClose={() => setVideoPlayerModal({ visible: false, playerToken: "" })}>
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 }}>
             <View style={{ width: "95%", height: "90%", backgroundColor: "#000", borderRadius: 14, overflow: "hidden", borderWidth: 1, borderColor: darkMode ? "#333" : "#555" }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 12, backgroundColor: darkMode ? "#222" : "#333" }}>
@@ -31185,6 +31185,7 @@ function MainApp() {
               </View>
               {Platform.OS === "web" ? (
                 <iframe
+                  key={videoPlayerModal.playerToken}
                   src={`${getBaseUrl().replace(/\/api\/v1\/?$/, "")}/player/${encodeURIComponent(videoPlayerModal.playerToken)}`}
                   style={{ flex: 1, width: "100%", height: "100%", border: "none", backgroundColor: "black" }}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

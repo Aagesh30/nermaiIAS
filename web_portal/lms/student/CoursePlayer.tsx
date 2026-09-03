@@ -38,27 +38,7 @@ export const CoursePlayer: React.FC<CoursePlayerProps> = ({ courseId, initialCla
   const [activeVideoProgress, setActiveVideoProgress] = useState<number>(0);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (activeVideo?.id && activeVideo.classType?.includes('recorded')) {
-      const fetchProgress = async () => {
-         try {
-           const response = await fetch(`/api/v1/attendance/status/${activeVideo.id}`, { 
-             headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } 
-           });
-           const res = await response.json();
-           if (res.data && typeof res.data.percentage === 'number') {
-             setActiveVideoProgress(Math.min(100, Math.max(0, res.data.percentage)));
-           }
-         } catch (e) {}
-      };
-      fetchProgress();
-      interval = setInterval(fetchProgress, 30000); // sync every 30s
-    } else {
-      setActiveVideoProgress(0);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    }
+    setActiveVideoProgress(0);
   }, [activeVideo?.id]);
 
   const { sessions: realtimeLiveSessions } = useLiveSessionsState(getApiClient());

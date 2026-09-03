@@ -509,8 +509,8 @@ export class ExaminationController {
                     };
                 });
 
-            // Cache cleaned questions in memory for 15 minutes
-            testQuestionsCache.set(cacheKey, cleanedQuestions, 900);
+            // Cache cleaned questions in memory for 24 hours (86,400s) - questions are static once exam begins
+            testQuestionsCache.set(cacheKey, cleanedQuestions, 86400);
 
             const etag = `W/"${attempt.testId}-${cleanedQuestions.length}"`;
             res.setHeader("ETag", etag);

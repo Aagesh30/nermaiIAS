@@ -44,6 +44,8 @@ export class LiveSessionController {
         await LiveSessionService.editSession(session.id!, { scheduledStartTime, expectedDurationMinutes }, teacherId || 'system');
       }
 
+      // Invalidate list cache so students see new session on next poll
+      LiveSessionService.invalidateListSessionsCache();
       res.status(201).json({ success: true, data: session });
     } catch (error: any) {
       logger.error('Error creating live session:', error);
@@ -57,6 +59,7 @@ export class LiveSessionController {
       const adminId = req.user?.userId || 'system';
       const updates = req.body;
       const result = await LiveSessionService.editSession(sessionId, updates, adminId);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error editing live session:', error);
@@ -71,6 +74,7 @@ export class LiveSessionController {
       const { newStartTime } = req.body;
       if (!newStartTime) throw new AppError('newStartTime is required', 400);
       const result = await LiveSessionService.rescheduleSession(sessionId, newStartTime, adminId);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error rescheduling live session:', error);
@@ -83,6 +87,7 @@ export class LiveSessionController {
       const sessionId = req.params.id as string;
       const adminId = req.user?.userId || 'system';
       const result = await LiveSessionService.cancelSession(sessionId, adminId);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error cancelling live session:', error);
@@ -95,6 +100,7 @@ export class LiveSessionController {
       const sessionId = req.params.id as string;
       const adminId = req.user?.userId || 'system';
       const result = await LiveSessionService.deleteSession(sessionId, adminId);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error deleting live session:', error);
@@ -130,6 +136,7 @@ export class LiveSessionController {
     try {
       const sessionId = req.params.id as string;
       const result = await LiveSessionService.startSession(sessionId, req.user);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error starting live session:', error);
@@ -156,6 +163,7 @@ export class LiveSessionController {
     try {
       const sessionId = req.params.id as string;
       await LiveSessionService.endSession(sessionId, req.user);
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, message: 'Session ended successfully' });
     } catch (error: any) {
       logger.error('Error ending live session:', error);
@@ -499,6 +507,7 @@ export class LiveSessionController {
         !!convertToYoutube,
         youtubeUrl
       );
+      LiveSessionService.invalidateListSessionsCache();
       res.status(200).json({ success: true, data: result });
     } catch (error: any) {
       logger.error('Error ending session with conversion:', error);

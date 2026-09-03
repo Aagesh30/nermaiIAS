@@ -223,18 +223,11 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
     }
 
     if (!CONFIG.isLive) {
-      saveProgress(false, 'JOIN');
-      if (activeTimeInterval) clearInterval(activeTimeInterval);
-      activeTimeInterval = setInterval(() => {
-        if (player.getPlayerState() === YT.PlayerState.PLAYING) {
-          saveProgress(false, 'PLAY');
-        }
-      }, CONFIG.watchProgressInterval);
-      if (CONFIG.resumePosition > 0) {
+      console.log('[Player] Recorded video mode: Attendance API calls disabled.');
+      if (CONFIG.resumePosition > 0 && player && player.seekTo) {
         player.seekTo(CONFIG.resumePosition, true);
-        console.log('[Attendance] Resumed playback at ' + CONFIG.resumePosition + 's');
+        console.log('[Player] Resumed playback at ' + CONFIG.resumePosition + 's');
       }
-      console.log('[Attendance] HEARTBEAT Started (Recorded)');
     } else {
       sendHeartbeat(false, 'JOIN');
       startHeartbeat();
@@ -243,76 +236,11 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
 
   function onPlayerStateChange(event) {
     if (CONFIG.isLive) return;
-
-    const currentTime = player.getCurrentTime();
-
-    if (event.data === YT.PlayerState.PAUSED) {
-      saveProgress(false, 'PAUSE');
-    } else if (event.data === YT.PlayerState.ENDED) {
-      isCompleted = true;
-      saveProgress(false, 'COMPLETE');
-    } else if (event.data === YT.PlayerState.PLAYING) {
-      if (Math.abs(currentTime - lastSavedTime) > 5) {
-        saveProgress(false, 'SEEK');
-      } else {
-        saveProgress(false, 'PLAY');
-      }
-    }
   }
 
   function saveProgress(forceFlush = false, customEvent = 'PLAY') {
-    try {
-      if (!player || !player.getCurrentTime) return;
-      const currentTime = player.getCurrentTime();
-      const duration = (player.getDuration && player.getDuration()) || 1;
-
-      lastSavedTime = currentTime;
-      const watchPercent = Math.min(100, Math.max(0, (currentTime / duration) * 100));
-      
-      let ev = customEvent;
-      if (watchPercent >= CONFIG.completionPercent && !isCompleted) {
-        isCompleted = true;
-        ev = 'COMPLETE';
-      }
-
-      const reqId = 'att-' + Math.random().toString(36).substring(2, 10);
-      const payload = JSON.stringify({
-        classId: CONFIG.classId,
-        event: ev,
-        position: Math.floor(currentTime),
-        timestamp: new Date().toISOString(),
-        provider: 'youtube_recorded',
-        requestId: reqId
-      });
-
-      console.log(\`[Attendance] [\${reqId}] \${ev === 'JOIN' ? 'JOIN Sent' : 'HEARTBEAT Fired'} (Recorded)\`);
-      console.log(\`[Attendance] [\${reqId}] Sending\`, payload);
-      updateDebug('event', ev);
-
-      if (forceFlush && navigator.sendBeacon) {
-        console.log(\`[Attendance] [\${reqId}] sendBeacon event:\`, payload);
-        const blob = new Blob([payload], { type: 'application/json' });
-        navigator.sendBeacon(\`\${CONFIG.apiUrl}/api/v1/attendance/event?token=\${CONFIG.jwt}\`, blob);
-      } else {
-        fetch(\`\${CONFIG.apiUrl}/api/v1/attendance/event\`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': \`Bearer \${CONFIG.jwt}\`
-          },
-          body: payload
-        }).then(res => {
-          console.log(\`[Attendance] [\${reqId}] Response \${res.status} \${res.statusText}\`);
-          updateDebug('res', res.status + ' OK');
-          console.log(\`[Attendance] [\${reqId}] Next Interval Scheduled\`);
-        }).catch(err => {
-          console.error(\`[Attendance] [\${reqId}] Fetch Error:\`, err);
-          updateDebug('res', 'Error');
-        });
-      }
-    } catch (error) {
-      console.error('[Player] saveProgress error:', error);
-    }
+    // Recorded YouTube classes do not send attendance events
+    return;
   }
 
   // --- Live Heartbeat Logic ---
@@ -335,12 +263,7 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
   function startHeartbeat() {
     console.log('[Attendance] HEARTBEAT Started (Live)');
     resetActivity();
-    if (activeTimeInterval) {
-      clearInterval(activeTimeInterval);
-      console.log('[Attendance] Heartbeat Cleared');
-    }
-    activeTimeInterval = setInterval(sendHeartbeat, CONFIG.attendanceHeartbeatInterval);
-    console.log('[Attendance] Heartbeat Restarted');
+    setInterval(sendHeartbeat, CONFIG.attendanceHeartbeatInterval);
   }
 
   function sendHeartbeat(forceFlush = false, customEvent = 'HEARTBEAT') {
@@ -390,22 +313,17 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
 
   // Immediate sync on hidden tab
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === 'hidden') {
-      if (CONFIG.isLive) sendHeartbeat(false, 'BACKGROUND');
-      else saveProgress(false, 'BACKGROUND');
-    } else {
-      if (CONFIG.isLive) sendHeartbeat(false, 'FOREGROUND');
-      else saveProgress(false, 'FOREGROUND');
+    if (CONFIG.isLive) {
+      if (document.visibilityState === 'hidden') sendHeartbeat(false, 'BACKGROUND');
+      else sendHeartbeat(false, 'FOREGROUND');
     }
   });
 
   // Handle Unload (Flush)
   window.addEventListener('beforeunload', () => {
-    console.log('[Attendance] Component Unmounted');
     if (CONFIG.isLive) {
+      console.log('[Attendance] Live Component Unmounted');
       sendHeartbeat(true, 'LEAVE');
-    } else {
-      saveProgress(true, 'LEAVE');
     }
   });
 

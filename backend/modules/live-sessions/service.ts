@@ -1,6 +1,7 @@
 import { db } from '../../infrastructure/firebase';
 import { ILiveSession } from './types';
 import { redisClient } from '../../infrastructure/redis';
+import { generalCache } from '../../shared/utils/cache';
 import { ProviderManager } from './providers/ProviderManager';
 import { AppError } from '../../core/errors/AppError';
 import { ClassRepository } from '../courses/repository';
@@ -34,8 +35,22 @@ export class LiveSessionService {
     return { id: doc.id, ...doc.data() } as ILiveSession;
   }
   
+  /**
+   * Invalidate all listSessions caches — call when a session is created/updated/deleted.
+   */
+  static invalidateListSessionsCache(): void {
+    generalCache.invalidatePrefix('live_list_admin');
+    generalCache.invalidatePrefix('live_list_student_');
+  }
+
   static async listSessions(filters?: { teacherId?: string }, user?: { userId: string; role: string }): Promise<ILiveSession[]> {
     const now = Date.now();
+
+    // ── Server-side cache (30s) — admin/teacher panel polls frequently ──────────
+    // Cache key includes teacherId filter so filtered views don't bleed into each other.
+    const listCacheKey = `live_list_admin_${filters?.teacherId || 'all'}`;
+    const cached = generalCache.get<ILiveSession[]>(listCacheKey);
+    if (cached) return cached;
 
     // Cache courses and batches for fast lookup
     const coursesSnap = await db.collection('courses').get();
@@ -142,12 +157,27 @@ export class LiveSessionService {
        });
     }
     console.log('DEBUG: Returning enriched sessions, count:', enriched.length);
-    return (enriched as any[]).sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
+    const sortedResult = (enriched as any[]).sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
+    // Cache for 30 seconds — frequent admin polls hit memory instead of Firestore
+    generalCache.set(listCacheKey, sortedResult, 30);
+    return sortedResult;
   }
   
   static async getStudentLiveSessions(userId: string, tenantId: string): Promise<any[]> {
     console.log('DEBUG: getStudentLiveSessions started', userId);
     const now = Date.now();
+
+    // ── Per-student 60s server-side cache ────────────────────────────────────────
+    // 1000 students each poll every 15–30s. Without this, every poll = ~92 Firestore
+    // reads (4 full-collection scans + N+1 live_sessions loop). With this cache, all
+    // polls within the 60s window for the same student hit memory only.
+    // Cache is invalidated via invalidateListSessionsCache() on any session change.
+    const studentCacheKey = `live_list_student_${userId}`;
+    const cachedStudentSessions = generalCache.get<any[]>(studentCacheKey);
+    if (cachedStudentSessions) {
+      console.log('DEBUG: getStudentLiveSessions served from cache for userId:', userId);
+      return cachedStudentSessions;
+    }
 
     // Cache courses and batches
     console.log('DEBUG: Fetching courses...');
@@ -518,7 +548,10 @@ export class LiveSessionService {
       }
     }
 
-    return result.sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
+    const sortedStudentResult = result.sort((a, b) => new Date(b.scheduledStartTime || 0).getTime() - new Date(a.scheduledStartTime || 0).getTime());
+    // Cache per-student for 60 seconds — drastically reduces N+1 Firestore reads from polling
+    generalCache.set(studentCacheKey, sortedStudentResult, 60);
+    return sortedStudentResult;
   }
   
   static async recordHistory(sessionId: string, action: string, userId: string, metadata?: any) {
