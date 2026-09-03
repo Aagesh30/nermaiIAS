@@ -32,14 +32,9 @@ export const useAttendanceHeartbeat = ({ classId, provider, playerJwt, playerRef
   }, [classId, provider, playerJwt, isLive]);
 
   const startHeartbeat = useCallback(() => {
-    if (!isLive) return;
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      if (!isBackgroundRef.current) {
-        sendEvent('HEARTBEAT');
-      }
-    }, heartbeatInterval);
-  }, [sendEvent, heartbeatInterval, isLive]);
+    // Heartbeat module disabled to eliminate database write costs
+    return;
+  }, []);
 
   const stopHeartbeat = useCallback(() => {
     if (timerRef.current) {
