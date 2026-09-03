@@ -721,6 +721,7 @@ export const StudentLiveClassesPage = () => {
       return { liveClasses: res.data?.data || res.data || [] };
     },
     refetchInterval: 30000,    // Poll every 30s — server cache handles intra-poll freshness
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 

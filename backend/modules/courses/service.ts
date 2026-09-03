@@ -12,8 +12,7 @@ import { analyticsWorker } from '../analytics/worker';
 import { ContextService } from '../assistant/contextService';
 import { LiveSessionService } from '../live-sessions/service';
 
-import { env } from '../../config/env';
-import jwt from 'jsonwebtoken';
+import { generalCache } from '../../shared/utils/cache';
 const notificationService = new NotificationService();
 const contextService = new ContextService();
 
@@ -52,7 +51,9 @@ export class CourseService {
     if (existing.length > 0) {
       throw new AppError(`Course with name "${data.name}" already exists in this tenant.`, 409);
     }
-    return await this.courseRepo.create({ ...data, tenantId }, userId);
+    const created = await this.courseRepo.create({ ...data, tenantId }, userId);
+    generalCache.invalidatePrefix('courses:');
+    return created;
   }
 
   async updateCourse(id: string, data: Partial<ICourse>, userId: string, tenantId: string) {
@@ -69,6 +70,7 @@ export class CourseService {
     }
     
     await this.courseRepo.update(id, data, userId);
+    generalCache.invalidatePrefix('courses:');
     return await this.courseRepo.findById(id);
   }
 
@@ -81,13 +83,20 @@ export class CourseService {
   }
 
   async listCourses(tenantId: string) {
-    return await this.courseRepo.findAllByTenant(tenantId);
+    const cacheKey = `courses:list:${tenantId}`;
+    const cached = generalCache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const res = await this.courseRepo.findAllByTenant(tenantId);
+    generalCache.set(cacheKey, res, 60);
+    return res;
   }
 
   async deleteCourse(id: string, userId: string, tenantId: string) {
     const course = await this.courseRepo.findById(id);
     if (!course || course.tenantId !== tenantId) throw new AppError('Course not found', 404);
     await this.courseRepo.softDelete(id, userId);
+    generalCache.invalidatePrefix('courses:');
   }
 
   async assignStaff(courseId: string, staffData: any, userId: string, tenantId: string) {
@@ -150,12 +159,18 @@ export class CourseService {
   }
 
   async listAllSubjects(tenantId: string) {
+    const cacheKey = `courses:subjects:${tenantId}`;
+    const cached = generalCache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
     const courses = await this.courseRepo.findAllByTenant(tenantId);
     if (courses.length === 0) return [];
     
     const subjectPromises = courses.map(c => this.subjectRepo.findByCourseId(c.id!));
     const results = await Promise.all(subjectPromises);
-    return results.flat();
+    const flat = results.flat();
+    generalCache.set(cacheKey, flat, 60);
+    return flat;
   }
   async updateSubject(id: string, data: Partial<ISubject>, userId: string, tenantId: string) {
     const subject = await this.subjectRepo.findById(id);
@@ -208,12 +223,18 @@ export class CourseService {
   }
 
   async listAllTopics(tenantId: string) {
+    const cacheKey = `courses:topics:${tenantId}`;
+    const cached = generalCache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
     const subjects = await this.listAllSubjects(tenantId);
     if (subjects.length === 0) return [];
     
     const topicPromises = subjects.map(s => this.topicRepo.findBySubjectId(s.id!));
     const results = await Promise.all(topicPromises);
-    return results.flat();
+    const flat = results.flat();
+    generalCache.set(cacheKey, flat, 60);
+    return flat;
   }
 
   async updateTopic(id: string, data: Partial<ITopic>, userId: string, tenantId: string) {
@@ -374,7 +395,9 @@ export class CourseService {
       delete classData.youtubeUrl;
     }
 
-    return await this.classRepo.create(classData, userId);
+    const createdClass = await this.classRepo.create(classData, userId);
+    generalCache.invalidatePrefix('courses:');
+    return createdClass;
   }
 
   async listClassesByTopic(topicId: string, tenantId: string) {
@@ -403,6 +426,11 @@ export class CourseService {
   }
 
   async listAllClasses(tenantId: string, role?: string, userId?: string) {
+    const isStaff = role && ['super_admin', 'admin', 'teacher', 'staff'].includes(role);
+    const cacheKey = `courses:classes:${tenantId}:${isStaff ? 'staff' : 'student'}`;
+    const cached = generalCache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
     const classes = await this.classRepo.findByTenantId(tenantId);
 
     const enrichedClasses = [];
@@ -419,7 +447,7 @@ export class CourseService {
       
       // Decrypt the raw YouTube URL ONLY for staff/admins so they can view it in the edit form.
       // Students will NOT receive this field to prevent inspection extraction.
-      if (role && ['super_admin', 'admin', 'teacher', 'staff'].includes(role) && (cls.classType === 'recorded' || (cls.classType as string) === 'youtube_recorded') && (cls as any).encryptedVideoId) {
+      if (isStaff && (cls.classType === 'recorded' || (cls.classType as string) === 'youtube_recorded') && (cls as any).encryptedVideoId) {
         try {
           (cls as any).recordingUrl = `https://youtube.com/watch?v=${decrypt((cls as any).encryptedVideoId)}`;
         } catch (e) {
@@ -429,6 +457,7 @@ export class CourseService {
       
       enrichedClasses.push(cls);
     }
+    generalCache.set(cacheKey, enrichedClasses, 30);
     return enrichedClasses;
   }
 
@@ -459,6 +488,7 @@ export class CourseService {
     }
 
     await this.classRepo.update(id, classData, userId);
+    generalCache.invalidatePrefix('courses:');
     return await this.classRepo.findById(id);
   }
 
@@ -523,6 +553,7 @@ export class CourseService {
     if (!course || course.tenantId !== tenantId) throw new AppError('Tenant mismatch', 403);
     
     await this.classRepo.softDelete(id, userId);
+    generalCache.invalidatePrefix('courses:');
 
     const anyClassDoc = classDoc as any;
     if (anyClassDoc.liveSessionId) {

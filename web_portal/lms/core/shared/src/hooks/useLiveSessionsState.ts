@@ -19,6 +19,7 @@ export function useLiveSessionsState(api: any, classId?: string) {
       return response.data?.data as LiveSessionState[];
     },
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
     staleTime: 10000,
   });
 
