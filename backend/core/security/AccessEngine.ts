@@ -92,9 +92,9 @@ export class AccessEngine {
         jti: randomUUID() // Explicit sessionId for attendance tracking
       },
       process.env.JWT_SECRET as string,
-      { expiresIn: resourceType === 'video' ? '300s' : '900s' }
+      { expiresIn: resourceType === 'video' ? '14400s' : '900s' }
     );
-    const ttl = resourceType === 'video' ? 300 : 900; // 5 min video, 15 min resource
+    const ttl = resourceType === 'video' ? 14400 : 900; // 4 hours for video, 15 min for resource
 
     const finalPayload = JSON.stringify({
       ...tokenPayload,

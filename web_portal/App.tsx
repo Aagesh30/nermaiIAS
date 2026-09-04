@@ -2590,6 +2590,7 @@ function MainApp() {
   });
 
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
   const [selectedAttendanceTitle, setSelectedAttendanceTitle] = useState("");
   const [attendanceLoading, setAttendanceLoading] = useState(false);
@@ -11503,15 +11504,26 @@ function MainApp() {
         {showAttendanceModal && (
           <Modal visible={true} animationType="fade" transparent>
             <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 }}>
-              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "100%", maxWidth: 600, borderRadius: 16, padding: 20, alignSelf: "center", maxHeight: "90%" }]}>
+              <View style={[styles.feedbackSheet, darkMode && styles.feedbackSheetDark, { width: "100%", maxWidth: 800, borderRadius: 16, padding: 20, alignSelf: "center", maxHeight: "90%" }]}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
                   <Text style={[styles.feedbackTitle, darkMode && { color: "#f0f0f0" }, { fontSize: 16, fontWeight: "800" }]}>
                     Attendance: {selectedAttendanceTitle}
                   </Text>
-                  <TouchableOpacity onPress={() => setShowAttendanceModal(false)}>
+                  <TouchableOpacity onPress={() => { setShowAttendanceModal(false); setAttendanceSearchQuery(""); }}>
                     <Ionicons name="close" size={24} color={darkMode ? "#9e9e9e" : "#757575"} />
                   </TouchableOpacity>
                 </View>
+
+                {/* Search / Filter Input */}
+                {!attendanceLoading && attendanceList.length > 0 && (
+                  <TextInput
+                    style={[styles.input, { marginBottom: 10, padding: 8, height: 40 }, darkMode && { backgroundColor: "#2a2a2a", borderColor: "#444", color: "#e0e0e0" }]}
+                    placeholder="Search by Name, Reg No, or Batch..."
+                    placeholderTextColor={darkMode ? "#666" : "#999"}
+                    value={attendanceSearchQuery}
+                    onChangeText={(txt) => setAttendanceSearchQuery(txt)}
+                  />
+                )}
 
                 {attendanceLoading ? (
                   <View style={{ padding: 40, alignItems: "center" }}>
@@ -11529,13 +11541,21 @@ function MainApp() {
                       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: darkMode ? "#333" : "#ddd", paddingBottom: 8, marginBottom: 4 }}>
                         <Text style={{ flex: 2, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Name</Text>
                         <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Reg No</Text>
+                        <Text style={{ flex: 1.5, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Batch</Text>
                         <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Join Time</Text>
                         <Text style={{ flex: 1, fontWeight: 'bold', fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>Status</Text>
                       </View>
-                      {attendanceList.map((p, idx) => (
+                      {attendanceList.filter(p => {
+                        const query = (attendanceSearchQuery || '').toLowerCase();
+                        if (!query) return true;
+                        return (p.name || '').toLowerCase().includes(query) || 
+                               (p.regNo || '').toLowerCase().includes(query) || 
+                               (p.batchName || '').toLowerCase().includes(query);
+                      }).map((p, idx) => (
                         <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
                           <Text style={{ flex: 2, fontSize: 13, color: darkMode ? "#eee" : "#222" }}>{p.name || p.studentName || p.id || p.studentId}</Text>
                           <Text style={{ flex: 1, fontSize: 12, color: darkMode ? "#ccc" : "#666" }}>{p.regNo || '-'}</Text>
+                          <Text style={{ flex: 1.5, fontSize: 12, color: darkMode ? "#ccc" : "#666" }}>{p.batchName || '-'}</Text>
                           <Text style={{ flex: 1, fontSize: 12, color: darkMode ? "#ccc" : "#666" }}>
                             {p.joinedAt ? new Date(p.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
                           </Text>
@@ -11550,7 +11570,7 @@ function MainApp() {
                 )}
                 
                 <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 15 }}>
-                  <TouchableOpacity onPress={() => setShowAttendanceModal(false)} style={[styles.outlineBtn, { marginVertical: 0 }]}>
+                  <TouchableOpacity onPress={() => { setShowAttendanceModal(false); setAttendanceSearchQuery(""); }} style={[styles.outlineBtn, { marginVertical: 0 }]}>
                     <Text style={styles.outlineBtnTxt}>Close</Text>
                   </TouchableOpacity>
                 </View>
@@ -27471,9 +27491,11 @@ function MainApp() {
                                             convertToYoutube: convertYt && !!ytUrl,
                                             youtubeUrl: ytUrl || undefined
                                           })
-                                            .then(() => {
-                                              Alert.alert('Done', convertYt && ytUrl ? 'Session ended & converted to recorded class!' : 'Session ended successfully.');
-                                              loadLiveSessions();
+                                            .then(async () => {
+                                             const res = await api.get(`/live-sessions/${sessionId}/attendance`);
+                                             const raw = res.data?.data || res.data || [];
+                                             const list = Array.isArray(raw) ? raw : (raw.records || []);
+                                             setAttendanceList(list);
                                             })
                                             .catch((err: any) => {
                                               Alert.alert('Error', err?.response?.data?.message || 'Failed to end session');

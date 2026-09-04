@@ -148,7 +148,6 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
   </div>
   ` : ''}
 
-<script src="https://www.youtube.com/iframe_api"></script>
 <script>
   console.log('[Player] Secure iframe script loaded. isLive:', ${isLive});
   const CONFIG = {
@@ -176,6 +175,9 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
     }
   }
 
+  // MUST be defined before the YouTube iframe_api script tag below so that
+  // the callback is available even when the script is served from browser cache
+  // (cached scripts execute synchronously, before the rest of this block).
   function onYouTubeIframeAPIReady() {
     console.log('[Attendance] Player Loaded');
     player = new YT.Player('frame', {
@@ -197,6 +199,17 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
         'onStateChange': onPlayerStateChange
       }
     });
+  }
+</script>
+<!-- Load YouTube iframe API AFTER defining onYouTubeIframeAPIReady above.
+     This guarantees the callback exists before YouTube's script (cached or
+     not) tries to invoke it, fixing the black-screen on second video load. -->
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+  // Belt-and-suspenders: if YT was already fully initialised before the
+  // script tag above ran (e.g. very aggressive caching), fire manually.
+  if (window.YT && typeof window.YT.Player === 'function' && !player) {
+    onYouTubeIframeAPIReady();
   }
 
   function onPlayerReady(event) {
@@ -261,70 +274,21 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
   window.addEventListener('focus', resetActivity);
   
   function startHeartbeat() {
-    console.log('[Attendance] HEARTBEAT Started (Live)');
-    resetActivity();
-    setInterval(sendHeartbeat, CONFIG.attendanceHeartbeatInterval);
+    console.log('[Attendance] HEARTBEAT Disabled (Simple tracking mode)');
   }
 
   function sendHeartbeat(forceFlush = false, customEvent = 'HEARTBEAT') {
-    try {
-      if (document.visibilityState === 'hidden') isUserActive = false;
-      
-      const reqId = 'att-' + Math.random().toString(36).substring(2, 10);
-      const ev = isUserActive ? customEvent : 'BACKGROUND';
-      const payload = JSON.stringify({
-        classId: CONFIG.classId,
-        event: ev,
-        position: player && player.getCurrentTime ? Math.floor(player.getCurrentTime()) : 0,
-        timestamp: new Date().toISOString(),
-        provider: 'youtube_live',
-        requestId: reqId
-      });
-
-      console.log(\`[Attendance] [\${reqId}] \${ev === 'JOIN' ? 'JOIN Sent' : 'HEARTBEAT Fired'} (Live)\`);
-      console.log(\`[Attendance] [\${reqId}] Sending\`, payload);
-      updateDebug('event', ev);
-
-      if (forceFlush && navigator.sendBeacon) {
-        console.log(\`[Attendance] [\${reqId}] sendBeacon heartbeat:\`, payload);
-        const blob = new Blob([payload], { type: 'application/json' });
-        navigator.sendBeacon(\`\${CONFIG.apiUrl}/api/v1/attendance/event?token=\${CONFIG.jwt}\`, blob);
-      } else {
-        fetch(\`\${CONFIG.apiUrl}/api/v1/attendance/event\`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': \`Bearer \${CONFIG.jwt}\`
-          },
-          body: payload
-        }).then(res => {
-          console.log(\`[Attendance] [\${reqId}] Response \${res.status} \${res.statusText}\`);
-          updateDebug('res', res.status + ' OK');
-          console.log(\`[Attendance] [\${reqId}] Next Interval Scheduled\`);
-        }).catch(err => {
-          console.error(\`[Attendance] [\${reqId}] Fetch Error:\`, err);
-          updateDebug('res', 'Error');
-        });
-      }
-    } catch (error) {
-      console.error('[Player] sendHeartbeat error:', error);
-    }
+    // Disabled as per simplified attendance requirement
   }
 
   // Immediate sync on hidden tab
   document.addEventListener("visibilitychange", () => {
-    if (CONFIG.isLive) {
-      if (document.visibilityState === 'hidden') sendHeartbeat(false, 'BACKGROUND');
-      else sendHeartbeat(false, 'FOREGROUND');
-    }
+    // Disabled
   });
 
   // Handle Unload (Flush)
   window.addEventListener('beforeunload', () => {
-    if (CONFIG.isLive) {
-      console.log('[Attendance] Live Component Unmounted');
-      sendHeartbeat(true, 'LEAVE');
-    }
+    // Disabled
   });
 
   /* ── Fullscreen Logic ── */
@@ -412,10 +376,11 @@ export const renderPlayer = async (req: Request, res: Response) => {
     res.removeHeader('X-Frame-Options');
     const isDev = env.NODE_ENV !== 'production';
     const allowedAncestors = isDev
-      ? `'self' http://localhost:* http://127.0.0.1:* https://*.nermai.com`
-      : `'self' https://*.nermai.com`;
+      ? `'self' http://localhost:* http://127.0.0.1:* https://*.nermai.com https://nermaiiasacademy-519c8.web.app`
+      : `'self' https://*.nermai.com https://nermaiiasacademy-519c8.web.app`;
     res.setHeader('Content-Security-Policy', `frame-ancestors ${allowedAncestors}`);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -511,22 +476,12 @@ function buildZoomPlayerPage({ meetingNumber, signature, sdkKey, userName, playe
         };
 
         function startHeartbeat() {
-          setInterval(() => {
-            const payload = JSON.stringify({
-              classId: CONFIG.classId,
-              event: 'HEARTBEAT',
-              position: 0,
-              timestamp: new Date().toISOString(),
-              provider: 'zoom_live',
-              requestId: 'zoom-' + Math.random().toString(36).substring(2, 10)
-            });
-            fetch(\`\${CONFIG.apiUrl}/api/v1/attendance/event\`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': \`Bearer \${CONFIG.jwt}\` },
-              body: payload
-            }).catch(console.error);
-          }, CONFIG.attendanceHeartbeatInterval);
+          console.log('[Attendance] Zoom Heartbeat Disabled (Simple mode)');
         }
+
+        window.addEventListener('beforeunload', () => {
+          // Disabled
+        });
 
         // Watermark time
         function updateTime() { document.getElementById('wm-time').textContent = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); }

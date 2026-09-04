@@ -390,7 +390,7 @@ const SessionCard = ({
 
   // Load existing attendance record for this class on mount — for all statuses
   React.useEffect(() => {
-    const classId = cls.classId || cls.id;
+    const classId = cls.id || cls.classId;
     if (!classId) return;
     LmsAttendanceApi.getClassAttendance(classId)
       .then((res: any) => {
@@ -560,7 +560,7 @@ const SessionCard = ({
                 style={{ backgroundColor: '#16a34a', boxShadow: '0 10px 15px -3px rgba(22, 163, 74, 0.3)' }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
-                onClick={() => { setHasJoined(true); onJoin(cls.courseId || cls.id, cls.classId || cls.id); }}
+                onClick={() => { setHasJoined(true); onJoin(cls.courseId || cls.id, cls.classId || cls.id, cls); }}
               >
                 <Video size={16} />
                 {hasJoined || attRecord?.joinedAt ? 'Rejoin Class' : 'Join Now'}
@@ -790,22 +790,21 @@ export const StudentLiveClassesPage = () => {
           }
           launched = true;
           // Silent: record join timestamp for attendance
-          if (cls) {
-            LmsAttendanceApi.recordJoin(
-              cls.classId || classId,
-              cls.title || cls.className || '',
-              cls.courseId || '',
-              cls.courseName || '',
-              cls.batchName || ''
-            ).catch(() => {});
-            
-            // Also register with the real-time Live Attendance module (LAMS)
-            // It safely returns 200 if no active session is running yet.
-            const liveSessionIdForLams = cls.sessionId || cls.id || classId;
-            import('../core/services').then(({ LiveAttendanceApi }) => {
-               LiveAttendanceApi.studentJoin(liveSessionIdForLams).catch(() => {});
-            }).catch(() => {});
-          }
+          const targetCls = cls || classes.find((c: any) => (c.classId || c.id) === classId) || {};
+          LmsAttendanceApi.recordJoin(
+            targetCls.id || targetCls.classId || classId,
+            targetCls.title || targetCls.className || '',
+            targetCls.courseId || courseId || '',
+            targetCls.courseName || '',
+            targetCls.batchName || ''
+          ).catch((err) => console.error("Error recording attendance join:", err));
+          
+          // Also register with the real-time Live Attendance module (LAMS)
+          // It safely returns 200 if no active session is running yet.
+          const liveSessionIdForLams = targetCls.sessionId || targetCls.id || classId;
+          import('../core/services').then(({ LiveAttendanceApi }) => {
+             LiveAttendanceApi.studentJoin(liveSessionIdForLams).catch(() => {});
+          }).catch(() => {});
         }
 
       } catch (tokErr) {

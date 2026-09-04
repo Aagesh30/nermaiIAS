@@ -361,16 +361,73 @@ export class LmsAttendanceService {
   }
 
   // ── ADMIN: Get per-class attendance summary ───────────────────────────────
-  async getClassAttendanceSummary(classId: string) {
-    const snap = await db.collection(ATTENDANCE_COL)
-      .where('classId', '==', classId)
-      .get();
+  async getClassAttendanceSummary(paramId: string) {
+    let targetClassIds = [paramId];
+    try {
+      const lsDoc = await db.collection('live_sessions').doc(paramId).get();
+      if (lsDoc.exists && lsDoc.data()?.classId) {
+        targetClassIds.push(lsDoc.data()?.classId);
+      } else {
+        const snap = await db.collection('live_sessions')
+          .where('classId', '==', paramId)
+          .limit(1)
+          .get();
+        if (!snap.empty) {
+          targetClassIds.push(snap.docs[0].id);
+        }
+      }
+    } catch (e) {}
 
-    const records = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    targetClassIds = Array.from(new Set(targetClassIds.filter(Boolean)));
+
+    const allDocsMap = new Map<string, any>();
+    for (const cId of targetClassIds) {
+      try {
+        const snap = await db.collection(ATTENDANCE_COL)
+          .where('classId', '==', cId)
+          .get();
+        for (const d of snap.docs) {
+          if (!allDocsMap.has(d.id)) {
+            allDocsMap.set(d.id, { id: d.id, ...d.data() });
+          }
+        }
+      } catch (e) {}
+    }
+
+    const records = Array.from(allDocsMap.values());
+
+    // Fallback: check joinedParticipantsDetails on live_sessions doc
+    for (const cId of targetClassIds) {
+      try {
+        const lsDoc = await db.collection('live_sessions').doc(cId).get();
+        if (lsDoc.exists && lsDoc.data()?.joinedParticipantsDetails) {
+          const detailsMap = lsDoc.data()!.joinedParticipantsDetails;
+          for (const [stId, p] of Object.entries(detailsMap) as [string, any][]) {
+            if (p?.role === 'student' || p?.role === undefined) {
+              const alreadyRecorded = records.some(r => r.studentId === stId);
+              if (!alreadyRecorded) {
+                records.push({
+                  id: `ls_${cId}_${stId}`,
+                  studentId: stId,
+                  studentName: p.name || p.displayName || 'Student',
+                  classId: cId,
+                  className: lsDoc.data()?.title || '',
+                  joinedAt: p.joinedAt || new Date().toISOString(),
+                  attendanceSubmittedAt: p.joinedAt || new Date().toISOString(),
+                  status: 'PRESENT',
+                  regNo: p.regNo || '-',
+                  batchName: p.batchName || '-'
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
 
     // OPTIMIZATION: Batch fetch student profiles for records missing studentName
     const missingStudentIds = Array.from(new Set(
-      records.filter((r: any) => !r.studentName && r.studentId).map((r: any) => r.studentId)
+      records.filter((r: any) => (!r.studentName || r.studentName === 'Student') && r.studentId).map((r: any) => r.studentId)
     ));
 
     const profileMap = new Map<string, any>();
@@ -393,28 +450,30 @@ export class LmsAttendanceService {
       let regNo = rec.regNo || rec.username || '';
       let batchName = rec.batchName || '';
 
-      if (!studentName && rec.studentId) {
+      if ((!studentName || studentName === 'Student') && rec.studentId) {
         const profile = profileMap.get(rec.studentId);
         if (profile) {
           studentName = profile.displayName || profile.name || profile.fullName
-            || profile.studentName || profile.username || '';
-          regNo = profile.regNo || profile.username || profile.rollNumber || '';
+            || profile.studentName || profile.username || studentName;
+          regNo = profile.regNo || profile.username || profile.rollNumber || regNo;
           batchName = batchName || profile.batchName || '';
         }
       }
 
       return {
         ...rec,
-        studentName: studentName || 'Unknown',
-        regNo,
-        batchName,
+        studentName: studentName || 'Student',
+        name: studentName || rec.name || 'Student',
+        displayName: studentName || rec.displayName || 'Student',
+        regNo: regNo || '-',
+        batchName: batchName || '-',
       };
     });
 
-    const submitted = enriched.filter(r => r.attendanceSubmittedAt);
-    const pending   = enriched.filter(r => !r.attendanceSubmittedAt);
-    const present   = submitted.filter(r => r.status === 'PRESENT');
-    const absent    = submitted.filter(r => r.status === 'ABSENT');
+    const submitted = enriched.filter(r => r.attendanceSubmittedAt || r.status === 'PRESENT');
+    const pending   = enriched.filter(r => !r.attendanceSubmittedAt && r.status !== 'PRESENT');
+    const present   = enriched.filter(r => r.status === 'PRESENT');
+    const absent    = enriched.filter(r => r.status === 'ABSENT');
 
     return {
       totalJoined: enriched.length,

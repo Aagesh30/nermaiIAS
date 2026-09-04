@@ -530,14 +530,194 @@ export class LiveSessionController {
 
   static async getAttendance(req: Request, res: Response) {
     try {
-      const session = await LiveSessionService.getSession(req.params.id);
-      if (!session) {
-        return res.status(404).json({ success: false, message: 'Live session not found' });
+      const paramId = req.params.id as string;
+      const { db } = require('../../infrastructure/firebase');
+      
+      let classId = paramId;
+      let liveSessionId = paramId;
+
+      // 1. Resolve both classId and liveSessionId
+      try {
+        const liveSessionDoc = await db.collection('live_sessions').doc(paramId).get();
+        if (liveSessionDoc.exists) {
+          liveSessionId = liveSessionDoc.id;
+          classId = liveSessionDoc.data()?.classId || paramId;
+        } else {
+          const snap = await db.collection('live_sessions')
+            .where('classId', '==', paramId)
+            .limit(1)
+            .get();
+          if (!snap.empty) {
+            liveSessionId = snap.docs[0].id;
+          }
+        }
+      } catch (err) {
+        console.error('Error resolving session IDs:', err);
       }
-      const details = (session as any).joinedParticipantsDetails || {};
-      res.status(200).json({ success: true, data: Object.values(details) });
+
+      const uniqueStudentMap = new Map<string, any>();
+      const targetClassIds = Array.from(new Set([classId, liveSessionId, paramId].filter(Boolean)));
+
+      // 2. Fetch from lms_class_attendance (primary LMS join collection)
+      for (const cId of targetClassIds) {
+        try {
+          const lmsSnap = await db.collection('lms_class_attendance')
+            .where('classId', '==', cId)
+            .get();
+          
+          for (const doc of lmsSnap.docs) {
+            const data = doc.data();
+            const key = data.studentId || data.studentName || doc.id;
+            if (!uniqueStudentMap.has(key)) {
+              uniqueStudentMap.set(key, {
+                studentId: data.studentId,
+                studentName: data.studentName || 'Student',
+                name: data.studentName || 'Student',
+                displayName: data.studentName || 'Student',
+                regNo: data.regNo || '-',
+                batchName: data.batchName || '-',
+                joinedAt: data.joinedAt || data.createdAt,
+                status: data.status === 'ABSENT' ? 'ABSENT' : 'PRESENT'
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Error querying lms_class_attendance for ${cId}:`, e);
+        }
+      }
+
+      // 3. Fetch from ParticipantService (live_sessions/{id}/participants)
+      const { ParticipantService } = require('./participantService');
+      for (const sId of targetClassIds) {
+        try {
+          const participants = await ParticipantService.listParticipants(sId);
+          for (const p of participants) {
+            const key = p.studentId || p.displayName;
+            if (!uniqueStudentMap.has(key)) {
+              const isPresent = ['JOINED', 'CONNECTED', 'RECONNECTING', 'APPROVED'].includes(p.presenceStatus);
+              uniqueStudentMap.set(key, {
+                studentId: p.studentId,
+                name: p.displayName || 'Student',
+                regNo: '-',
+                batchName: '-',
+                joinedAt: p.joinedAt || p.requestedAt,
+                status: isPresent ? 'PRESENT' : (p.presenceStatus === 'LEFT' ? 'LEFT' : 'ABSENT')
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Error querying ParticipantService for ${sId}:`, e);
+        }
+      }
+
+      // 3b. Fetch from joinedParticipantsDetails directly on live_sessions doc
+      for (const sId of targetClassIds) {
+        try {
+          const lsDoc = await db.collection('live_sessions').doc(sId).get();
+          if (lsDoc.exists && lsDoc.data()?.joinedParticipantsDetails) {
+            const detailsMap = lsDoc.data().joinedParticipantsDetails;
+            for (const [stId, p] of Object.entries(detailsMap) as [string, any][]) {
+              if (p?.role === 'student' || p?.role === undefined) {
+                const key = stId || p.name;
+                if (!uniqueStudentMap.has(key)) {
+                  uniqueStudentMap.set(key, {
+                    studentId: stId,
+                    name: p.name || p.displayName || 'Student',
+                    regNo: p.regNo || '-',
+                    batchName: p.batchName || '-',
+                    joinedAt: p.joinedAt || new Date().toISOString(),
+                    status: 'PRESENT'
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`Error querying joinedParticipantsDetails for ${sId}:`, e);
+        }
+      }
+
+      // 4. Fetch from attendance_sessions (legacy/heartbeat collection)
+      for (const cId of targetClassIds) {
+        try {
+          const attSnap = await db.collection('attendance_sessions')
+            .where('classId', '==', cId)
+            .get();
+          for (const doc of attSnap.docs) {
+            const data = doc.data();
+            const key = data.userId || doc.id;
+            if (!uniqueStudentMap.has(key)) {
+              uniqueStudentMap.set(key, {
+                studentId: data.userId,
+                name: 'Student',
+                regNo: '-',
+                batchName: '-',
+                joinedAt: data.joinTime || data.createdAt,
+                status: data.status === 'ABSENT' ? 'ABSENT' : 'PRESENT'
+              });
+            }
+          }
+        } catch (e) {
+          console.error(`Error querying attendance_sessions for ${cId}:`, e);
+        }
+      }
+
+      // 5. Enrich student details (name, regNo, batchName) if missing
+      const result = Array.from(uniqueStudentMap.values());
+      const batchCache = new Map<string, string>();
+
+      for (const item of result) {
+        if (item.studentId) {
+          try {
+            let sData: any = null;
+            const studentDoc = await db.collection('students').doc(item.studentId).get();
+            if (studentDoc.exists) {
+              sData = studentDoc.data();
+            } else {
+              const pDoc = await db.collection('student_profiles').doc(item.studentId).get();
+              if (pDoc.exists) {
+                sData = pDoc.data();
+              } else {
+                const uDoc = await db.collection('users').doc(item.studentId).get();
+                if (uDoc.exists) sData = uDoc.data();
+              }
+            }
+
+            if (sData) {
+              if (!item.name || item.name === 'Student' || item.name === 'Unknown') {
+                item.name = sData.name || sData.displayName || sData.fullName || sData.studentName || item.name;
+              }
+              if (!item.regNo || item.regNo === '-') {
+                item.regNo = sData.regNo || sData.registrationNumber || sData.rollNumber || sData.username || '-';
+              }
+              if (!item.batchName || item.batchName === '-') {
+                const bId = sData.batchId || sData.batch;
+                if (bId) {
+                  if (batchCache.has(bId)) {
+                    item.batchName = batchCache.get(bId)!;
+                  } else {
+                    const bDoc = await db.collection('student_batches').doc(bId).get();
+                    if (bDoc.exists) {
+                      const bName = bDoc.data().name || bDoc.data().batchName || bId;
+                      batchCache.set(bId, bName);
+                      item.batchName = bName;
+                    } else {
+                      batchCache.set(bId, bId);
+                      item.batchName = bId;
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Error enriching student ${item.studentId}:`, err);
+          }
+        }
+      }
+
+      res.status(200).json({ success: true, data: result });
     } catch (error: any) {
-      logger.error('Error fetching attendance:', error);
+      console.error('Error fetching attendance:', error);
       res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Internal server error' });
     }
   }

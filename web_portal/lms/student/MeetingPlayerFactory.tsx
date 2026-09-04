@@ -25,18 +25,29 @@ export const MeetingPlayerFactory: React.FC<MeetingPlayerFactoryProps> = ({ clas
   const [accessData, setAccessData] = useState<any>(null);
   const [error, setError] = useState<string>('');
   const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guard against stale async responses when classId changes rapidly.
+  // Each time classId changes, a new "generation" ref is set. If the in-flight
+  // response belongs to a previous generation, it is silently discarded.
+  const fetchGenRef = useRef(0);
 
   const fetchAccess = async () => {
     if (!classId) return;
+    // Stamp this invocation with the current generation
+    fetchGenRef.current += 1;
+    const gen = fetchGenRef.current;
+
     setLoading(true);
     setError('');
     
     try {
       const response = await CourseApi.getClassPlaybackAccess(classId);
+      // Discard if a newer fetch has already started
+      if (gen !== fetchGenRef.current) return;
       const data = response.data?.data || response.data;
       setAccessData(data);
       if (onAccessLoaded) onAccessLoaded(data);
     } catch (err: any) {
+      if (gen !== fetchGenRef.current) return;
       const msg = err.response?.data?.message || 'Unable to access this video. Please try again.';
       setError(msg);
       
@@ -46,16 +57,20 @@ export const MeetingPlayerFactory: React.FC<MeetingPlayerFactoryProps> = ({ clas
         fetchTimeoutRef.current = setTimeout(fetchAccess, 10000);
       }
     } finally {
-      setLoading(false);
+      if (gen === fetchGenRef.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    // Reset state for the new classId immediately so we never show stale data
+    setAccessData(null);
+    setError('');
     fetchAccess();
     return () => {
       if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
     };
   }, [classId]);
+
 
   if (loading) {
     return <LoadingPlayer />;
