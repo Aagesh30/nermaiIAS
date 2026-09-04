@@ -3568,6 +3568,7 @@ function MainApp() {
   const [driveTestResult, setDriveTestResult] = useState<any>(null);
   const [driveSaveResult, setDriveSaveResult] = useState<any>(null);
   const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(false);
+  const [scriptCopied, setScriptCopied] = useState(false);
 
   const loadDriveConfig = async () => {
     try {
@@ -26355,34 +26356,8 @@ function MainApp() {
                             <Ionicons name={showAppsScriptGuide ? "chevron-up" : "chevron-down"} size={18} color="#757575" />
                           </TouchableOpacity>
 
-                          {showAppsScriptGuide && (
-                            <View style={{ gap: 12, marginTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee", paddingTop: 10 }}>
-                              <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", lineHeight: 16 }}>
-                                Follow these steps to deploy your Google Apps Script bypass:
-                              </Text>
-
-                              <View style={{ gap: 8, paddingLeft: 6 }}>
-                                <TouchableOpacity onPress={() => Linking.openURL("https://script.google.com")} style={{ paddingVertical: 4 }}>
-                                  <Text style={{ fontSize: 11, color: "#1976d2", textDecorationLine: "underline", fontWeight: "bold" }}>
-                                    1. Click here to open Google Apps Script dashboard (script.google.com)
-                                  </Text>
-                                </TouchableOpacity>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555" }}>
-                                  2. Click <Text style={{ fontWeight: "bold" }}>"New Project"</Text> and replace all code in <Text style={{ fontWeight: "bold" }}>Code.gs</Text> with the following script:
-                                </Text>
-                              </View>
-
-                              {/* Script Code Block */}
-                              <ScrollView style={{
-                                backgroundColor: darkMode ? "#121212" : "#f4f4f4",
-                                borderRadius: 8,
-                                padding: 10,
-                                maxHeight: 180,
-                                borderWidth: 1,
-                                borderColor: darkMode ? "#333" : "#e0e0e0"
-                              }}>
-                                <Text style={{ fontFamily: "monospace", fontSize: 9, color: darkMode ? "#81c784" : "#2e7d32" }}>
-{`function doPost(e) {
+                          {showAppsScriptGuide && (() => {
+                            const appsScriptTemplate = `function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var rootFolderId = data.rootFolderId;
@@ -26452,32 +26427,91 @@ function MainApp() {
       error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
-}`}
-                                </Text>
-                              </ScrollView>
+}`;
 
-                              <View style={{ gap: 4, marginTop: 4 }}>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                  3. Click <Text style={{ fontWeight: "bold" }}>"Deploy" &gt; "New deployment"</Text> at the top-right.
+                            return (
+                              <View style={{ gap: 12, marginTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee", paddingTop: 10 }}>
+                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", lineHeight: 16 }}>
+                                  Follow these steps to deploy your Google Apps Script bypass:
                                 </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                  4. Click the gear icon next to "Select type" and select <Text style={{ fontWeight: "bold" }}>"Web app"</Text>.
-                                </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                  5. Choose Configuration options:
-                                </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
-                                  • Execute as: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Me (your-email)"</Text>
-                                </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
-                                  • Who has access: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Anyone"</Text> (Required for API routing)
-                                </Text>
-                                <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                  6. Click <Text style={{ fontWeight: "bold" }}>"Deploy"</Text> and copy the <Text style={{ fontWeight: "bold" }}>Web app URL</Text> into the Settings panel above.
-                                </Text>
+
+                                <View style={{ gap: 8, paddingLeft: 6 }}>
+                                  <TouchableOpacity onPress={() => Linking.openURL("https://script.google.com")} style={{ paddingVertical: 4 }}>
+                                    <Text style={{ fontSize: 11, color: "#1976d2", textDecorationLine: "underline", fontWeight: "bold" }}>
+                                      1. Click here to open Google Apps Script dashboard (script.google.com)
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginVertical: 4 }}>
+                                    <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", flex: 1, minWidth: 200 }}>
+                                      2. Click <Text style={{ fontWeight: "bold" }}>"New Project"</Text> and replace all code in <Text style={{ fontWeight: "bold" }}>Code.gs</Text> with the following script:
+                                    </Text>
+                                    <TouchableOpacity
+                                      onPress={() => {
+                                        if (typeof navigator !== "undefined" && navigator.clipboard) {
+                                          navigator.clipboard.writeText(appsScriptTemplate);
+                                        }
+                                        setScriptCopied(true);
+                                        setTimeout(() => setScriptCopied(false), 3000);
+                                      }}
+                                      style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        backgroundColor: scriptCopied ? "#2e7d32" : "#e64a19",
+                                        paddingHorizontal: 14,
+                                        paddingVertical: 8,
+                                        borderRadius: 6,
+                                        shadowColor: "#000",
+                                        shadowOpacity: 0.15,
+                                        shadowRadius: 4,
+                                        elevation: 3
+                                      }}
+                                    >
+                                      <Ionicons name={scriptCopied ? "checkmark-circle" : "copy-outline"} size={16} color="#fff" />
+                                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+                                        {scriptCopied ? "Copied!" : "📋 Copy Script"}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+
+                                {/* Script Code Block */}
+                                <ScrollView style={{
+                                  backgroundColor: darkMode ? "#121212" : "#f4f4f4",
+                                  borderRadius: 8,
+                                  padding: 10,
+                                  maxHeight: 180,
+                                  borderWidth: 1,
+                                  borderColor: darkMode ? "#333" : "#e0e0e0"
+                                }}>
+                                  <Text style={{ fontFamily: "monospace", fontSize: 9, color: darkMode ? "#81c784" : "#2e7d32" }}>
+                                    {appsScriptTemplate}
+                                  </Text>
+                                </ScrollView>
+
+                                <View style={{ gap: 4, marginTop: 4 }}>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                    3. Click <Text style={{ fontWeight: "bold" }}>"Deploy" &gt; "New deployment"</Text> at the top-right.
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                    4. Click the gear icon next to "Select type" and select <Text style={{ fontWeight: "bold" }}>"Web app"</Text>.
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                    5. Choose Configuration options:
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+                                    • Execute as: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Me (your-email)"</Text>
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+                                    • Who has access: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Anyone"</Text> (Required for API routing)
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+                                    6. Click <Text style={{ fontWeight: "bold" }}>"Deploy"</Text> and copy the <Text style={{ fontWeight: "bold" }}>Web app URL</Text> into the Settings panel above.
+                                  </Text>
+                                </View>
                               </View>
-                            </View>
-                          )}
+                            );
+                          })()}
                         </View>
                       </View>
                     );

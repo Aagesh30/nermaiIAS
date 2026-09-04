@@ -591,8 +591,19 @@ export class ExaminationController {
                 [`answers.${questionId}`]: answer !== undefined ? answer : null
             };
 
-            attemptCache.delete(`attempt_${attemptId}`); // Invalidate cache so progress/resume load fresh answers map
-            await db.collection("student_attempts").doc(attemptId).update(answersUpdate);
+            // Maintain transient answers in attemptCache to throttle database writes
+            const cacheKey = `attempt_${attemptId}`;
+            const existingAnswers = attempt.answers || {};
+            existingAnswers[questionId] = answer !== undefined ? answer : null;
+            attempt.answers = existingAnswers;
+            attemptCache.set(cacheKey, attempt, 30); // 30s RAM window
+
+            // Throttle direct Firestore write: only execute write if last write was > 15s ago, or on submit
+            const lastWriteTime = attempt._lastWriteTime || 0;
+            if (Date.now() - lastWriteTime > 15000) {
+                attempt._lastWriteTime = Date.now();
+                await db.collection("student_attempts").doc(attemptId).update(answersUpdate);
+            }
 
             return res.status(200).json({
                 success: true,
