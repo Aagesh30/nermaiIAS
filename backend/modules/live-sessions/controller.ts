@@ -662,6 +662,74 @@ export class LiveSessionController {
         }
       }
 
+      // NEW: Fetch from new_attendance collection — queried LAST so PRESENT always wins
+      // getAttendanceBySession returns { totalJoined, present, absent, pending, records[] }
+      // targetClassIds contains both classId AND liveSessionId — new_attendance stores liveSessionId
+      try {
+        const { NewAttendanceService } = require('../new-attendance/service');
+        for (const cId of targetClassIds) {
+          console.log('[ADMIN-ATT-DEBUG] Querying new_attendance for id:', cId);
+          const result = await NewAttendanceService.getAttendanceBySession(cId);
+          const newRecs = Array.isArray(result) ? result : (result?.records || []);
+          console.log('[ADMIN-ATT-DEBUG] new_attendance result for', cId, '— totalJoined:', result?.totalJoined ?? result?.length, '| records:', newRecs.length);
+          for (const rec of newRecs) {
+            const key = rec.studentId || rec.id;
+            const existing = uniqueStudentMap.get(key);
+            // Always set/override — PRESENT from new_attendance beats any legacy ABSENT
+            if (!existing || existing.status === 'ABSENT') {
+              uniqueStudentMap.set(key, {
+                studentId: rec.studentId,
+                name: rec.studentName || existing?.name || 'Student',
+                regNo: rec.rollNo || existing?.regNo || '-',
+                batchName: rec.batchName || existing?.batchName || '-',
+                joinedAt: rec.joinedAt || existing?.joinedAt,
+                status: 'PRESENT'  // new_attendance records are always PRESENT
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error querying new_attendance:', e);
+      }
+
+      // FINAL DEDUP: If the same student appears under two different keys (e.g. different
+      // source IDs) — one ABSENT and one PRESENT — keep only the PRESENT entry.
+      // Also collapses two PRESENT entries (e.g. written under Firebase UID vs ERP doc ID)
+      // by keeping only the earliest-joined one.
+      // Group by normalized name; if any entry for that name is PRESENT, remove ABSENT duplicates.
+      const nameToKeys = new Map<string, string[]>();
+      for (const [key, entry] of uniqueStudentMap.entries()) {
+        const normName = (entry.name || '').toLowerCase().trim();
+        if (normName && normName !== 'student') {
+          if (!nameToKeys.has(normName)) nameToKeys.set(normName, []);
+          nameToKeys.get(normName)!.push(key);
+        }
+      }
+      for (const [, keys] of nameToKeys.entries()) {
+        if (keys.length > 1) {
+          const presentKeys = keys.filter(k => uniqueStudentMap.get(k)?.status === 'PRESENT');
+          const absentKeys  = keys.filter(k => uniqueStudentMap.get(k)?.status === 'ABSENT');
+
+          // Remove all ABSENT entries if there is at least one PRESENT
+          if (presentKeys.length > 0) {
+            for (const k of absentKeys) uniqueStudentMap.delete(k);
+          }
+
+          // If multiple PRESENT entries remain, keep only the earliest-joined one
+          if (presentKeys.length > 1) {
+            const sorted = presentKeys.sort((a, b) => {
+              const tA = new Date(uniqueStudentMap.get(a)?.joinedAt || 0).getTime();
+              const tB = new Date(uniqueStudentMap.get(b)?.joinedAt || 0).getTime();
+              return tA - tB; // ascending — earliest first
+            });
+            // Delete all but the first (earliest)
+            for (let i = 1; i < sorted.length; i++) {
+              uniqueStudentMap.delete(sorted[i]);
+            }
+          }
+        }
+      }
+
       // 5. Enrich student details (name, regNo, batchName) if missing
       const result = Array.from(uniqueStudentMap.values());
       const batchCache = new Map<string, string>();
@@ -679,19 +747,30 @@ export class LiveSessionController {
                 sData = pDoc.data();
               } else {
                 const uDoc = await db.collection('users').doc(item.studentId).get();
-                if (uDoc.exists) sData = uDoc.data();
+                if (uDoc.exists) {
+                  sData = uDoc.data();
+                  if (sData.studentId) {
+                    try {
+                      const stDoc = await db.collection('students').doc(sData.studentId).get();
+                      if (stDoc.exists) {
+                        sData = { ...stDoc.data(), ...sData };
+                        item.studentId = sData.studentId;
+                      }
+                    } catch (stErr) {}
+                  }
+                }
               }
             }
 
             if (sData) {
-              if (!item.name || item.name === 'Student' || item.name === 'Unknown') {
-                item.name = sData.name || sData.displayName || sData.fullName || sData.studentName || item.name;
+              if (!item.name || item.name === 'Student' || item.name === 'Unknown' || item.name === '-') {
+                item.name = sData.name || sData.displayName || sData.fullName || sData.studentName || sData.username || item.name;
               }
               if (!item.regNo || item.regNo === '-') {
-                item.regNo = sData.regNo || sData.registrationNumber || sData.rollNumber || sData.username || '-';
+                item.regNo = sData.regNo || sData.registrationNumber || sData.rollNumber || sData.rollNo || sData.username || '-';
               }
               if (!item.batchName || item.batchName === '-') {
-                const bId = sData.batchId || sData.batch;
+                const bId = sData.batchId || sData.batch || (Array.isArray(sData.batches) ? sData.batches[0] : null);
                 if (bId) {
                   if (batchCache.has(bId)) {
                     item.batchName = batchCache.get(bId)!;
@@ -715,7 +794,35 @@ export class LiveSessionController {
         }
       }
 
-      res.status(200).json({ success: true, data: result });
+      // Final dedup pass on enriched result
+      const finalMap = new Map<string, any>();
+      for (const item of result) {
+        const idKey = item.studentId;
+        const nameKey = (item.name || '').toLowerCase().trim();
+        const dedupeKey = (idKey && idKey !== '-') ? idKey : (nameKey && nameKey !== '-' && nameKey !== 'student' ? nameKey : item.studentId);
+        
+        if (!finalMap.has(dedupeKey)) {
+          finalMap.set(dedupeKey, item);
+        } else {
+          const existing = finalMap.get(dedupeKey);
+          if (item.status === 'PRESENT' && existing.status !== 'PRESENT') {
+            finalMap.set(dedupeKey, item);
+          } else {
+            if ((!existing.batchName || existing.batchName === '-') && item.batchName && item.batchName !== '-') {
+              existing.batchName = item.batchName;
+            }
+            if ((!existing.name || existing.name === '-' || existing.name === 'Student') && item.name && item.name !== '-' && item.name !== 'Student') {
+              existing.name = item.name;
+            }
+            if ((!existing.regNo || existing.regNo === '-') && item.regNo && item.regNo !== '-') {
+              existing.regNo = item.regNo;
+            }
+          }
+        }
+      }
+      const finalResult = Array.from(finalMap.values());
+
+      res.status(200).json({ success: true, data: finalResult });
     } catch (error: any) {
       console.error('Error fetching attendance:', error);
       res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Internal server error' });

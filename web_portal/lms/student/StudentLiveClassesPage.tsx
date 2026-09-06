@@ -389,17 +389,69 @@ const SessionCard = ({
   const [hasJoined, setHasJoined] = React.useState(false);
 
   // Load existing attendance record for this class on mount — for all statuses
+  // IMPORTANT: use sessionId first (same key recordJoin writes to Firestore)
   React.useEffect(() => {
-    const classId = cls.id || cls.classId;
-    if (!classId) return;
-    LmsAttendanceApi.getClassAttendance(classId)
-      .then((res: any) => {
-        const rec = res?.data?.data || res?.data || null;
-        setAttRecord(rec);
-        if (rec?.joinedAt) setHasJoined(true);
-      })
-      .catch(() => {});
-  }, [cls.classId, cls.id]);
+    // ── ID resolution: sessionId is the live-session doc ID; classId is the class doc ID.
+    // recordJoin writes liveSessionId = cls.sessionId || cls.id (the live-session ID).
+    // checkStudentAttendance MUST query with the same ID, so prefer sessionId.
+    const attCheckId = cls.sessionId || cls.liveSessionId || cls.id || cls.classId;
+    const fallbackClassId = cls.classId || cls.id;
+    console.log('[ATT-DEBUG] SessionCard mount — resolved IDs for attendance check:', {
+      'cls.id': cls.id,
+      'cls.classId': cls.classId,
+      'cls.sessionId': cls.sessionId,
+      'cls.liveSessionId': cls.liveSessionId,
+      'attCheckId (used for new-att)': attCheckId,
+      'fallbackClassId (used for lms-att)': fallbackClassId,
+      title: cls.title || cls.className,
+    });
+    if (!attCheckId) {
+      console.warn('[ATT-DEBUG] attCheckId is empty — skipping attendance check');
+      return;
+    }
+    console.log('[ATT-DEBUG] Calling NewAttendanceApi.checkStudentAttendance with id:', attCheckId);
+    import('../core/services').then(({ NewAttendanceApi, LmsAttendanceApi }) => {
+      NewAttendanceApi.checkStudentAttendance(attCheckId)
+        .then((res: any) => {
+          const data = res?.data?.data || res?.data || {};
+          console.log('[ATT-DEBUG] checkStudentAttendance response for', attCheckId, ':', data);
+          if (data?.joined) {
+            console.log('[ATT-DEBUG] ✅ Student HAS joined (new-attendance) — joinedAt:', data.joinedAt);
+            setHasJoined(true);
+            setAttRecord({ joinedAt: data.joinedAt || new Date().toISOString() });
+          } else {
+            console.log('[ATT-DEBUG] Not in new-attendance — falling back to LmsAttendanceApi for classId:', fallbackClassId);
+            LmsAttendanceApi.getClassAttendance(fallbackClassId)
+              .then((r: any) => {
+                const rec = r?.data?.data || r?.data || null;
+                console.log('[ATT-DEBUG] LmsAttendanceApi.getClassAttendance response:', rec);
+                setAttRecord(rec);
+                if (rec?.joinedAt) {
+                  console.log('[ATT-DEBUG] ✅ Student found in lms-attendance joinedAt:', rec.joinedAt);
+                  setHasJoined(true);
+                } else {
+                  console.log('[ATT-DEBUG] ❌ No record in either attendance system');
+                }
+              })
+              .catch((e: any) => console.warn('[ATT-DEBUG] LmsAttendanceApi.getClassAttendance failed:', e?.message));
+          }
+        })
+        .catch((e: any) => {
+          console.warn('[ATT-DEBUG] checkStudentAttendance failed:', e?.message, '— falling back to LmsAttendanceApi');
+          LmsAttendanceApi.getClassAttendance(fallbackClassId)
+            .then((r: any) => {
+              const rec = r?.data?.data || r?.data || null;
+              console.log('[ATT-DEBUG] Fallback LmsAttendanceApi response:', rec);
+              setAttRecord(rec);
+              if (rec?.joinedAt) {
+                console.log('[ATT-DEBUG] ✅ Student found in fallback lms-attendance');
+                setHasJoined(true);
+              }
+            })
+            .catch((e2: any) => console.warn('[ATT-DEBUG] Fallback LmsAttendanceApi also failed:', e2?.message));
+        });
+    });
+  }, [cls.classId, cls.id, cls.sessionId, cls.liveSessionId]);
 
   const handleGiveAttendance = async () => {
     setGivingAtt(true);
@@ -560,7 +612,7 @@ const SessionCard = ({
                 style={{ backgroundColor: '#16a34a', boxShadow: '0 10px 15px -3px rgba(22, 163, 74, 0.3)' }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
-                onClick={() => { setHasJoined(true); onJoin(cls.courseId || cls.id, cls.classId || cls.id, cls); }}
+                onClick={() => { setHasJoined(true); onJoin(cls.courseId || cls.id, cls.sessionId || cls.id || cls.classId); }}
               >
                 <Video size={16} />
                 {hasJoined || attRecord?.joinedAt ? 'Rejoin Class' : 'Join Now'}
@@ -623,28 +675,12 @@ const SessionCard = ({
           </div>
         )}
 
+        {/* ENDED — has access */}
         {isEnded && !accessDenied && (
           <div className="space-y-2 mt-2">
             <div className="w-full py-2 px-4 text-center text-xs text-red-400/80 bg-red-500/10 border border-red-500/20 rounded-lg">
               Session ended
             </div>
-            {/* Show recording section only if this class has a recording */}
-            {liveStatus === 'RECORDED_AVAILABLE' && (
-              cls.hasRecordedAccess ? (
-                // Student can watch recording — navigate to CoursePlayer
-                <button
-                  className="w-full py-2 px-4 text-center text-xs font-semibold rounded-lg border border-purple-400/50 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 hover:bg-purple-100 transition-colors flex items-center justify-center gap-2"
-                  onClick={() => onJoin(cls.courseId || cls.id, cls.classId || cls.id)}
-                >
-                  <Video size={12} /> Watch Recording
-                </button>
-              ) : (
-                // Online-only student: recording locked
-                <div className="w-full py-2 px-4 text-center text-xs font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg dark:text-amber-400 dark:bg-amber-900/30 dark:border-amber-700/50">
-                  🔒 Recording available — upgrade to Recorded batch to access
-                </div>
-              )
-            )}
             {/* Show attendance outcome if submitted */}
             {attRecord?.attendanceSubmittedAt && (
               <div className={`w-full py-2 px-4 text-center text-xs font-semibold rounded-lg border ${
@@ -720,8 +756,7 @@ export const StudentLiveClassesPage = () => {
       const res = await LiveClassesApi.getStudentLiveSessions();
       return { liveClasses: res.data?.data || res.data || [] };
     },
-    refetchInterval: false,    // Polling disabled to eliminate background database read costs
-    refetchIntervalInBackground: false,
+    refetchInterval: 15000,
     refetchOnWindowFocus: true,
   });
 
@@ -762,14 +797,21 @@ export const StudentLiveClassesPage = () => {
 
 
   const handleJoinClass = async (courseId: string | null, classId: string, cls?: any) => {
-    console.log(`[DEBUG LMS] handleJoinClass called with courseId: ${courseId}, classId: ${classId}`);
+    console.log('[ATT-DEBUG] handleJoinClass called with:', {
+      courseId,
+      classId,
+      'cls?.id': cls?.id,
+      'cls?.classId': cls?.classId,
+      'cls?.sessionId': cls?.sessionId,
+      'cls?.liveSessionId': cls?.liveSessionId,
+    });
     try {
       let launched = false;
       try {
-        console.log(`[DEBUG LMS] Requesting generateJoinToken for classId: ${classId}`);
+        console.log('[ATT-DEBUG] Calling generateJoinToken with classId:', classId);
         const tokenRes = await LiveSessionApi.generateJoinToken(classId);
-        console.log(`[DEBUG LMS] generateJoinToken response:`, tokenRes);
-        const token = tokenRes.data?.token || tokenRes.token;
+        const token = (tokenRes as any)?.data?.token || (tokenRes as any)?.token;
+        console.log('[ATT-DEBUG] generateJoinToken result — token present:', !!token, 'classId used:', classId);
         if (token) {
           const baseOrigin = typeof window !== "undefined" ? window.location.origin : "https://nermaiiasacademy-519c8.web.app";
           
@@ -789,24 +831,14 @@ export const StudentLiveClassesPage = () => {
             window.open(popupUrl, "nermai-meeting", "width=1280,height=760,menubar=no,toolbar=no,location=no,status=no,resizable=yes");
           }
           launched = true;
-          // Silent: record join timestamp for attendance
-          const targetCls = cls || classes.find((c: any) => (c.classId || c.id) === classId) || {};
-          LmsAttendanceApi.recordJoin(
-            targetCls.id || targetCls.classId || classId,
-            targetCls.title || targetCls.className || '',
-            targetCls.courseId || courseId || '',
-            targetCls.courseName || '',
-            targetCls.batchName || ''
-          ).catch((err) => console.error("Error recording attendance join:", err));
-          
-          // Also register with the real-time Live Attendance module (LAMS)
-          // It safely returns 200 if no active session is running yet.
-          const liveSessionIdForLams = targetCls.sessionId || targetCls.id || classId;
-          import('../core/services').then(({ LiveAttendanceApi }) => {
-             LiveAttendanceApi.studentJoin(liveSessionIdForLams).catch(() => {});
-          }).catch(() => {});
+          // NEW: Record in new-attendance module (1 Firestore write, fire-and-forget)
+          console.log('[ATT-DEBUG] Calling NewAttendanceApi.recordJoin with liveSessionId:', classId);
+          import('../core/services').then(({ NewAttendanceApi }) => {
+            NewAttendanceApi.recordJoin(classId)
+              .then((r: any) => console.log('[ATT-DEBUG] recordJoin SUCCESS — response:', r?.data))
+              .catch((e: any) => console.error('[ATT-DEBUG] recordJoin FAILED:', e?.response?.data || e?.message));
+          }).catch((e: any) => console.error('[ATT-DEBUG] import services failed:', e));
         }
-
       } catch (tokErr) {
         console.warn("Join token resolution failed, checking join API:", tokErr);
       }
@@ -832,11 +864,31 @@ export const StudentLiveClassesPage = () => {
       }
     } catch (err: any) {
       console.error("Failed to join session:", err);
+      // Read the structured SAPE denial reason from the backend response.
+      const reason =
+        err?.response?.data?.reason ||
+        err?.response?.data?.data?.reason ||
+        '';
+      if (reason === 'WRONG_COURSE') {
+        alert('This class belongs to a different course. You are not enrolled in this course.');
+        return;
+      }
+      if (reason === 'OFFLINE_LIVE') {
+        alert('Your batch type does not include live class access. Please contact admin to request access.');
+        return;
+      }
+      if (reason === 'TARGET_MISMATCH') {
+        alert('This class is restricted to a specific enrollment group that does not include your batch.');
+        return;
+      }
       alert(err.response?.data?.message || err.message || "Failed to join live session.");
     }
   };
 
-  const live = classes.filter((c: any) => isLiveStatus(c.liveStatus || c.status));
+  // UI safety net: never show a denied class in the Live Now tab even if backend slips.
+  const live = classes.filter(
+    (c: any) => isLiveStatus(c.liveStatus || c.status) && !c.accessDenied
+  );
 
   // Default to live tab if there are live classes and we haven't manually changed tabs
   useEffect(() => {
@@ -988,10 +1040,13 @@ export const StudentLiveClassesPage = () => {
                 ) : (
                   live.map((cls: any, i: number) => (
                     <SessionCard
-                      key={cls.classId || cls.id || cls.sessionId || i}
+                      key={i}
                       cls={cls}
                       myRequests={myRequests}
-                      onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
+                      onJoin={() => {
+                        console.log('[ATT-DEBUG] Live tab onJoin closure — cls IDs:', { 'cls.id': cls.id, 'cls.classId': cls.classId, 'cls.sessionId': cls.sessionId, 'cls.liveSessionId': cls.liveSessionId, 'cls.courseId': cls.courseId, 'passing sessionId': cls.sessionId || cls.id });
+                        handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls);
+                      }}
                       onRequestAccess={(c) => setRequestModal({ cls: c })}
                       onAttendanceSubmitted={setAttPopup}
                     />
@@ -1007,10 +1062,13 @@ export const StudentLiveClassesPage = () => {
                 ) : (
                   upcoming.map((cls: any, i: number) => (
                     <SessionCard
-                      key={cls.classId || cls.id || cls.sessionId || i}
+                      key={i}
                       cls={cls}
                       myRequests={myRequests}
-                      onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
+                      onJoin={() => {
+                        console.log('[ATT-DEBUG] Upcoming tab onJoin closure — cls IDs:', { 'cls.id': cls.id, 'cls.classId': cls.classId, 'cls.sessionId': cls.sessionId, 'cls.liveSessionId': cls.liveSessionId, 'cls.courseId': cls.courseId, 'passing sessionId': cls.sessionId || cls.id });
+                        handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls);
+                      }}
                       onRequestAccess={(c) => setRequestModal({ cls: c })}
                       onAttendanceSubmitted={setAttPopup}
                     />
@@ -1092,7 +1150,7 @@ export const StudentLiveClassesPage = () => {
                               key={cls.id}
                               cls={cls}
                               myRequests={myRequests}
-                              onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id, cls)}
+                              onJoin={() => handleJoinClass(cls.courseId, cls.sessionId || cls.id)}
                               onRequestAccess={(c) => setRequestModal({ cls: c })}
                               onAttendanceSubmitted={setAttPopup}
                             />

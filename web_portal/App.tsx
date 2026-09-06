@@ -27493,8 +27493,7 @@ function MainApp() {
                                           })
                                             .then(async () => {
                                              const res = await api.get(`/live-sessions/${sessionId}/attendance`);
-                                             const raw = res.data?.data || res.data || [];
-                                             const list = Array.isArray(raw) ? raw : (raw.records || []);
+                                             const list = Array.isArray(res) ? res : (res?.records || res?.data || []);
                                              setAttendanceList(list);
                                             })
                                             .catch((err: any) => {
@@ -27548,7 +27547,8 @@ function MainApp() {
                                           setShowAttendanceModal(true);
                                           try {
                                             const res = await api.get(`/live-sessions/${sessionId}/attendance`);
-                                            setAttendanceList(res.data?.data || res.data || []);
+                                            const attList = Array.isArray(res) ? res : (res?.records || res?.data || []);
+                                            setAttendanceList(attList);
                                           } catch (err: any) {
                                             const errorMsg = err?.response?.data?.message || err?.message || 'Failed to fetch attendance';
                                             console.error("Attendance fetch error details:", errorMsg, err?.response?.status, err?.response?.data);

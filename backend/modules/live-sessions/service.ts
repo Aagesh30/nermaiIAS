@@ -43,6 +43,15 @@ export class LiveSessionService {
     generalCache.invalidatePrefix('live_list_student_');
   }
 
+  /**
+   * Invalidate a single student's live-session list cache.
+   * Call this whenever the student's batch type or enrollment changes so the
+   * new access decision is reflected immediately (no 60s staleness window).
+   */
+  static invalidateStudentSessionsCache(userId: string): void {
+    generalCache.delete(`live_list_student_${userId}`);
+  }
+
   static async listSessions(filters?: { teacherId?: string }, user?: { userId: string; role: string }): Promise<ILiveSession[]> {
     const now = Date.now();
 
@@ -231,6 +240,7 @@ export class LiveSessionService {
     
     const rawBatchIds: string[] = [];
     let userCourseIds: string[] = [];
+    const userBatchTypes: string[] = []; // Track batch types for each enrolled batch
     
     if (studentData) {
       if (studentData.type) studentType = studentData.type;
@@ -245,6 +255,29 @@ export class LiveSessionService {
             rawBatchIds.push(id);
           }
         }
+      }
+
+      // Read multiple batches if array
+      if (Array.isArray(studentData.batches)) {
+        studentData.batches.forEach((b: string) => {
+          rawBatchIds.push(b);
+          for (const [id, name] of batchMap.entries()) {
+            if (name === b) rawBatchIds.push(id);
+          }
+        });
+      }
+
+      // Read batchModes: { [batchIdOrName]: ["offline", "online"] }
+      if (studentData.batchModes && typeof studentData.batchModes === 'object') {
+        Object.entries(studentData.batchModes).forEach(([bId, modes]: [string, any]) => {
+          rawBatchIds.push(bId);
+          for (const [id, name] of batchMap.entries()) {
+            if (name === bId) rawBatchIds.push(id);
+          }
+          if (Array.isArray(modes)) {
+            modes.forEach((m: string) => userBatchTypes.push(m.toLowerCase().trim()));
+          }
+        });
       }
       
       if (studentData.courseId) userCourseIds.push(studentData.courseId);
@@ -287,20 +320,19 @@ export class LiveSessionService {
     }
 
     const userBatchIds = Array.from(new Set(rawBatchIds.filter(Boolean)));
-    const userBatchTypes: string[] = []; // NEW: track batch types for each enrolled batch
 
     if (userBatchIds.length > 0) {
       const batchDocs = await Promise.all(userBatchIds.map((b: string) => db.collection('student_batches').doc(b).get()));
       batchDocs.forEach(d => {
         const cId = d.data()?.courseId;
         if (cId) userCourseIds.push(cId);
-        // NEW: collect batch type
+        // Collect batch type from student_batches doc
         const bType = (d.data()?.type || d.data()?.batchType || '').toLowerCase().trim();
         if (bType) userBatchTypes.push(bType);
       });
     }
 
-    // Fallback: if no batch types were found in the batch docs, fallback to studentType
+    // Fallback: if no batch types were found in batchModes or batch docs, fallback to studentType
     if (userBatchTypes.length === 0 && studentType) {
       userBatchTypes.push(studentType.toLowerCase().trim());
     }
@@ -356,33 +388,47 @@ export class LiveSessionService {
 
       // ── Permission Matrix access logic ──────────────────────────────────────────
       let hasAccess = false;
-      let hasRecordedAccess = false; // NEW: whether student can watch recording after class ends
+      let hasRecordedAccess = false;
 
       const isEnrolled = userBatchIds.length > 0 || uniqueUserCourseIds.length > 0;
 
-      // Determine batch types from actual enrolled batch documents
+      // Determine batch capabilities from actual enrolled batch documents & batchModes
       const hasOnlineBatch   = userBatchTypes.includes('online');
       const hasOfflineBatch  = userBatchTypes.includes('offline');
       const hasRecordedBatch = userBatchTypes.includes('recorded');
+      const hasKnownBatchType = hasOnlineBatch || hasOfflineBatch || hasRecordedBatch;
+      const isUnknownBatchType = !hasKnownBatchType;
 
-      // Permission Matrix:
-      // - Only Offline                 → no live, no recording (must request)
-      // - Only Online                  → live only, no recording
-      // - Online + Offline             → live only, no recording
-      // - Offline + Recorded           → live + recording
-      // - Online + Recorded            → live + recording
-      // - Only Recorded                → live + recording
-      // - No batch type (unknown/free) → treat as online (live only)
-      const isOnlyOffline = hasOfflineBatch && !hasOnlineBatch && !hasRecordedBatch;
-      const isOnlineStudent = hasOnlineBatch || studentType === 'online' || (!hasOfflineBatch && !hasRecordedBatch);
+      const canViewLive     = hasOnlineBatch || hasRecordedBatch || isUnknownBatchType;
+      const canViewRecorded = hasRecordedBatch;
 
-      // hasRecordedAccess = true only when student has a recorded batch
-      hasRecordedAccess = hasRecordedBatch;
+      // ── Class Scope Resolution ──
+      const classCourseId = cls.courseId || '';
+      const isOpenClass =
+        accessLevel === 'free' || 
+        accessLevel === 'all' || 
+        targetBatches.includes('all') || 
+        targetBatches.includes('all_free');
 
-      const targetCourses = cls.targetCourses || (cls.courseId ? [cls.courseId] : []);
-      const isTargeted = targetBatches.length > 0 || targetCourses.length > 0;
-      const matchBatch = targetBatches.length > 0 ? targetBatches.some((bId: string) => userBatchIds.includes(bId)) : false;
-      const matchCourse = targetCourses.length > 0 ? targetCourses.some((cId: string) => uniqueUserCourseIds.includes(cId)) : false;
+      // Primary course security gate: student must be enrolled in this class's course.
+      // (Bypassed only by explicit admin grant)
+      const hasCourseEnrollment =
+        !classCourseId ||
+        uniqueUserCourseIds.includes(classCourseId);
+
+      // ── Targeting Resolution ──
+      const targetCourseIds: string[] = Array.isArray(cls.targetCourses)
+        ? cls.targetCourses
+        : (cls.courseId ? [cls.courseId] : []);
+      const specificBatchTargets = targetBatches.filter(
+        (id: string) => id !== 'all' && id !== 'all_free'
+      );
+      const hasBatchTargeting  = specificBatchTargets.length > 0;
+      const hasCourseTargeting = targetCourseIds.length > 0;
+
+      const matchesTargetBatch  = !hasBatchTargeting  || specificBatchTargets.some((bId: string) => userBatchIds.includes(bId));
+      const matchesTargetCourse = !hasCourseTargeting || targetCourseIds.some((cId: string) => uniqueUserCourseIds.includes(cId));
+      const passesTargeting = matchesTargetBatch && matchesTargetCourse;
 
       // ── Grant-based override: admin approved a CLASS or higher-level grant ──
       const hasGrant = activeGrantEntityIds.has(cls.id);
@@ -390,26 +436,31 @@ export class LiveSessionService {
       if (hasGrant) {
         hasAccess = true;
         hasRecordedAccess = true; // Grant unlocks everything
-      } else if (isOnlineStudent) {
-        hasAccess = true; // Online students have access to live classes
-      } else if (
-        accessLevel === 'free' || 
-        accessLevel === 'all' || 
-        targetBatches.includes('all') || 
-        targetBatches.includes('all_free')
-      ) {
-        // Free/open class: everyone except only-offline students can join live
-        hasAccess = !isOnlyOffline;
       } else if (!isEnrolled) {
         hasAccess = false;
-      } else if (isOnlyOffline) {
-        hasAccess = false; // Only-offline must request access from admin
-      } else if (isTargeted) {
-        // Student must match either a targeted batch or targeted course
-        hasAccess = matchBatch || matchCourse;
+        hasRecordedAccess = false;
+      } else if (!hasCourseEnrollment) {
+        // Enrolled somewhere, but NOT in this class's course - strictly deny!
+        // This stops UDC students from having access to LDC classes
+        hasAccess = false;
+        hasRecordedAccess = false;
+      } else if (isOpenClass) {
+        hasAccess = canViewLive;
+        hasRecordedAccess = canViewRecorded;
+      } else if (!passesTargeting) {
+        // STEP 5: TARGET MISMATCH
+        // Fallback: If enrolled in the course AND has live capability, grant access.
+        // This handles data format mismatch e.g. student batch is "43" (name) vs class targets UUIDs.
+        if (hasCourseEnrollment && canViewLive) {
+          hasAccess = true;
+          hasRecordedAccess = canViewRecorded;
+        } else {
+          hasAccess = false;
+          hasRecordedAccess = false;
+        }
       } else {
-        // Not targeted specifically, but student is enrolled and not only-offline
-        hasAccess = true;
+        hasAccess = canViewLive;
+        hasRecordedAccess = canViewRecorded;
       }
 
       if (hasAccess) {
@@ -463,6 +514,8 @@ export class LiveSessionService {
 
         result.push({
           id: resolvedSession.sessionId || cls.id,
+          sessionId: resolvedSession.sessionId || cls.id,
+          liveSessionId: resolvedSession.sessionId || cls.id,
           classId: cls.id,
           title: cls.title,
           status: derivedStatus,
@@ -510,9 +563,15 @@ export class LiveSessionService {
             derivedStatus = 'RECORDED_AVAILABLE';
         }
 
+        // Cross-course security gate: classes from different courses MUST NOT be visible!
+        // (e.g. UDC student viewing LDC class)
+        if (!hasCourseEnrollment) {
+          continue;
+        }
+
         // Only show denied-access classes if they are still upcoming/scheduled (not ended)
-        const endedStatuses = ['ENDED', 'CANCELLED', 'EXPIRED', 'ARCHIVED', 'NOT_UPLOADED', 'RECORDED_AVAILABLE'];
-        if (!endedStatuses.includes(derivedStatus)) {
+        const requestableStatuses = ['SCHEDULED', 'DRAFT'];
+        if (requestableStatuses.includes(derivedStatus)) {
           const scheduledStartTime = cls.scheduledStartTime || null;
           const durationMinutes = cls.expectedDurationMinutes || 60;
           const courseName = courseMap.get(cls.courseId) || cls.courseName || '';
@@ -526,6 +585,8 @@ export class LiveSessionService {
           }
           result.push({
             id: resolvedSession.sessionId || cls.id,
+            sessionId: resolvedSession.sessionId || cls.id,
+            liveSessionId: resolvedSession.sessionId || cls.id,
             classId: cls.id,
             title: cls.title,
             status: derivedStatus,
@@ -650,6 +711,16 @@ export class LiveSessionService {
       }
       if (session.status === 'SCHEDULED' || session.status === 'JOINING' || session.status === 'HOST_CONNECTED') {
         return { status: session.status, waiting: true, sessionId: session.id, provider: session.provider };
+      }
+
+      // Automatically record join in new_attendance module when a student joins
+      try {
+        const { NewAttendanceService } = require('../new-attendance/service');
+        NewAttendanceService.recordJoin(session.id!, user.userId || user.id).catch((e: any) => {
+          console.warn('[LiveSessionService] joinLiveClass - auto attendance failed:', e);
+        });
+      } catch (attErr) {
+        console.warn('[LiveSessionService] joinLiveClass - could not load NewAttendanceService:', attErr);
       }
 
       return this.getJoinPayload(session.id!, user);
@@ -1628,6 +1699,18 @@ Reason:     ${verifyResult.state}
   }
 
   static async generateJoinToken(sessionId: string, user: any) {
+    // Automatically record join in new_attendance module when a student joins
+    if (user?.role === 'student') {
+      try {
+        const { NewAttendanceService } = require('../new-attendance/service');
+        NewAttendanceService.recordJoin(sessionId, user.userId || user.id).catch((e: any) => {
+          console.warn('[LiveSessionService] generateJoinToken - auto attendance failed:', e);
+        });
+      } catch (attErr) {
+        console.warn('[LiveSessionService] generateJoinToken - could not load NewAttendanceService:', attErr);
+      }
+    }
+
     const { randomBytes } = require('crypto');
     const token = randomBytes(32).toString('hex');
     

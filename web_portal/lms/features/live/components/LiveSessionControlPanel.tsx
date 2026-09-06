@@ -16,7 +16,7 @@ interface TimelineEvent {
 }
 
 export const LiveSessionControlPanel: React.FC = () => {
-  const { session, provider, zoomState, windowState, hostConnected, startSession } = useLiveSessionContext();
+  const { session, provider, zoomState, windowState, hostConnected, startSession, capabilities, role } = useLiveSessionContext();
   
   // Local transient state for Modals & Actions (Zero Orchestration State)
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -178,14 +178,16 @@ export const LiveSessionControlPanel: React.FC = () => {
             <button onClick={handleRejoin} disabled={isGeneratingToken} className="col-span-1 bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors disabled:opacity-50">
               <Play size={20} /> Rejoin
             </button>
-            {session?.capabilities?.canForceEndSession ? (
-              <button onClick={() => setShowEndConfirm(true)} className="col-span-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors">
-                <StopCircle size={20} /> Force End
-              </button>
-            ) : session?.capabilities?.canEndMeeting ? (
-              <button onClick={() => setShowEndConfirm(true)} className="col-span-1 bg-gray-800 hover:bg-gray-700 text-gray-300 p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors">
-                <StopCircle size={20} /> End Class
-              </button>
+            {(capabilities?.canEndMeeting || ['admin', 'super_admin', 'teacher', 'staff'].includes(role)) ? (
+              ['admin', 'super_admin'].includes(role) ? (
+                <button onClick={() => setShowEndConfirm(true)} className="col-span-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors">
+                  <StopCircle size={20} /> Force End
+                </button>
+              ) : (
+                <button onClick={() => setShowEndConfirm(true)} className="col-span-1 bg-gray-800 hover:bg-gray-700 text-gray-300 p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors">
+                  <StopCircle size={20} /> End Class
+                </button>
+              )
             ) : null}
             <button onClick={handleExtend} className="col-span-1 bg-gray-800 hover:bg-gray-700 text-gray-300 p-3 rounded-lg font-medium flex flex-col items-center justify-center gap-2 transition-colors">
               <Clock size={20} /> Extend +15m

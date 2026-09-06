@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LmsAttendanceApi } from '../core/services';
+import { NewAttendanceApi, LmsAttendanceApi } from '../core/services';
 import { CheckCircle, XCircle, Clock, Calendar, AlertCircle, RefreshCw } from 'lucide-react';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -135,14 +135,28 @@ export const StudentAttendancePage = () => {
   } = useQuery({
     queryKey: ['myLmsAttendance'],
     queryFn: async () => {
-      const res = await LmsAttendanceApi.getMyAttendance();
-      return res?.data?.data || res?.data || { records: [], summary: {} };
+      const res = await NewAttendanceApi.getMyAttendance();
+      const raw = res?.data?.data || res?.data || [];
+      const records = (Array.isArray(raw) ? raw : []).map((r: any) => ({
+        ...r,
+        status: 'PRESENT',
+      }));
+      return {
+        records,
+        summary: {
+          totalClasses: records.length,
+          present: records.length,
+          absent: 0,
+          pending: 0,
+        }
+      };
     },
+
     refetchOnWindowFocus: true,
   });
 
   const records: any[] = data?.records || [];
-  const summary = data?.summary || {};
+  const summary: any = data?.summary || {};
 
   const handleRequestCorrection = async (attendanceId: string, reason: string) => {
     await LmsAttendanceApi.requestCorrection(attendanceId, reason);

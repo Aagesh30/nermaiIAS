@@ -320,6 +320,21 @@ export const AccessRequestApi = {
   revokeGrant: (grantId: string, data: any) => api.post(`/access-requests/admin/grants/${grantId}/revoke`, data),
 };
 
+// ─── New Attendance API ────────────────────────────────────────────────
+export const NewAttendanceApi = {
+  recordJoin: (liveSessionId: string) =>
+    api.post('/new-attendance/join', { liveSessionId }),
+  checkStudentAttendance: (sessionId: string) =>
+    api.get(`/new-attendance/check/${sessionId}`),
+  getMyAttendance: () =>
+    api.get('/new-attendance/my-attendance'),
+  getSessionAttendance: (sessionId: string) =>
+    api.get(`/new-attendance/session/${sessionId}`),
+  getAdminRecords: (params?: any) =>
+    api.get('/new-attendance/admin/records', { params }),
+};
+
+
 // ─── LMS Attendance ──────────────────────────────────────────────────────────
 
 export const LmsAttendanceApi = {

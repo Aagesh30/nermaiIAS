@@ -190,6 +190,16 @@ function isVisibleToStudent(
 export async function getMyLmsClasses(userId: string, tenantId: string): Promise<any[]> {
   const ctx = await resolveStudentContext(userId);
 
+  // ── Pre-fetch courses for cross-course enrollment gate ───────────────────────
+  // Prevents UDC students from seeing LDC content (and vice versa) when class-level
+  // targetBatchIds are absent or too broad (e.g. empty = "all").
+  const coursesSnap = await db.collection('courses').get();
+  const courseTargetBatches = new Map<string, string[]>();
+  for (const cdoc of coursesSnap.docs) {
+    const cdata = cdoc.data() as any;
+    courseTargetBatches.set(cdoc.id, cdata.targetBatchIds || []);
+  }
+
   // Query only recorded classes from Firestore
   const classesSnap = await db.collection('classes')
     .where('classType', 'in', ['recorded', 'youtube_recorded'])
@@ -203,6 +213,21 @@ export async function getMyLmsClasses(userId: string, tenantId: string): Promise
     // Skip classes belonging to a different tenant
     if (cls.tenantId && cls.tenantId !== tenantId) continue;
 
+    // ── Course-level enrollment gate (Bug fix: cross-course contamination) ──────
+    // A student must belong to a batch that is targeted by the CLASS'S COURSE.
+    // This stops UDC students from seeing LDC recorded classes and vice versa,
+    // even when individual class targetBatchIds are missing or set to "all".
+    if (cls.courseId) {
+      const courseBatches = courseTargetBatches.get(cls.courseId) || [];
+      if (
+        courseBatches.length > 0 &&
+        !courseBatches.includes('all') &&
+        !ctx.batchIds.some(bId => courseBatches.includes(bId))
+      ) {
+        continue; // Student's batch is not enrolled in this course
+      }
+    }
+
     const targetBatchIds: string[] = cls.targetBatchIds || [];
     const accessLevel: string = cls.accessLevel || '';
 
@@ -213,20 +238,16 @@ export async function getMyLmsClasses(userId: string, tenantId: string): Promise
     let access = { allowed: false, pendingRequest: false };
     try {
       const lockStatus = await sacsService.getLockStatus(userId, cls.id, 'class', tenantId);
-      
-      let isAllowed = lockStatus.decision.allowed;
-      // Replicate old NERMAI constraint: Offline students MUST request access for recorded classes
-      // BUT for hybrid mode: if they are online/recorded in the matched batch, they should get immediate access!
-      const matchedBatchId = targetBatchIds.find(bId => ctx.batchIds.includes(bId));
-      const matchedBatchName = matchedBatchId ? ctx.batchNameMap[matchedBatchId] : null;
-      const modesForThisBatch = matchedBatchName ? (ctx.batchModes[matchedBatchName] || []) : [];
-      
-      const hasOnlineAccessForThisBatch = modesForThisBatch.includes('online') || modesForThisBatch.includes('recorded');
-      const isPurelyOfflineForThisBatch = modesForThisBatch.includes('offline') && !hasOnlineAccessForThisBatch;
-      
-      const isOfflineLegacy = ctx.studentType === 'offline' && ctx.studentTypes.length === 0;
 
-      if ((isPurelyOfflineForThisBatch || (isOfflineLegacy && !hasOnlineAccessForThisBatch)) && !lockStatus.decision.hasTemporaryGrant) {
+      let isAllowed = lockStatus.decision.allowed;
+
+      // ── Recorded-content mode gate (Bug fix: online+offline can play) ─────────
+      // Only students explicitly enrolled with the 'recorded' student type are
+      // auto-granted playback. 'online', 'offline', and combined 'online+offline'
+      // students must submit an access request — identical to pure offline behaviour.
+      // A SACS temporary grant always overrides this restriction.
+      const hasRecordedStudentType = ctx.studentTypes.includes('recorded');
+      if (!hasRecordedStudentType && !lockStatus.decision.hasTemporaryGrant) {
         isAllowed = false;
       }
 

@@ -136,7 +136,21 @@ export class StudentService {
       await this.studentRepo.update(id, data, adminId);
     }
 
+    // Invalidate live-session listing cache — batch type or enrollment change must reflect immediately
+    StudentService.invalidateLiveCache(id);
     return await this.studentRepo.findById(id);
+  }
+
+  // ── Internal helper: invalidate the student's live-session list cache ──
+  // Uses lazy require to avoid circular dependency (students → live-sessions → students).
+  private static invalidateLiveCache(userId: string): void {
+    try {
+      const { LiveSessionService } = require('../live-sessions/service');
+      LiveSessionService.invalidateStudentSessionsCache(userId);
+    } catch (e) {
+      // Non-fatal — cache will expire naturally
+      console.warn('[StudentService] Could not invalidate live-session cache:', e);
+    }
   }
 
   async promoteStudent(id: string, adminId: string, tenantId: string) {
@@ -271,6 +285,8 @@ export class StudentService {
     // Invalidate access cache — student's batchIds must update on next resource/video request
     await invalidateAccessCache(studentId);
     invalidateDashboardCache(studentId, tenantId);
+    // Invalidate live-session listing cache — batch change must reflect immediately
+    StudentService.invalidateLiveCache(studentId);
     return { success: true };
   }
 
@@ -294,6 +310,8 @@ export class StudentService {
     // Invalidate access cache — revoked batch access must take effect immediately
     await invalidateAccessCache(studentId);
     invalidateDashboardCache(studentId, tenantId);
+    // Invalidate live-session listing cache — batch removal must reflect immediately
+    StudentService.invalidateLiveCache(studentId);
     return { success: true };
   }
 

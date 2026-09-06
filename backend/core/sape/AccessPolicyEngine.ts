@@ -8,6 +8,8 @@ import { STUDENT_COLLECTIONS } from '../../modules/students/constants';
 export type DenialReason =
   | 'NOT_ENROLLED'       // Student doesn't exist in DB at all
   | 'FREE_PLAN'          // Student has no batch membership
+  | 'WRONG_COURSE'       // Student is not enrolled in the course this class belongs to
+  | 'TARGET_MISMATCH'    // Student is in the course, but not targeted for this class
   | 'ONLINE_RECORDED'    // Online student trying to access a recorded class
   | 'OFFLINE_RECORDED'   // Offline student trying to access a recorded class
   | 'OFFLINE_LIVE'       // Offline student trying to access a live class
@@ -111,30 +113,53 @@ export class AccessPolicyEngine {
       };
     }
 
-    // Load all batches and merge capabilities
+    // Load all batches and merge capabilities & enrolled courses.
+    // Capability source priority:
+    //   1. Explicit batch.capabilities object in Firestore (most precise)
+    //   2. Derived from batch.batchType string (fallback, matches listing service logic)
+    //   3. No known type at all → treat as 'online' (matrix: 'No recognized batch type → Live: ✅')
     const batchCapabilities: IBatchCapabilities[] = [];
     const batchDocs: IBatch[] = [];
+    const enrolledCourseIds = new Set<string>();
 
     for (const m of activeMemberships) {
+      if ((m as any).courseId) enrolledCourseIds.add((m as any).courseId);
       if (m.batchId) {
         const batchDoc = await db.collection(STUDENT_COLLECTIONS.BATCHES).doc(m.batchId).get();
         if (batchDoc.exists) {
           const batch = { id: batchDoc.id, ...batchDoc.data() } as IBatch;
           batchDocs.push(batch);
+          if (batch.courseId) enrolledCourseIds.add(batch.courseId);
           if (batch.capabilities) {
+            // Explicit capabilities object — highest priority.
             batchCapabilities.push(batch.capabilities);
+          } else if (batch.batchType) {
+            // No explicit capabilities → derive from batchType so SAPE matches the
+            // listing service exactly (both now use the same authoritative matrix).
+            batchCapabilities.push(AccessPolicyEngine.deriveCapsFromBatchType(batch.batchType));
           }
+          // If neither capabilities nor batchType exists, we handle it after the loop.
         }
       }
     }
 
-    const mergedCapabilities = CapabilityResolver.mergeCapabilities(batchCapabilities);
+    // 'No recognized batch type' fallback: matrix says treat as Online → Live ✅, Recorded ❌.
+    // This fires when the student has active memberships but NONE of the batch docs have
+    // a capabilities object or a known batchType.
+    const hasAnyCapability = batchCapabilities.length > 0;
+    const effectiveCapabilities = hasAnyCapability
+      ? batchCapabilities
+      : [{ canViewLive: true, canViewRecorded: false, canRequestRecorded: true,
+             canRequestTopic: true, canRequestSubject: false, canRequestCourse: false }];
+
+    const mergedCapabilities = CapabilityResolver.mergeCapabilities(effectiveCapabilities);
     // Determine "primary" batch type for context (use most permissive)
     const primaryBatchType = batchDocs.find(b => b.batchType === 'recorded')?.batchType
       ?? batchDocs.find(b => b.batchType === 'online')?.batchType
       ?? batchDocs.find(b => b.batchType === 'offline')?.batchType
       ?? null;
     const primaryBatchName = batchDocs[0]?.name;
+
 
     // 5. Check explicitly granted permissions again (for profile-enrolled students — redundant
     //    for legacy students who were handled by the early check above, but kept for safety)
@@ -177,13 +202,27 @@ export class AccessPolicyEngine {
       };
     }
 
-    // 5. Batch Capability check
+    // 5. Batch Capability & Course check
     if (entityType === 'CLASS') {
       const clsDoc = await db.collection('classes').doc(entityId).get();
       if (clsDoc.exists) {
         const cls = clsDoc.data()!;
 
-        // 5a. Specific Batch check (ERP batches / all / paid / free)
+        // 5a. Public / free content
+        if (cls.accessLevel === 'free') {
+          return { allowed: true, reason: 'Publicly visible resource', source: 'PUBLIC' };
+        }
+
+        // 5b. Course Enrollment Hard Gate (must be enrolled in the class's course)
+        if (cls.courseId && !enrolledCourseIds.has(cls.courseId)) {
+          return this.buildDeniedDecision(
+            studentId, entityType, entityId, 'WRONG_COURSE',
+            { batchType: primaryBatchType, classType: cls.classType, batchName: primaryBatchName },
+            mergedCapabilities
+          );
+        }
+
+        // 5c. Specific Batch check (ERP batches / all / paid / free)
         if (cls.accessLevel === 'batch' || (cls.targetBatchIds && cls.targetBatchIds.length > 0)) {
           const targetBatchIds: string[] = cls.targetBatchIds || [];
           const hasBatchAccess = 
@@ -194,24 +233,19 @@ export class AccessPolicyEngine {
 
           if (!hasBatchAccess) {
             return this.buildDeniedDecision(
-              studentId, entityType, entityId, 'NO_CAPABILITY',
+              studentId, entityType, entityId, 'TARGET_MISMATCH',
               { batchType: primaryBatchType, classType: cls.classType, batchName: primaryBatchName },
               mergedCapabilities
             );
           }
         }
 
-        // 5b. Public / free content
-        if (cls.accessLevel === 'free') {
-          return { allowed: true, reason: 'Publicly visible resource', source: 'PUBLIC' };
-        }
-
-        // 5b. Recorded class
+        // 5d. Recorded class
         if (cls.classType === 'youtube_recorded') {
           if (mergedCapabilities.canViewRecorded) {
             return { allowed: true, reason: 'Batch grants recorded access', source: 'BATCH' };
           }
-          // Denied — build context-aware reason
+          // Denied - build context-aware reason
           const denialReason: DenialReason =
             primaryBatchType === 'online' ? 'ONLINE_RECORDED'
             : primaryBatchType === 'offline' ? 'OFFLINE_RECORDED'
@@ -224,7 +258,7 @@ export class AccessPolicyEngine {
           );
         }
 
-        // 5c. Live class
+        // 5e. Live class
         if (cls.classType === 'youtube_live' || cls.classType === 'zoom_live' || cls.classType === 'live') {
           if (mergedCapabilities.canViewLive) {
             return { allowed: true, reason: 'Batch grants live access', source: 'BATCH' };
@@ -348,6 +382,25 @@ export class AccessPolicyEngine {
       allowedRequestScopes,
       remainingRecordedUnits,
       monthlyLimit
+    };
+  }
+  /**
+   * Derives IBatchCapabilities from a batchType string.
+   * Implements the authoritative matrix identically to the listing service:
+   *   online   → Live ✅  Recorded ❌
+   *   recorded → Live ✅  Recorded ✅
+   *   offline  → Live ❌  Recorded ❌
+   *   unknown  → treat as online (Live ✅  Recorded ❌)
+   */
+  private static deriveCapsFromBatchType(batchType: string): IBatchCapabilities {
+    const t = batchType.toLowerCase().trim();
+    return {
+      canViewLive:      t === 'online' || t === 'recorded',
+      canViewRecorded:  t === 'recorded',
+      canRequestRecorded: true,
+      canRequestTopic:    true,
+      canRequestSubject:  false,
+      canRequestCourse:   false,
     };
   }
 }

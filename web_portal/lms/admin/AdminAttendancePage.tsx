@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { LmsAttendanceApi } from '../core/services';
+import { NewAttendanceApi } from '../core/services';
+
 import {
   CheckCircle, XCircle, Clock, RefreshCw, Search, Filter,
   AlertCircle, User, BookOpen, Calendar, SlidersHorizontal,
@@ -124,7 +125,8 @@ export const AdminAttendancePage = () => {
       if (filters.status !== 'ALL') params.status = filters.status;
       if (filters.dateFrom) params.dateFrom = filters.dateFrom;
       if (filters.dateTo) params.dateTo = filters.dateTo;
-      const res = await LmsAttendanceApi.adminGetRecords(params);
+      const res = await NewAttendanceApi.getAdminRecords(params);
+
       return res?.data?.data || res?.data || [];
     },
     enabled: tab === 'records',
