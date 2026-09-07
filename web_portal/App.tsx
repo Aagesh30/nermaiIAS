@@ -16078,43 +16078,6 @@ function MainApp() {
                   </View>
                 )}
 
-                {/* Campaign notification banners for Students */}
-                {user.role === "student" && campaigns.filter((c: any) => c.sendNotification).map((cp: any) => (
-                  <TouchableOpacity
-                    key={cp.id}
-                    onPress={() => setSelectedCampaignModal(cp)}
-                    style={[styles.card, darkMode && styles.cardDark, { borderLeftWidth: 5, borderLeftColor: "#2e7d32", backgroundColor: darkMode ? "#1b2e1b" : "#e8f5e9", marginVertical: 6, borderRadius: 12 }]}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <Ionicons name="notifications-circle" size={18} color="#2e7d32" />
-                      <Text style={{ fontWeight: "bold", color: "#2e7d32", fontSize: 11, letterSpacing: 0.5 }}>ACADEMY BROADCAST</Text>
-                    </View>
-                    <Text style={{ fontWeight: "bold", color: darkMode ? "#e0e0e0" : "#212121", fontSize: 14 }}>{cp.title}</Text>
-                    <Text style={{ color: darkMode ? "#cccccc" : "#212121", fontSize: 12, marginTop: 4, lineHeight: 18 }}>
-                      {cp.notificationMessage || cp.description}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-
-                {/* Text Promo Banners for Paid Students */}
-                {user.role === "student" && campaigns.filter((c: any) => c.showInDashboard && !c.posterUrl).map((cp: any) => (
-                  <TouchableOpacity
-                    key={cp.id}
-                    onPress={() => setSelectedCampaignModal(cp)}
-                    style={[styles.card, darkMode && styles.cardDark, { borderLeftWidth: 5, borderLeftColor: "#1565c0", backgroundColor: darkMode ? "#1a2c3d" : "#e3f2fd", marginVertical: 6, borderRadius: 12 }]}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <Ionicons name="sparkles" size={15} color="#1565c0" />
-                      <Text style={{ fontWeight: "bold", color: "#1565c0", fontSize: 11, letterSpacing: 0.5 }}>SPECIAL OFFER</Text>
-                    </View>
-                    <Text style={{ fontWeight: "bold", color: darkMode ? "#90caf9" : "#1565c0", fontSize: 14 }}>{cp.title}</Text>
-                    {cp.description ? <Text style={{ color: darkMode ? "#cccccc" : "#212121", fontSize: 12, marginTop: 4, lineHeight: 18 }}>{cp.description}</Text> : null}
-                    <Text style={{ color: "#1565c0", fontWeight: "bold", fontSize: 11, marginTop: 8 }}>Explore Details &rarr;</Text>
-                  </TouchableOpacity>
-                ))}
-
-
-
                 {isAdmin ? (
                   <View style={{ marginVertical: 12 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, paddingHorizontal: 4 }}>
@@ -16125,7 +16088,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("crm"); changeCrmSub("admissions"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2a1b38" : "#f3e5f5",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2a1b38" : "#f3e5f5",
                           borderWidth: 1, borderColor: darkMode ? "#4a148c" : "#e1bee7", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16142,7 +16105,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("crm"); changeCrmSub("inquiries"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#192a3a" : "#e1f5fe",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#192a3a" : "#e1f5fe",
                           borderWidth: 1, borderColor: darkMode ? "#0277bd" : "#b3e5fc", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16152,14 +16115,14 @@ function MainApp() {
                         </View>
                         <View>
                           <Text style={{ fontWeight: "bold", fontSize: 13, color: darkMode ? "#b3e5fc" : "#01579b" }}>Inquiries</Text>
-                          <Text style={{ fontSize: 11, color: darkMode ? "#4fc3f7" : "#0288d1", marginTop: 2 }}>CRM Leads & Queries</Text>
+                          <Text style={{ fontSize: 11, color: darkMode ? "#4fc3f7" : "#0288d1", marginTop: 2 }}>CRM Leads &amp; Queries</Text>
                         </View>
                       </TouchableOpacity>
 
                       <TouchableOpacity
                         onPress={() => { setActiveTab("erp"); changeErpSub("profile-requests"); setProfileRequestsTab("requests"); }}
                         style={{
-                          width: 230, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#332219" : "#fff3e0",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#332219" : "#fff3e0",
                           borderWidth: 1, borderColor: darkMode ? "#e65100" : "#ffe0b2", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16182,7 +16145,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("erp"); changeErpSub("qr-permissions"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#19302c" : "#e0f2f1",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#19302c" : "#e0f2f1",
                           borderWidth: 1, borderColor: darkMode ? "#00695c" : "#b2dfdb", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16199,7 +16162,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("erp"); changeErpSub("edit-permissions"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#361b24" : "#fce4ec",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#361b24" : "#fce4ec",
                           borderWidth: 1, borderColor: darkMode ? "#880e4f" : "#f8bbd0", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16216,7 +16179,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("erp"); changeErpSub("fees"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1b2e1e" : "#e8f5e9",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1b2e1e" : "#e8f5e9",
                           borderWidth: 1, borderColor: darkMode ? "#1b5e20" : "#c8e6c9", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16233,7 +16196,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("lms"); changeLmsSub("live-classes"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#3e1c1c" : "#ffebee",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#3e1c1c" : "#ffebee",
                           borderWidth: 1, borderColor: darkMode ? "#c62828" : "#ff8a80", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16250,7 +16213,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("lms"); changeLmsSub("resources"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1c2a38" : "#e3f2fd",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#1c2a38" : "#e3f2fd",
                           borderWidth: 1, borderColor: darkMode ? "#1565c0" : "#90caf9", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16267,7 +16230,7 @@ function MainApp() {
                       <TouchableOpacity
                         onPress={() => { setActiveTab("lms"); changeLmsSub("lms-access"); }}
                         style={{
-                          width: 220, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2e1c38" : "#f3e5f5",
+                          width: "calc(33.33% - 8px)" as any, padding: 14, borderRadius: 12, backgroundColor: darkMode ? "#2e1c38" : "#f3e5f5",
                           borderWidth: 1, borderColor: darkMode ? "#6a1b9a" : "#ce93d8", minHeight: 90, justifyContent: "space-between"
                         }}
                       >
@@ -16891,6 +16854,42 @@ function MainApp() {
                   {getFeatureAccess(getTestFeatureKey(testSub)) !== "none" && (
                     <>
                       {renderPendingApprovalsBanner(getTestFeatureKey(testSub))}
+
+                  {testSub === "available" && getFeatureAccess("examinations") !== "none" && (() => {
+                    const now = nowTick;
+                    return (
+                      <>
+                        {!isAdmin && (
+                          <View style={{
+                            marginBottom: 20,
+                            borderRadius: 16,
+                            padding: 20,
+                            backgroundColor: darkMode ? '#1e1b1b' : '#fff5f5',
+                            borderWidth: 1,
+                            borderColor: darkMode ? '#4a1515' : '#fecaca',
+                            overflow: 'hidden',
+                          }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                  <View style={{ backgroundColor: '#b91c1c', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                                    <Text style={{ color: '#ffffff', fontSize: 10, fontWeight: '700', letterSpacing: 0.5 }}>TARGET IAS 2026</Text>
+                                  </View>
+                                  <Text style={{ color: darkMode ? '#9ca3af' : '#6b7280', fontSize: 12 }}>Academic Portal</Text>
+                                </View>
+                                <Text style={{ fontSize: 20, fontWeight: '800', color: darkMode ? '#f9fafb' : '#111827', marginBottom: 4 }}>
+                                  Welcome Back, Aspirant! 🎯
+                                </Text>
+                                <Text style={{ fontSize: 13, color: darkMode ? '#d1d5db' : '#4b5563', lineHeight: 18 }}>
+                                  Track your upcoming mock tests, review performance logs, and stay ahead in your preparation.
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {testSub === "available" && getFeatureAccess("examinations") !== "none" && (() => {
                     const now = nowTick;
@@ -19274,12 +19273,15 @@ function MainApp() {
                                                    updatedModes[b.batchName] = ["offline"]; // default mode
                                                  }
                                                  
+                                                 const primaryBatchObj = batches.find((batchObj: any) => updatedBatches.includes(batchObj.batchName));
+                                                 const autoCourse = primaryBatchObj ? primaryBatchObj.course : "";
+                                                 
                                                  setEditingStudent({
                                                    ...editingStudent,
                                                    batches: updatedBatches,
                                                    batchModes: updatedModes,
                                                    batch: updatedBatches[0] || "",
-                                                   course: b.course
+                                                   course: autoCourse
                                                  });
                                                }}
                                                style={{ flexDirection: "row", alignItems: "center", marginBottom: isSelected ? 8 : 0 }}
@@ -19454,12 +19456,15 @@ function MainApp() {
                                                    updatedModes[b.batchName] = ["offline"]; // default mode
                                                  }
                                                  
+                                                 const primaryBatchObj = batches.find((batchObj: any) => updatedBatches.includes(batchObj.batchName));
+                                                 const autoCourse = primaryBatchObj ? primaryBatchObj.course : "";
+
                                                  setNewStudent({
                                                    ...newStudent,
                                                    batches: updatedBatches,
                                                    batchModes: updatedModes,
                                                    batch: updatedBatches[0] || "",
-                                                   course: b.course
+                                                   course: autoCourse
                                                  });
                                                }}
                                                style={{ flexDirection: "row", alignItems: "center", marginBottom: isSelected ? 8 : 0 }}
@@ -23355,7 +23360,7 @@ function MainApp() {
                     <View style={{ flex: 1, padding: 16 }}>
                       <LMSProvider>
                         <Suspense fallback={<RNContainerSkeleton rows={3} darkMode={darkMode} />}>
-                          <StudentPayFeesPage />
+                          <StudentPayFeesPage darkMode={darkMode} />
                         </Suspense>
                       </LMSProvider>
                     </View>
@@ -29772,13 +29777,20 @@ function MainApp() {
                 </View>
               )}
             </View>
-            <Text style={[styles.bottomTabLabel, activeTab === "test" && styles.bottomTabLabelActive, !(activeTab === "test") && darkMode && styles.bottomTabLabelDark]}>Test Portal</Text>
+            <Text style={[styles.bottomTabLabel, activeTab === "test" && styles.bottomTabLabelActive, !(activeTab === "test") && darkMode && styles.bottomTabLabelDark]}>{isAdmin ? "Test Portal" : "Tests & Exams"}</Text>
           </TouchableOpacity>
         )}
 
         {user?.role !== "teacher" && (
           <TouchableOpacity
-            onPress={() => handleTabPress("erp", () => setActiveTab("erp"))}
+            onPress={() => handleTabPress("erp", () => {
+              setActiveTab("erp");
+              if (!isAdmin) {
+                changeErpSub("my-profile");
+                const myStudent = getLoggedInStudent(user, students);
+                if (myStudent) loadMyProfileRequest(myStudent.id);
+              }
+            })}
             style={[styles.bottomTab, activeTab === "erp" && styles.bottomTabSelected, activeTab === "erp" && darkMode && styles.sidebarTabActiveDark]}
           >
             <View style={{ position: "relative" }}>
@@ -29793,13 +29805,18 @@ function MainApp() {
                 </View>
               )}
             </View>
-            <Text style={[styles.bottomTabLabel, activeTab === "erp" && styles.bottomTabLabelActive, !(activeTab === "erp") && darkMode && styles.bottomTabLabelDark]}>ERP</Text>
+            <Text style={[styles.bottomTabLabel, activeTab === "erp" && styles.bottomTabLabelActive, !(activeTab === "erp") && darkMode && styles.bottomTabLabelDark]}>{isAdmin ? "ERP" : "My Profile"}</Text>
           </TouchableOpacity>
         )}
 
         {user?.role !== "teacher" && (
           <TouchableOpacity
-            onPress={() => handleTabPress("lms", () => setActiveTab("lms"))}
+            onPress={() => handleTabPress("lms", () => {
+              setActiveTab("lms");
+              if (!isAdmin) {
+                changeLmsSub("my-live");
+              }
+            })}
             style={[styles.bottomTab, activeTab === "lms" && styles.bottomTabSelected, activeTab === "lms" && darkMode && styles.sidebarTabActiveDark]}
           >
             <View style={{ position: "relative" }}>
@@ -29814,7 +29831,7 @@ function MainApp() {
                 </View>
               )}
             </View>
-            <Text style={[styles.bottomTabLabel, activeTab === "lms" && styles.bottomTabLabelActive, !(activeTab === "lms") && darkMode && styles.bottomTabLabelDark]}>LMS</Text>
+            <Text style={[styles.bottomTabLabel, activeTab === "lms" && styles.bottomTabLabelActive, !(activeTab === "lms") && darkMode && styles.bottomTabLabelDark]}>{isAdmin ? "LMS" : "Classes"}</Text>
           </TouchableOpacity>
         )}
 

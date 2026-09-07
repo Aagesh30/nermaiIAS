@@ -21,8 +21,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { RNContainerSkeleton } from '../components/ui/RNSkeleton';
 
-export const StudentPayFeesPage = () => {
+export const StudentPayFeesPage = ({ darkMode = false }: { darkMode?: boolean }) => {
   const { success, error } = useToast();
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -281,287 +282,290 @@ export const StudentPayFeesPage = () => {
 
   if (Platform.OS === 'web') {
     return (
-      <div className="space-y-6 max-w-4xl mx-auto">
-        <PageHeader 
-          title="Pay Fees" 
-          description="View payment terms, scan QR codes, and pay your fees." 
-        />
+      <View style={{ gap: 16, width: '100%' }}>
+        {/* Section Header */}
+        <View style={{ marginBottom: 4 }}>
+          <Text style={{ fontSize: 20, fontWeight: 'bold', color: darkMode ? '#ffffff' : '#111827' }}>Pay Fees</Text>
+          <Text style={{ fontSize: 13, color: darkMode ? '#9ca3af' : '#6b7280', marginTop: 2 }}>
+            View payment terms, scan QR codes, and pay your fees.
+          </Text>
+        </View>
 
         {loading ? (
-          <div className="flex justify-center items-center h-48">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-600 border-t-primary" />
-          </div>
+          <RNContainerSkeleton rows={2} darkMode={darkMode} />
         ) : (
-          <div className="space-y-6">
-            
-            <Card className="backdrop-blur-md overflow-hidden">
-              <CardContent className="p-8 flex flex-col items-center text-center">
-                
-                {!status?.qrCodeEnabled ? (
-                  // Not enabled view
-                  <div className="w-full space-y-6">
-                    <div className="p-4 bg-primary/10 rounded-full w-16 h-16 flex items-center justify-center mx-auto text-primary">
-                      <QrCode size={36} />
-                    </div>
-                    
-                    {status?.qrCodeRequested ? (
-                      // Request is pending
-                      <div className="space-y-4">
-                        <div className="inline-flex items-center gap-2 bg-amber-500/10 text-amber-400 px-4 py-2 rounded-full border border-amber-500/20 text-sm font-semibold">
-                          <CheckCircle2 size={16} />
-                          Request Pending Approval
-                        </div>
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Your request is sent!</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-                          The administrator has been notified. They will respond in a short time. Please refresh this page or check back later.
-                        </p>
-                        <Button 
-                          variant="outline" 
-                          onClick={fetchQrStatus}
-                          className="mt-2"
-                        >
-                          Refresh Status
-                        </Button>
-                      </div>
-                    ) : (
-                      // Idle state - can request QR code
-                      <div className="space-y-4">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Scan QR Code for Payments</h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-                          To view the administration's fee payment QR code, please request access. The code will be valid for a limited time.
-                        </p>
-                        <Button 
-                          onClick={() => setIsDialogOpen(true)}
-                          className="bg-gradient-to-r from-primary to-yellow-600 text-white font-bold px-8 py-3 rounded-xl shadow-lg hover:shadow-primary/20 transition-all flex items-center gap-2 mx-auto"
-                        >
-                          <QrCode size={18} />
-                          Fees
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  // Enabled/Active view
-                  <div className="w-full space-y-8">
-                    <div className="inline-flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 text-sm font-semibold">
-                      <CheckCircle2 size={16} />
-                      Payment QR Code Active
-                    </div>
-                    
-                    {/* Countdown & Scan Container */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-                      
-                      {/* Left block: QR code display */}
-                      <div className="space-y-4">
-                        {/* Countdown Timer */}
-                        <div className="bg-gray-50 dark:bg-surfaceHighlight/50 border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 flex items-center justify-center gap-3 max-w-xs mx-auto">
-                          <Clock className="text-primary animate-pulse" size={18} />
-                          <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                            Expires in <b className="text-primary text-base font-bold font-mono">{formatTime(timeLeft)}</b>
-                          </span>
-                        </div>
+          <View style={{ gap: 20 }}>
+            {/* Main Payment Card */}
+            <View style={{
+              backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+              borderRadius: 12,
+              padding: 24,
+              borderWidth: 1,
+              borderColor: darkMode ? '#333333' : '#e0e0e0',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.05,
+              shadowRadius: 4,
+              alignItems: 'center',
+            }}>
+              {!status?.qrCodeEnabled ? (
+                // Not Enabled State
+                <View style={{ alignItems: 'center', width: '100%', maxWidth: 500, gap: 16 }}>
+                  <View style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 32,
+                    backgroundColor: darkMode ? '#3a1a1a' : '#ffebee',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <Ionicons name="qr-code-outline" size={34} color="#c62828" />
+                  </View>
 
-                        {status?.qrCodeUrl ? (
-                          <div className="relative inline-block p-4 bg-white rounded-2xl shadow-inner border border-gray-200">
-                            <img 
-                              src={status.qrCodeUrl} 
-                              alt="Payment QR Code" 
-                              className="w-56 h-56 object-contain rounded-lg"
-                            />
-                          </div>
-                        ) : (
-                          <div className="p-8 border border-dashed border-gray-200 dark:border-gray-700 rounded-xl text-center">
-                            <AlertCircle className="mx-auto text-destructive mb-2 w-10 h-10" />
-                            <p className="text-gray-500 dark:text-gray-400">No QR code image uploaded by admin.</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Right block: Submit transaction ID or screenshot */}
-                      <div className="text-left border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-surfaceHighlight/30 p-6 rounded-2xl space-y-4">
-                        <h4 className="text-md font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                          <Send size={16} className="text-primary" />
-                          Submit Transaction Proof
-                        </h4>
-                        
-                        <form onSubmit={handleSubmitAcknowledgement} className="space-y-4">
-                          
-                          {/* Transaction ID Input */}
-                          <div>
-                            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">Transaction ID / UTR</label>
-                            <input 
-                              type="text"
-                              placeholder="Enter 12-digit transaction ID"
-                              value={transactionId}
-                              onChange={(e) => setTransactionId(e.target.value)}
-                              className="w-full bg-white dark:bg-[#1a1a2e] border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-primary"
-                            />
-                          </div>
-
-                          {/* File Upload Box */}
-                          <div>
-                            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">Upload Receipt Screenshot</label>
-                            <div className="relative border border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-3 bg-white dark:bg-[#1a1a2e] flex items-center justify-between">
-                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
-                                {screenshotUrl ? "✓ Screenshot attached (<50KB)" : "Select payment receipt image"}
-                              </span>
-                              <label className="cursor-pointer bg-primary/10 border border-primary/20 text-primary px-3 py-1 rounded text-xs font-bold hover:bg-primary/20 transition-all flex items-center gap-1">
-                                <Upload size={12} />
-                                Choose
-                                <input 
-                                  id="screenshot-upload"
-                                  type="file" 
-                                  accept="image/*"
-                                  onChange={handleScreenshotChange}
-                                  className="hidden" 
-                                />
-                              </label>
-                            </div>
-                          </div>
-
-                          {/* Image Thumbnail preview if selected */}
-                          {screenshotUrl && (
-                            <div className="flex items-center gap-2 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 text-emerald-400 text-xs font-medium">
-                              <ImageIcon size={14} />
-                              Screenshot compressed successfully to ~{(screenshotUrl.length / 1024 * 0.75).toFixed(1)} KB
-                            </div>
-                          )}
-
-                          <Button 
-                            type="submit" 
-                            className="w-full font-bold bg-primary text-white flex items-center justify-center gap-2"
-                            disabled={submittingPayment}
-                          >
-                            {submittingPayment ? 'Submitting...' : 'Submit Acknowledgement'}
-                          </Button>
-
-                        </form>
-                      </div>
-
-                    </div>
-
-                    <div className="max-w-md mx-auto text-xs text-gray-500 dark:text-gray-400 leading-relaxed space-y-1.5 border-t border-gray-200 dark:border-gray-700 pt-4">
-                      <p className="font-semibold text-gray-900 dark:text-white">Instructions:</p>
-                      <p>1. Scan the QR code, fill in your details, and finalize the payment.</p>
-                      <p>2. Paste the UTR transaction reference number or submit the compressed receipt screenshot above to request approval from the office.</p>
-                    </div>
-                  </div>
-                )}
-
-              </CardContent>
-            </Card>
-
-            {/* Payment Acknowledgement History */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-primary" />
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Transaction Acknowledgement History</h3>
-              </div>
-              
-              {paymentHistory.length === 0 ? (
-                <Card>
-                  <CardContent className="p-8 text-center text-gray-500 dark:text-gray-400 text-sm">
-                    No payment submissions found. Once you submit transaction receipts, they will list here.
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="flex flex-row gap-4 overflow-x-auto pb-4 pt-1 snap-x scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-                  {paymentHistory.map((item, idx) => {
-                    const statusColors = {
-                      pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-                      approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-                      rejected: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                    };
-
-                    return (
-                      <div 
-                        key={item.id} 
-                        className="snap-start flex-shrink-0 w-80 bg-white dark:bg-[#1a1a2e]/40 border border-gray-200 dark:border-gray-800 rounded-xl p-5 space-y-4 hover:border-primary/30 transition-all"
+                  {status?.qrCodeRequested ? (
+                    <View style={{ alignItems: 'center', gap: 10 }}>
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: darkMode ? '#3a2e1a' : '#fff8e1',
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 20,
+                        borderWidth: 1,
+                        borderColor: darkMode ? '#5a461a' : '#ffe082',
+                      }}>
+                        <Ionicons name="time-outline" size={16} color="#f57c00" />
+                        <Text style={{ color: '#f57c00', fontSize: 12, fontWeight: 'bold' }}>Request Pending Approval</Text>
+                      </View>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold', color: darkMode ? '#ffffff' : '#111111' }}>
+                        Your request is sent!
+                      </Text>
+                      <Text style={{ fontSize: 13, color: darkMode ? '#9ca3af' : '#666666', textAlign: 'center', lineHeight: 18 }}>
+                        The administrator has been notified. They will respond in a short time. Please refresh this page or check back later.
+                      </Text>
+                      <TouchableOpacity
+                        onPress={fetchQrStatus}
+                        style={{
+                          marginTop: 8,
+                          paddingHorizontal: 16,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: darkMode ? '#444' : '#d0d0d0',
+                          backgroundColor: darkMode ? '#2a2a2a' : '#f5f5f5',
+                        }}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-gray-400 dark:text-gray-500">
-                            Submission #{paymentHistory.length - idx}
-                          </span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusColors[item.status as 'pending' | 'approved' | 'rejected']}`}>
-                            {(item.status || 'pending').toUpperCase()}
-                          </span>
-                        </div>
+                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: darkMode ? '#fff' : '#333' }}>Refresh Status</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={{ alignItems: 'center', gap: 10 }}>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold', color: darkMode ? '#ffffff' : '#111111' }}>
+                        Scan QR Code for Payments
+                      </Text>
+                      <Text style={{ fontSize: 13, color: darkMode ? '#9ca3af' : '#666666', textAlign: 'center', lineHeight: 18 }}>
+                        To view the administration's fee payment QR code, please request access. The code will be valid for a limited time.
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setIsDialogOpen(true)}
+                        style={{
+                          marginTop: 8,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                          backgroundColor: '#c62828',
+                          paddingHorizontal: 20,
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Ionicons name="qr-code" size={18} color="#ffffff" />
+                        <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>Request QR Code</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                // Active QR Code State
+                <View style={{ width: '100%', gap: 20 }}>
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    alignSelf: 'center',
+                    gap: 6,
+                    backgroundColor: darkMode ? '#1a3a1a' : '#e8f5e9',
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    borderRadius: 20,
+                    borderWidth: 1,
+                    borderColor: darkMode ? '#2e5e2e' : '#c8e6c9',
+                  }}>
+                    <Ionicons name="checkmark-circle" size={16} color="#2e7d32" />
+                    <Text style={{ color: '#2e7d32', fontSize: 12, fontWeight: 'bold' }}>Payment QR Code Active</Text>
+                  </View>
 
-                        <div className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
-                          <div className="flex justify-between">
-                            <span>Sent Date:</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{formatDate(item.submittedAt)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Txn UTR:</span>
-                            <span className="font-semibold text-gray-900 dark:text-white truncate max-w-[160px]">
-                              {item.transactionId || <span className="italic text-xs">Not Entered</span>}
-                            </span>
-                          </div>
-                        </div>
+                  {/* QR Image & Form Grid */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 20, justifyContent: 'center' }}>
+                    <View style={{ alignItems: 'center', gap: 10 }}>
+                      <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: darkMode ? '#2a2a2a' : '#f5f5f5',
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                      }}>
+                        <Ionicons name="time-outline" size={16} color="#c62828" />
+                        <Text style={{ fontSize: 12, color: darkMode ? '#aaa' : '#666' }}>
+                          Expires in: <Text style={{ fontWeight: 'bold', color: '#c62828' }}>{formatTime(timeLeft)}</Text>
+                        </Text>
+                      </View>
 
-                        {item.screenshotUrl && (
-                          <div className="space-y-2">
-                            <button
-                              onClick={() => setExpandedAckId(expandedAckId === item.id ? null : item.id)}
-                              className="w-full flex items-center justify-center gap-1.5 py-2 bg-gray-100 dark:bg-surfaceHighlight/50 hover:bg-gray-200 dark:hover:bg-surfaceHighlight border border-gray-200 dark:border-gray-700 text-xs font-bold text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
-                            >
-                              <Eye size={12} />
-                              {expandedAckId === item.id ? 'Hide Receipt' : 'View Receipt'}
-                            </button>
-                            
-                            {expandedAckId === item.id && (
-                              <div className="border border-border bg-white rounded-lg p-1.5 flex justify-center items-center overflow-hidden transition-all duration-200">
-                                <img 
-                                  src={item.screenshotUrl} 
-                                  alt="Payment Receipt" 
-                                  className="max-h-40 max-w-full object-contain rounded"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                      {status?.qrCodeUrl ? (
+                        <Image
+                          source={{ uri: status.qrCodeUrl }}
+                          style={{ width: 220, height: 220, borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0' }}
+                        />
+                      ) : (
+                        <View style={{ width: 220, height: 220, borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', alignItems: 'center', justify: 'center' }}>
+                          <Ionicons name="alert-circle-outline" size={32} color="#c62828" />
+                          <Text style={{ fontSize: 12, color: '#9e9e9e', marginTop: 4 }}>No QR image uploaded.</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Submit Proof Form */}
+                    <View style={{
+                      flex: 1,
+                      minWidth: 280,
+                      backgroundColor: darkMode ? '#141414' : '#fafafa',
+                      padding: 16,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: darkMode ? '#333' : '#eee',
+                      gap: 12,
+                    }}>
+                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: darkMode ? '#fff' : '#111' }}>
+                        Submit Transaction Proof
+                      </Text>
+
+                      <View style={{ gap: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: darkMode ? '#aaa' : '#666' }}>Transaction ID / UTR</Text>
+                        <TextInput
+                          placeholder="Enter 12-digit transaction ID"
+                          placeholderTextColor={darkMode ? '#666' : '#999'}
+                          value={transactionId}
+                          onChangeText={setTransactionId}
+                          style={{
+                            backgroundColor: darkMode ? '#222' : '#fff',
+                            borderWidth: 1,
+                            borderColor: darkMode ? '#444' : '#ccc',
+                            borderRadius: 6,
+                            paddingHorizontal: 10,
+                            paddingVertical: 8,
+                            fontSize: 13,
+                            color: darkMode ? '#fff' : '#000',
+                          }}
+                        />
+                      </View>
+
+                      <View style={{ gap: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: darkMode ? '#aaa' : '#666' }}>Upload Receipt Screenshot</Text>
+                        <input
+                          id="screenshot-upload"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleScreenshotChange}
+                          style={{ fontSize: 12, color: darkMode ? '#aaa' : '#666' }}
+                        />
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => handleSubmitAcknowledgement()}
+                        disabled={submittingPayment}
+                        style={{
+                          backgroundColor: '#c62828',
+                          paddingVertical: 10,
+                          borderRadius: 8,
+                          alignItems: 'center',
+                          marginTop: 8,
+                          opacity: submittingPayment ? 0.7 : 1,
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>
+                          {submittingPayment ? 'Submitting...' : 'Submit Acknowledgement'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
               )}
-            </div>
+            </View>
 
-          </div>
+            {/* Acknowledgement History Section */}
+            <View style={{ gap: 10 }}>
+              <Text style={{ fontSize: 15, fontWeight: 'bold', color: darkMode ? '#ffffff' : '#111827' }}>
+                • Transaction Acknowledgement History
+              </Text>
+
+              {paymentHistory.length === 0 ? (
+                <View style={{
+                  backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+                  borderRadius: 12,
+                  padding: 20,
+                  borderWidth: 1,
+                  borderColor: darkMode ? '#333' : '#e0e0e0',
+                  alignItems: 'center',
+                }}>
+                  <Text style={{ fontSize: 12, color: darkMode ? '#9e9e9e' : '#757575', textAlign: 'center' }}>
+                    No payment submissions found. Once you submit transaction receipts, they will list here.
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {paymentHistory.map((item, idx) => (
+                    <View key={item.id || idx} style={{
+                      backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+                      borderRadius: 10,
+                      padding: 14,
+                      borderWidth: 1,
+                      borderColor: darkMode ? '#333' : '#e0e0e0',
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}>
+                      <View style={{ gap: 4 }}>
+                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: darkMode ? '#fff' : '#111' }}>
+                          Submission #{paymentHistory.length - idx}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: darkMode ? '#aaa' : '#666' }}>
+                          UTR: {item.transactionId || 'Not Entered'} | {formatDate(item.submittedAt)}
+                        </Text>
+                      </View>
+                      <View style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 12,
+                        backgroundColor: item.status === 'approved' ? '#e8f5e9' : item.status === 'rejected' ? '#ffebee' : '#fff8e1',
+                      }}>
+                        <Text style={{
+                          fontSize: 11,
+                          fontWeight: 'bold',
+                          color: item.status === 'approved' ? '#2e7d32' : item.status === 'rejected' ? '#c62828' : '#f57c00',
+                        }}>
+                          {(item.status || 'pending').toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
         )}
-
-        {/* Confirmation Dialog for requesting QR */}
-        <Dialog
-          isOpen={isDialogOpen}
-          onClose={() => setIsDialogOpen(false)}
-          title="Request Payment QR Code"
-          size="sm"
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-textSecondary">
-              Are you sure you want to request the fee payment QR code? 
-              Once approved, it will be visible for a limited duration set by the administrator.
-            </p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button 
-                variant="ghost" 
-                onClick={() => setIsDialogOpen(false)}
-                disabled={submitting}
-              >
-                Cancel
-              </Button>
-              <Button 
-                onClick={handleRequestQr}
-                disabled={submitting}
-                className="bg-primary text-white font-semibold"
-              >
-                {submitting ? 'Sending...' : 'Confirm'}
-              </Button>
-            </div>
-          </div>
-        </Dialog>
-      </div>
+      </View>
     );
   }
 
