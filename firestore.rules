@@ -253,6 +253,12 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // live_class_index signal doc
+    match /live_class_index/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     // ─── CATCH-ALL: Deny everything else ────────────────────
     match /{document=**} {
       allow read: if false;

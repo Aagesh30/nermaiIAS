@@ -94,6 +94,13 @@ export class LiveSyncService {
 
       await db.collection('classes').doc(cls.id).update(updatePayload);
 
+      // 🔔 Signal document update: notify student browsers via Firestore onSnapshot
+      await db.collection('live_class_index').doc('current').set({
+        updatedAt: new Date().toISOString(),
+        lastChangedClassId: cls.id,
+        lastStatus: newStatus,
+      }, { merge: true });
+
       // --- Trigger Attendance Reconciliation when ENDED ---
       if (newStatus === 'ENDED' && updatePayload.actualEndTime && cls.actualStartTime) {
         const start = new Date(cls.actualStartTime).getTime();

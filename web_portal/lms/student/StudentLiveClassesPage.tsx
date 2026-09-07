@@ -1,4 +1,6 @@
 import React, { useState, useEffect, Suspense } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../firebaseConfig';
 import { useNavigate } from 'react-router-dom';
 import { DashboardApi } from '../core/services';
 import { LiveClassesApi, LiveSessionApi, LmsAttendanceApi } from '../core/services';
@@ -756,9 +758,23 @@ export const StudentLiveClassesPage = () => {
       const res = await LiveClassesApi.getStudentLiveSessions();
       return { liveClasses: res.data?.data || res.data || [] };
     },
-    refetchInterval: 15000,
     refetchOnWindowFocus: true,
+    staleTime: 5 * 60 * 1000,
   });
+
+  // Listen to live_class_index signal doc via Firestore onSnapshot (Zero Polling)
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(db, 'live_class_index', 'current'),
+      (_snap) => {
+        queryClient.invalidateQueries({ queryKey: ['studentDashboard'] });
+      },
+      (error) => {
+        console.warn('[LiveDashboard] Firestore signal listener error:', error.code);
+      }
+    );
+    return () => unsub();
+  }, [queryClient]);
 
   // Load my access requests once
   useEffect(() => {
