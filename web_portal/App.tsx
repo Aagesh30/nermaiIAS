@@ -7785,7 +7785,9 @@ function MainApp() {
         testType: newPdfTest.testType || "mock",
         subject: newPdfTest.subject || "",
         topic: newPdfTest.topic || "",
-        testMode: newPdfTest.testMode || "online"
+        testMode: newPdfTest.testMode || "online",
+        creationMode: genMode,
+        targetLanguages: genMode === "file" ? ["English", "Tamil"] : (targetLangs && targetLangs.length > 0 ? targetLangs : ["English", "Tamil"])
       });
       if (newPdfTest.subject) {
         setKnownSubjects(prev => prev.includes(newPdfTest.subject) ? prev : [...prev, newPdfTest.subject]);
@@ -9250,7 +9252,12 @@ function MainApp() {
         const remSec = res?.remainingTime ?? (res?.durationMinutes ? res.durationMinutes * 60 : 3600);
         setTimeLeft(remSec);
         setExamEndTime(Date.now() + remSec * 1000);
-        setActiveAttempt(res);
+        const attemptRes = res?.data || res;
+        setActiveAttempt({
+          ...attemptRes,
+          targetLanguages: test?.targetLanguages || attemptRes?.targetLanguages,
+          creationMode: test?.creationMode || attemptRes?.creationMode
+        });
 
         // Load questions: prefer local draft if available, otherwise fetch from server
         let qList = localDraft?.questions || [];
@@ -9296,7 +9303,11 @@ function MainApp() {
       if (!attemptData || !attemptData.attemptId) {
         throw new Error("Invalid response from server. Could not start test.");
       }
-      setActiveAttempt(attemptData);
+      setActiveAttempt({
+        ...attemptData,
+        targetLanguages: test?.targetLanguages || attemptData?.targetLanguages,
+        creationMode: test?.creationMode || attemptData?.creationMode
+      });
 
       const remSec = attemptData.remainingTime ?? (attemptData.durationMinutes * 60);
       setTimeLeft(remSec);
@@ -14555,7 +14566,7 @@ function MainApp() {
             <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT INSTRUCTIONS</Text>
             {[
               { icon: "🚫", text: "Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to the admin." },
-              { icon: "🚫", text: "Screen recording, screenshots, and PrintScreen shortcuts are blocked during the exam." },
+              { icon: "🚫", text: "Screen recording, screenshots, and PrintScreen shortcuts are disabled during the exam." },
               { icon: "🚫", text: "Right-click, Copy, and Cut operations are disabled — text cannot be extracted from the exam." },
               { icon: "✅", text: "You MUST visit ALL questions before the Submit button becomes available." },
               { icon: "⏰", text: "The exam auto-submits when the timer reaches 00:00. Ensure you click Submit before time runs out." },
@@ -14600,58 +14611,112 @@ function MainApp() {
 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {/* Top Bar Language View Selector Custom Dropdown */}
-            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, position: "relative", zIndex: 99999 }}>
-              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#ffffff", marginRight: 6 }}>文A View:</Text>
-              <View style={{ position: "relative" }}>
-                <TouchableOpacity
-                  onPress={() => setShowLangDropdown(!showLangDropdown)}
-                  style={{ backgroundColor: "#ffffff", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <Text style={{ fontSize: 11, fontWeight: "bold", color: "#c62828" }}>
-                    {(() => {
-                      const mapping = {
-                        "en-ta": "English + Tamil 🇮🇳",
-                        "en": "English Only 🇬🇧",
-                        "ta": "Tamil Only 🇮🇳",
-                        "en-ml": "English + Malayalam 🇮🇳",
-                        "ml": "Malayalam Only 🇮🇳",
-                        "en-te": "English + Telugu 🇮🇳",
-                        "te": "Telugu Only 🇮🇳"
-                      };
-                      return mapping[testLangFilter || "en-ta"];
-                    })()}
-                  </Text>
-                  <Ionicons name={showLangDropdown ? "chevron-up" : "chevron-down"} size={12} color="#c62828" />
-                </TouchableOpacity>
+            {(() => {
+              // Determine allowed target languages
+              let allowedLangs: string[] = [];
+              if (activeAttempt?.creationMode === "file") {
+                allowedLangs = ["English", "Tamil"];
+              } else if (activeAttempt?.targetLanguages && Array.isArray(activeAttempt.targetLanguages) && activeAttempt.targetLanguages.length > 0) {
+                allowedLangs = activeAttempt.targetLanguages;
+              } else {
+                // Dynamically detect from attemptQuestions for legacy tests
+                const hasEn = attemptQuestions.some((q: any) => !!(q.questionEn || q.question || q.options?.[0]));
+                const hasTa = attemptQuestions.some((q: any) => !!(q.questionTa || q.optionsTa?.[0]));
+                const hasMl = attemptQuestions.some((q: any) => !!(q.questionMl || q.optionsMl?.[0]));
+                const hasTe = attemptQuestions.some((q: any) => !!(q.questionTe || q.optionsTe?.[0]));
+                
+                if (hasEn) allowedLangs.push("English");
+                if (hasTa) allowedLangs.push("Tamil");
+                if (hasMl) allowedLangs.push("Malayalam");
+                if (hasTe) allowedLangs.push("Telugu");
+              }
 
-                {showLangDropdown && (
-                  <View style={{ position: "absolute", top: 32, right: 0, backgroundColor: "#ffffff", borderRadius: 8, padding: 4, width: 190, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5, zIndex: 100000 }}>
-                    {[
-                      { key: "en-ta", label: "English + Tamil 🇮🇳" },
-                      { key: "en", label: "English Only 🇬🇧" },
-                      { key: "ta", label: "Tamil Only 🇮🇳" },
-                      { key: "en-ml", label: "English + Malayalam 🇮🇳" },
-                      { key: "ml", label: "Malayalam Only 🇮🇳" },
-                      { key: "en-te", label: "English + Telugu 🇮🇳" },
-                      { key: "te", label: "Telugu Only 🇮🇳" }
-                    ].map(l => (
-                      <TouchableOpacity
-                        key={l.key}
-                        onPress={() => {
-                          setTestLangFilter(l.key);
-                          setShowLangDropdown(false);
-                        }}
-                        style={{ padding: 8, borderRadius: 4, backgroundColor: (testLangFilter || "en-ta") === l.key ? "#ffebee" : "transparent" }}
-                      >
-                        <Text style={{ fontSize: 11, fontWeight: "bold", color: (testLangFilter || "en-ta") === l.key ? "#c62828" : "#333" }}>
-                          {l.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+              if (allowedLangs.length === 0) {
+                allowedLangs = ["English", "Tamil"];
+              }
+
+              const allowedSet = new Set(allowedLangs.map((l: string) => String(l).trim()));
+              const isEn = allowedSet.has("English");
+              const isTa = allowedSet.has("Tamil");
+              const isMl = allowedSet.has("Malayalam");
+              const isTe = allowedSet.has("Telugu");
+
+              const allPossibleOptions = [
+                { key: "en-ta", label: "English + Tamil 🇮🇳", req: isEn && isTa },
+                { key: "en", label: "English Only 🇬🇧", req: isEn },
+                { key: "ta", label: "Tamil Only 🇮🇳", req: isTa },
+                { key: "en-ml", label: "English + Malayalam 🇮🇳", req: isEn && isMl },
+                { key: "ml", label: "Malayalam Only 🇮🇳", req: isMl },
+                { key: "en-te", label: "English + Telugu 🇮🇳", req: isEn && isTe },
+                { key: "te", label: "Telugu Only 🇮🇳", req: isTe }
+              ];
+
+              const availableOptions = allPossibleOptions.filter(o => o.req);
+              const validOptionKeys = availableOptions.map(o => o.key);
+
+              // Fallback testLangFilter if current selected option is not valid for this test
+              const activeLangKey = validOptionKeys.includes(testLangFilter) ? testLangFilter : (validOptionKeys[0] || "en-ta");
+
+              const mapping: Record<string, string> = {
+                "en-ta": "English + Tamil 🇮🇳",
+                "en": "English Only 🇬🇧",
+                "ta": "Tamil Only 🇮🇳",
+                "en-ml": "English + Malayalam 🇮🇳",
+                "ml": "Malayalam Only 🇮🇳",
+                "en-te": "English + Telugu 🇮🇳",
+                "te": "Telugu Only 🇮🇳"
+              };
+
+              return (
+                <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, position: "relative", zIndex: 99999 }}>
+                  <Text style={{ fontSize: 11, fontWeight: "bold", color: "#ffffff", marginRight: 6 }}>文A View:</Text>
+                  <View style={{ position: "relative" }}>
+                    <TouchableOpacity
+                      onPress={() => setShowLangDropdown(!showLangDropdown)}
+                      style={{ backgroundColor: "#ffffff", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6 }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: "bold", color: "#c62828" }}>
+                        {mapping[activeLangKey] || "Select View"}
+                      </Text>
+                      <Ionicons name={showLangDropdown ? "chevron-up" : "chevron-down"} size={12} color="#c62828" />
+                    </TouchableOpacity>
+
+                    {showLangDropdown && (
+                      <View style={{
+                        position: "absolute",
+                        top: 34,
+                        left: -30,
+                        backgroundColor: "#ffffff",
+                        borderRadius: 8,
+                        padding: 4,
+                        width: 185,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.25,
+                        shadowRadius: 6,
+                        elevation: 10,
+                        zIndex: 100000
+                      }}>
+                        {availableOptions.map(l => (
+                          <TouchableOpacity
+                            key={l.key}
+                            onPress={() => {
+                              setTestLangFilter(l.key);
+                              setShowLangDropdown(false);
+                            }}
+                            style={{ padding: 8, borderRadius: 4, backgroundColor: activeLangKey === l.key ? "#ffebee" : "transparent" }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: "bold", color: activeLangKey === l.key ? "#c62828" : "#333" }}>
+                              {l.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
-            </View>
+                </View>
+              );
+            })()}
 
             {/* Info button */}
             <TouchableOpacity

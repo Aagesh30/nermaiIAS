@@ -231,6 +231,8 @@ export class ExaminationController {
                     attemptId,
                     testId,
                     testTitle: test.title || "",
+                    creationMode: test.creationMode || "file",
+                    targetLanguages: test.targetLanguages || (test.creationMode === "file" ? ["English", "Tamil"] : ["English", "Tamil"]),
                     durationMinutes,
                     endTime: finalEndTime.toISOString(),
                     remainingTime: remainingSeconds
@@ -343,6 +345,9 @@ export class ExaminationController {
                 data: {
                     attemptId,
                     testId: attempt.testId,
+                    testTitle: test.title || "",
+                    creationMode: test.creationMode || "file",
+                    targetLanguages: test.targetLanguages || (test.creationMode === "file" ? ["English", "Tamil"] : ["English", "Tamil"]),
                     status: "started",
                     endTime: new Date(endTimeMs).toISOString(),
                     remainingTime,

@@ -539,7 +539,9 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 published,
                 targetAudience,
                 targetBatch,
-                requireFeedback
+                requireFeedback,
+                creationMode,
+                targetLanguages
             } = req.body;
 
             if (!title) {
@@ -781,6 +783,10 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 targetAudience: targetAudience || "all",
                 targetBatch: targetBatch || "",
                 requireFeedback: !!requireFeedback,
+                creationMode: creationMode || "file",
+                targetLanguages: Array.isArray(targetLanguages) && targetLanguages.length > 0
+                    ? targetLanguages
+                    : (creationMode === "file" ? ["English", "Tamil"] : ["English", "Tamil"]),
                 allowOfflineDirectly: !!req.body.allowOfflineDirectly,
                 allowOfflineDirectlyBatches: Array.isArray(req.body.allowOfflineDirectlyBatches) ? req.body.allowOfflineDirectlyBatches : [],
                 isDeleted: false,
