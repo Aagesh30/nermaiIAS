@@ -343,8 +343,8 @@ export const requireViewerJwt = (req: Request, res: Response, next: NextFunction
 
     req.user = {
       userId: decoded.userId,
-      tenantId: 'default_tenant',
-      role: 'student',
+      tenantId: decoded.tenantId || 'default_tenant',
+      role: decoded.role || 'student',
       programMemberships: [],
     };
     

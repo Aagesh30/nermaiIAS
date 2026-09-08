@@ -274,7 +274,12 @@ export class AccessRulesService {
         return { allowed: true };
 
       case 'batch': {
-        const hasBatch = accessCtx.batchIds.some(id => perm.targetBatchIds.includes(id));
+        const hasBatch = 
+          !perm.targetBatchIds ||
+          perm.targetBatchIds.length === 0 ||
+          perm.targetBatchIds.includes('all') ||
+          (perm.targetBatchIds.includes('all_paid') && accessCtx.accessProfiles.includes('batch')) ||
+          accessCtx.batchIds.some(id => perm.targetBatchIds.some(tb => String(tb).trim().toLowerCase() === String(id).trim().toLowerCase()));
         if (!hasBatch) {
           return {
             allowed: false,
@@ -297,7 +302,12 @@ export class AccessRulesService {
       }
 
       case 'mixed': {
-        const hasBatch   = accessCtx.batchIds.some(id => perm.targetBatchIds.includes(id));
+        const hasBatch = 
+          !perm.targetBatchIds ||
+          perm.targetBatchIds.length === 0 ||
+          perm.targetBatchIds.includes('all') ||
+          (perm.targetBatchIds.includes('all_paid') && accessCtx.accessProfiles.includes('batch')) ||
+          accessCtx.batchIds.some(id => perm.targetBatchIds.some(tb => String(tb).trim().toLowerCase() === String(id).trim().toLowerCase()));
         const hasStudent = perm.targetStudentIds.includes(userId);
         if (!hasBatch && !hasStudent) {
           return {

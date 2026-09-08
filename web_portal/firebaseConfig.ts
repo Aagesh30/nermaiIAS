@@ -63,10 +63,18 @@ export const auth = (() => {
 export const handleFirebaseGoogleSignIn = async (fallbackName?: string, fallbackPhone?: string) => {
   console.log("[DEBUG] handleFirebaseGoogleSignIn initiated", { fallbackName, fallbackPhone });
   if (Platform.OS === "web") {
+    try {
+      await auth.signOut();
+    } catch (e) {
+      console.log("[DEBUG] signOut prior to Google login error:", e);
+    }
     const provider = new GoogleAuthProvider();
     provider.addScope("email");
     provider.addScope("profile");
-    provider.setCustomParameters({ prompt: 'select_account' });
+    provider.setCustomParameters({ 
+      prompt: 'select_account',
+      auth_type: 'rerequest'
+    });
     
     console.log("[DEBUG] Platform is web. Triggering signInWithPopup");
     
@@ -82,6 +90,15 @@ export const handleFirebaseGoogleSignIn = async (fallbackName?: string, fallback
       };
     } catch (error: any) {
       console.error("[DEBUG] Firebase Google Sign-In error:", error);
+      if (
+        error?.code === "auth/popup-blocked" || 
+        error?.code === "auth/popup-closed-by-user" || 
+        (typeof window !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
+      ) {
+        console.log("[DEBUG] Popup blocked or mobile browser detected. Triggering signInWithRedirect fallback...");
+        await signInWithRedirect(auth, provider);
+        return null;
+      }
       throw error;
     }
   } else {

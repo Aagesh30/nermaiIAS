@@ -1,4 +1,4 @@
-import { storage } from '../../infrastructure/firebase';
+import { storage, db } from '../../infrastructure/firebase';
 import { redisClient } from '../../infrastructure/redis';
 import { AppError } from '../errors/AppError';
 import { randomUUID } from 'crypto';
@@ -41,17 +41,36 @@ export class AccessEngine {
     // ─── Step 1: Load Access Context (Redis cache or Firestore fallback) ───────
     const accessCtx = await getAccessContext(userId, tenantId);
 
+    // ─── Step 1.5: Admin / Staff Bypass ─────────────────────────────────────────
+    const effectiveRole = (tokenPayload?.role || params.tokenPayload?.role || accessCtx.role || '').toLowerCase();
+    const isAdminOrStaff = ['super_admin', 'admin', 'teacher', 'staff', 'creator'].includes(effectiveRole) || ['super_admin', 'admin', 'teacher', 'staff', 'creator'].includes((accessCtx.role || '').toLowerCase());
+
+    // ─── Step 1.8: Check SACS Temporary Grant Override ───────────────────────────
+    let hasTemporaryGrant = false;
+    try {
+      const permDoc = await storage ? null : null; // soft check
+      const permSnap = await db.collection('entity_permissions').doc(resourceId).get();
+      if (permSnap.exists) {
+        const grants = permSnap.data()?.temporaryGrants || [];
+        const now = new Date();
+        const activeGrant = grants.find((g: any) => g.studentId === userId && (!g.expiresAt || new Date(g.expiresAt) > now));
+        if (activeGrant) hasTemporaryGrant = true;
+      }
+    } catch (e) { }
+
     // ─── Step 2: Evaluate Visibility Rule ────────────────────────────────────
-    if (visibilityRule) {
+    if (visibilityRule && !isAdminOrStaff && !hasTemporaryGrant) {
       const { visibility, targetBatchIds, targetPrograms, targetStudentIds } = visibilityRule;
 
       switch (visibility) {
         case 'batch': {
           const hasBatchAccess = 
-            targetBatchIds?.includes('all') ||
-            (targetBatchIds?.includes('all_paid') && accessCtx.accessProfiles.includes('batch')) ||
-            (targetBatchIds?.includes('all_free') && !accessCtx.accessProfiles.includes('batch')) ||
-            accessCtx.batchIds.some(id => targetBatchIds?.includes(id));
+            !targetBatchIds ||
+            targetBatchIds.length === 0 ||
+            targetBatchIds.includes('all') ||
+            (targetBatchIds.includes('all_paid') && (accessCtx.accessProfiles.includes('batch') || accessCtx.batchIds.length > 0)) ||
+            (targetBatchIds.includes('all_free') && !accessCtx.accessProfiles.includes('batch') && accessCtx.batchIds.length === 0) ||
+            accessCtx.batchIds.some(id => targetBatchIds.some(tb => String(tb).trim().toLowerCase() === String(id).trim().toLowerCase()));
 
           if (!hasBatchAccess) {
             throw new AppError('Access denied: You are not in the assigned batch for this resource', 403);
@@ -60,8 +79,9 @@ export class AccessEngine {
         }
 
         case 'premium': {
-          // Any student who has paid and joined any batch gets premium access
-          if (!accessCtx.accessProfiles.includes('batch')) {
+          // Any student who has paid or is enrolled in any batch gets premium access
+          const isEnrolledStudent = accessCtx.accessProfiles.includes('batch') || accessCtx.batchIds.length > 0 || accessCtx.role === 'student';
+          if (!isEnrolledStudent) {
             throw new AppError('Access denied: You must be enrolled in a batch to access premium resources', 403);
           }
           break;
@@ -76,6 +96,11 @@ export class AccessEngine {
 
         case 'restricted': {
           throw new AppError('Access denied: This resource is restricted', 403);
+        }
+
+        case 'guest': {
+          // Guest-only resource
+          break;
         }
 
         // 'public' — no check needed

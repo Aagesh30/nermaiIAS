@@ -118,8 +118,8 @@ export function ResourcesPage() {
                       <td className="p-4 text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">{res.mimeType === 'application/pdf' ? 'PDF' : 'DOC'}</td>
                       <td className="p-4">
                         <div className="flex items-center gap-1.5 text-xs bg-gray-100 dark:bg-gray-800 w-max px-2.5 py-1 rounded-md text-gray-700 dark:text-gray-300 font-semibold border border-gray-200 dark:border-transparent">
-                          {res.visibility === 'public' ? <Globe className="w-3.5 h-3.5 text-emerald-500" /> : <Lock className="w-3.5 h-3.5 text-amber-500" />}
-                          <span className="capitalize">{res.visibility}</span>
+                          {(res.visibility === 'public' || res.visibility === 'guest') ? <Globe className="w-3.5 h-3.5 text-emerald-500" /> : <Lock className="w-3.5 h-3.5 text-amber-500" />}
+                          <span className="capitalize">{res.visibility === 'guest' ? 'Guest Only' : res.visibility === 'public' ? 'Guest + Enroll' : res.visibility === 'premium' ? 'Enroll Only' : res.visibility === 'batch' ? 'Enroll Batch Wise' : res.visibility}</span>
                         </div>
                       </td>
                       <td className="p-4 text-sm text-gray-600 dark:text-gray-400">{res.categoryId || 'General'}</td>

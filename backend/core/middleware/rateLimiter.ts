@@ -24,21 +24,14 @@ export const globalRateLimiter = rateLimit({
   skip: (req) => req.method === 'OPTIONS', // Skip CORS preflight
 });
 
-// Login/auth endpoints — strict, IP-based (user not yet authenticated)
-export const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 login attempts per IP per 15 minutes
-  message: 'Too many authentication attempts. Please try again in 15 minutes.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  store,
-});
+// Login/auth endpoints — disabled rate limiter to allow unlimited login attempts
+export const authRateLimiter = (_req: any, _res: any, next: any) => next();
 
 // Token refresh / validation — per IP
 export const tokenRateLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30,
-  message: 'Too many token validation attempts.',
+  max: 60,
+  message: { success: false, message: 'Too many token validation attempts.' },
   standardHeaders: true,
   legacyHeaders: false,
   store,

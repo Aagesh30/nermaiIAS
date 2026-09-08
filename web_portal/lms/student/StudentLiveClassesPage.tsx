@@ -480,7 +480,13 @@ const SessionCard = ({
 
   const formatBatchName = (name: string) => {
     if (!name) return '';
-    return name.split(',').map(b => b.trim().length > 20 ? b.trim().substring(0, 8) + '...' : b.trim()).join(', ');
+    return name.split(',').map(b => {
+      const trimmed = b.trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
+        return `Batch (${trimmed.substring(0, 8)})`;
+      }
+      return trimmed.length > 20 ? trimmed.substring(0, 8) + '...' : trimmed;
+    }).join(', ');
   };
 
   // Color theming

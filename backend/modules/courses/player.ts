@@ -47,92 +47,291 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
   <title>${esc(videoTitle)} — Nermai IAS</title>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
+    html, body {
       background: #000;
-      width: 100vw; height: 100vh;
+      width: 100%; height: 100%;
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
-      -moz-user-select: none;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
       cursor: default;
     }
-    #player-container {
-      width: 100%; height: 100%;
-      position: absolute; top: 0; left: 0; z-index: 1;
+    #player-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
     }
     #frame {
       width: 100%; height: 100%;
       border: none; display: block;
+      pointer-events: none; /* Disables all native YouTube clicks & hover popups */
     }
+    /* Pointer & Interaction Shield over YouTube Iframe */
+    #interaction-shield {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 10;
+      background: transparent;
+      cursor: pointer;
+    }
+    /* Big Center Play Button Overlay */
+    #center-play-overlay {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 20;
+      width: 68px; height: 68px;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: auto;
+    }
+    #center-play-overlay:hover {
+      transform: translate(-50%, -50%) scale(1.1);
+      background: rgba(15, 23, 42, 0.95);
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+    #center-play-overlay.playing {
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* End Screen Overlay to completely cover YouTube related videos */
+    #end-screen-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 25;
+      background: rgba(15, 23, 42, 0.96);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      padding: 24px;
+      text-align: center;
+    }
+    #end-screen-overlay.active {
+      display: flex;
+    }
+    #end-screen-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #f8fafc;
+    }
+    #end-screen-sub {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .replay-btn {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 9999px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+      transition: all 0.2s;
+    }
+    .replay-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
+    }
+    /* Custom Controls Bar */
+    #custom-controls {
+      position: absolute;
+      bottom: 0; left: 0;
+      width: 100%;
+      height: 68px;
+      z-index: 30;
+      background: #0f172a;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    #custom-controls.hidden {
+      opacity: 0;
+      transform: translateY(100%);
+      pointer-events: none;
+    }
+    .ctrl-btn {
+      background: transparent;
+      border: none;
+      color: #e2e8f0;
+      font-size: 16px;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #38bdf8;
+    }
+    #ctrl-time {
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 90px;
+    }
+    /* Scrubber Track */
+    .scrubber-container {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      height: 24px;
+      cursor: pointer;
+    }
+    .scrubber-track {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+    }
+    .scrubber-fill {
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      background: #38bdf8;
+      border-radius: 2px;
+      width: 0%;
+    }
+    .scrubber-input {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      opacity: 0;
+      cursor: pointer;
+      margin: 0;
+    }
+    /* Volume group */
+    .vol-container {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .vol-slider {
+      width: 60px;
+      height: 4px;
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+    /* Watermark inside controls */
+    .secure-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748b;
+      letter-spacing: 0.6px;
+      user-select: none;
+      flex-shrink: 0;
+    }
+    @media (max-width: 640px) {
+      .vol-slider, .secure-badge { display: none; }
+      #ctrl-time { font-size: 11px; min-width: 70px; }
+      #custom-controls { padding: 0 10px; gap: 8px; }
+    }
+    /* Floating Watermark */
     #watermark {
-      position: absolute; bottom: 0; left: 0; z-index: 9999; width: 100px; height: 55px;
-      padding: 4px 8px; border-radius: 0 8px 0 0; background: rgba(15, 23, 42, 1);
-      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-      border-top: 1px solid rgba(255,255,255,0.1); border-right: 1px solid rgba(255,255,255,0.1);
-      display: flex; flex-direction: column; justify-content: center; pointer-events: auto;
+      position: absolute; top: 12px; right: 12px; z-index: 40;
+      padding: 4px 10px; border-radius: 6px; background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.1); pointer-events: none;
+      display: flex; flex-direction: column; text-align: right;
     }
-    #watermark p { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.3; text-shadow: 1px 1px 3px rgba(0,0,0,0.9); white-space: nowrap; margin: 0; overflow: hidden; text-overflow: ellipsis; }
-    .wm-name  { font-size: 10px; font-weight: 700; color: #FFD54F; letter-spacing: .2px; }
-    .wm-email { font-size: 8px; color: #b0bec5; }
-    .wm-time  { font-size: 8px; color: #eceff1; margin-top: 1px; }
-    #fs-btn {
-      position: absolute; bottom: 16px; right: 16px; z-index: 10000; background: rgba(0,0,0,0.6);
-      color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; width: 44px; height: 44px;
-      font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s;
-    }
-    #fs-btn:hover { background: rgba(0,0,0,0.9); }
+    .wm-name  { font-size: 10px; font-weight: 700; color: #FFD54F; }
+    .wm-email { font-size: 8px; color: #94a3b8; }
     ${isLive ? `
     #live-badge {
       position: fixed; top: 14px; left: 14px; background: #E53935; color: #fff; padding: 3px 12px; border-radius: 4px;
-      font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 1.2px; z-index: 10000;
+      font-family: Arial, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 1.2px; z-index: 40;
       animation: pulse 1.8s ease-in-out infinite; pointer-events: none;
     }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.65} }
     ` : ''}
-    ${env.NODE_ENV !== 'production' ? `
-    #debug-fab {
-      position: absolute; bottom: 80px; right: 16px; width: 40px; height: 40px;
-      background: #E53935; border-radius: 20px; z-index: 99998;
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.2);
-    }
-    #debug-fab span { font-size: 18px; line-height: 1; }
-    #debug-sheet {
-      position: absolute; bottom: 0; left: 0; width: 100%;
-      background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px);
-      color: #0f0; font-family: monospace; font-size: 12px; padding: 16px;
-      border-top: 1px solid #444; z-index: 99999; transform: translateY(100%);
-      transition: transform 0.3s ease-out; pointer-events: none;
-    }
-    #debug-sheet.open { transform: translateY(0); pointer-events: auto; }
-    #debug-sheet-close { position: absolute; top: 8px; right: 12px; color: #fff; cursor: pointer; font-size: 16px; font-weight: bold; }
-    #debug-sheet h3 { color: #fff; margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid #444; padding-bottom: 4px; }
-    #debug-sheet .row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px dotted rgba(255,255,255,0.1); padding-bottom: 2px;}
-    #debug-sheet span { color: #fff; }
-    #debug-btn { margin-top: 12px; background: #667EEA; color: #fff; border: none; padding: 8px; width: 100%; cursor: pointer; border-radius: 4px; font-weight: bold; }
-    ` : ''}
-    .block-top-left { position: absolute; top: 0; left: 0; width: 70%; height: 80px; z-index: 100; background: transparent; }
-    .block-top-right { position: absolute; top: 0; right: 0; width: 30%; height: 80px; z-index: 100; background: transparent; }
-    .block-bottom-right { position: absolute; bottom: 0; right: 0; width: 180px; height: 80px; z-index: 100; background: transparent; pointer-events: none;}
   </style>
 </head>
 <body>
-  <div class="block-top-left"></div>
-  <div class="block-top-right"></div>
-  <div class="block-bottom-right"></div>
-
-  <button id="fs-btn" title="Toggle Fullscreen">⛶</button>
-
-  <div id="player-container">
+  <div id="player-wrapper">
     <div id="frame"></div>
-  </div>
+    <div id="interaction-shield"></div>
+    
+    <div id="center-play-overlay">▶</div>
 
-  <div id="watermark">
-    <p class="wm-name">${esc(studentName)}</p>
-    <p class="wm-email">${esc(studentEmail)}</p>
-    <p class="wm-time" id="wm-time"></p>
+    <div id="end-screen-overlay">
+      <div id="end-screen-title">${esc(videoTitle)}</div>
+      <div id="end-screen-sub">Lesson Completed</div>
+      <button class="replay-btn" id="replay-btn">
+        <span>🔄</span> Replay Video
+      </button>
+    </div>
+
+    <div id="watermark">
+      <span class="wm-name">${esc(studentName)}</span>
+      <span class="wm-email">${esc(studentEmail)}</span>
+    </div>
+
+    ${isLive ? '<div id="live-badge">&#128308; LIVE</div>' : ''}
+
+    <div id="custom-controls">
+      <button class="ctrl-btn" id="ctrl-play-btn" title="Play/Pause">▶</button>
+      <span id="ctrl-time">0:00 / 0:00</span>
+      <div class="scrubber-container">
+        <div class="scrubber-track">
+          <div class="scrubber-fill" id="scrubber-fill"></div>
+        </div>
+        <input type="range" id="ctrl-scrubber" class="scrubber-input" min="0" max="100" value="0" step="0.1" />
+      </div>
+      <div class="vol-container">
+        <button class="ctrl-btn" id="ctrl-mute-btn" title="Mute/Unmute">🔊</button>
+        <input type="range" id="ctrl-vol-slider" class="vol-slider" min="0" max="100" value="100" />
+      </div>
+      <div class="secure-badge">
+        <span>🛡️</span> <span>NERMAI SECURE</span>
+      </div>
+      <button class="ctrl-btn" id="ctrl-fs-btn" title="Toggle Fullscreen">⛶</button>
+    </div>
   </div>
-  ${isLive ? '<div id="live-badge">&#128308; LIVE</div>' : ''}
   ${/* env.NODE_ENV !== 'production' */ false ? `
   <div id="debug-fab" title="Attendance Diagnostics"><span>🐞</span></div>
   <div id="debug-sheet">
@@ -186,6 +385,8 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
       videoId: CONFIG.videoId,
       playerVars: {
         autoplay: 1,
+        controls: 0,
+        disablekb: 1,
         modestbranding: 1,
         rel: 0,
         iv_load_policy: 3,
@@ -212,7 +413,139 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
     onYouTubeIframeAPIReady();
   }
 
+  // --- Custom Controls & Interaction Logic ---
+  let isSeeking = false;
+  let hideControlsTimer = null;
+
+  function formatTime(sec) {
+    if (!sec || isNaN(sec)) return '0:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function updateScrubber() {
+    if (!player || typeof player.getCurrentTime !== 'function' || isSeeking) return;
+    const current = player.getCurrentTime() || 0;
+    const duration = player.getDuration() || 0;
+    const fill = document.getElementById('scrubber-fill');
+    const input = document.getElementById('ctrl-scrubber');
+    const timeEl = document.getElementById('ctrl-time');
+    
+    if (duration > 0) {
+      const pct = (current / duration) * 100;
+      if (fill) fill.style.width = pct + '%';
+      if (input) input.value = pct;
+      if (timeEl) timeEl.textContent = formatTime(current) + ' / ' + formatTime(duration);
+    }
+  }
+
+  function initCustomControls() {
+    const wrapper = document.getElementById('player-wrapper');
+    const shield = document.getElementById('interaction-shield');
+    const centerBtn = document.getElementById('center-play-overlay');
+    const playBtn = document.getElementById('ctrl-play-btn');
+    const scrubber = document.getElementById('ctrl-scrubber');
+    const fill = document.getElementById('scrubber-fill');
+    const muteBtn = document.getElementById('ctrl-mute-btn');
+    const volSlider = document.getElementById('ctrl-vol-slider');
+    const fsBtn = document.getElementById('ctrl-fs-btn');
+    const controls = document.getElementById('custom-controls');
+    const endOverlay = document.getElementById('end-screen-overlay');
+    const replayBtn = document.getElementById('replay-btn');
+
+    function togglePlay() {
+      if (!player) return;
+      const state = player.getPlayerState();
+      if (state === YT.PlayerState.PLAYING) {
+        player.pauseVideo();
+      } else {
+        if (endOverlay) endOverlay.classList.remove('active');
+        player.playVideo();
+      }
+    }
+
+    if (shield) shield.addEventListener('click', togglePlay);
+    if (centerBtn) centerBtn.addEventListener('click', togglePlay);
+    if (playBtn) playBtn.addEventListener('click', togglePlay);
+    if (replayBtn) replayBtn.addEventListener('click', () => {
+      if (endOverlay) endOverlay.classList.remove('active');
+      if (player) { player.seekTo(0, true); player.playVideo(); }
+    });
+
+    if (scrubber) {
+      scrubber.addEventListener('input', (e) => {
+        isSeeking = true;
+        const pct = parseFloat(e.target.value);
+        if (fill) fill.style.width = pct + '%';
+      });
+      scrubber.addEventListener('change', (e) => {
+        if (!player || typeof player.getDuration !== 'function') return;
+        const duration = player.getDuration() || 0;
+        const pct = parseFloat(e.target.value);
+        const targetTime = duration * (pct / 100);
+        player.seekTo(targetTime, true);
+        isSeeking = false;
+      });
+    }
+
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        if (!player) return;
+        if (player.isMuted()) {
+          player.unMute();
+          muteBtn.textContent = '🔊';
+        } else {
+          player.mute();
+          muteBtn.textContent = '🔇';
+        }
+      });
+    }
+
+    if (volSlider) {
+      volSlider.addEventListener('input', (e) => {
+        if (!player) return;
+        const val = parseInt(e.target.value, 10);
+        player.setVolume(val);
+        if (val === 0) player.mute(); else player.unMute();
+        if (muteBtn) muteBtn.textContent = val === 0 ? '🔇' : '🔊';
+      });
+    }
+
+    if (fsBtn) {
+      fsBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+          if (wrapper.requestFullscreen) wrapper.requestFullscreen();
+          else if (wrapper.webkitRequestFullscreen) wrapper.webkitRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+      });
+    }
+
+    // Auto-hide controls on mouse idle
+    function resetHideControlsTimer() {
+      if (controls) controls.classList.remove('hidden');
+      if (hideControlsTimer) clearTimeout(hideControlsTimer);
+      hideControlsTimer = setTimeout(() => {
+        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+          if (controls) controls.classList.add('hidden');
+        }
+      }, 3500);
+    }
+
+    if (wrapper) {
+      wrapper.addEventListener('mousemove', resetHideControlsTimer);
+      wrapper.addEventListener('touchstart', resetHideControlsTimer);
+    }
+
+    setInterval(updateScrubber, 250);
+  }
+
   function onPlayerReady(event) {
+    initCustomControls();
+
     if (CONFIG.isDev) {
       updateDebug('class', CONFIG.classId);
       updateDebug('provider', CONFIG.isLive ? 'youtube_live' : 'youtube_recorded');
@@ -248,7 +581,22 @@ function buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName,
   }
 
   function onPlayerStateChange(event) {
-    if (CONFIG.isLive) return;
+    const centerBtn = document.getElementById('center-play-overlay');
+    const playBtn = document.getElementById('ctrl-play-btn');
+    const endOverlay = document.getElementById('end-screen-overlay');
+
+    if (event.data === YT.PlayerState.PLAYING) {
+      if (centerBtn) centerBtn.classList.add('playing');
+      if (playBtn) playBtn.textContent = '❚❚';
+      if (endOverlay) endOverlay.classList.remove('active');
+    } else if (event.data === YT.PlayerState.PAUSED) {
+      if (centerBtn) centerBtn.classList.remove('playing');
+      if (playBtn) playBtn.textContent = '▶';
+    } else if (event.data === YT.PlayerState.ENDED) {
+      if (centerBtn) centerBtn.classList.remove('playing');
+      if (playBtn) playBtn.textContent = '▶';
+      if (endOverlay) endOverlay.classList.add('active');
+    }
   }
 
   function saveProgress(forceFlush = false, customEvent = 'PLAY') {
@@ -391,7 +739,31 @@ export const renderPlayer = async (req: Request, res: Response) => {
       resumePosition = state.watchTimeSeconds;
     }
 
-    res.send(buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName, studentEmail, isLive, resumePosition }));
+    let finalStudentName = studentName;
+    let finalStudentEmail = studentEmail;
+
+    if (!finalStudentName || finalStudentName === 'Student' || !finalStudentEmail) {
+      try {
+        const { db } = require('../../infrastructure/firebase');
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+          const uData = userDoc.data();
+          finalStudentName = uData.displayName || uData.name || uData.fullName || (uData.firstName ? `${uData.firstName} ${uData.lastName || ''}`.trim() : '') || finalStudentName || 'Student';
+          finalStudentEmail = uData.email || finalStudentEmail || '';
+        } else {
+          const studentDoc = await db.collection('students').doc(userId).get();
+          if (studentDoc.exists) {
+            const sData = studentDoc.data();
+            finalStudentName = sData.displayName || sData.name || sData.fullName || (sData.firstName ? `${sData.firstName} ${sData.lastName || ''}`.trim() : '') || finalStudentName || 'Student';
+            finalStudentEmail = sData.email || finalStudentEmail || '';
+          }
+        }
+      } catch (e) {
+        logger.warn('[Player] User lookup fallback error:', e);
+      }
+    }
+
+    res.send(buildPlayerPage({ videoId, classId, playerJwt, videoTitle, studentName: finalStudentName, studentEmail: finalStudentEmail, isLive, resumePosition }));
   } catch (error) {
     logger.error('Error rendering secure player:', error);
     res.status(500).send('Internal Server Error');

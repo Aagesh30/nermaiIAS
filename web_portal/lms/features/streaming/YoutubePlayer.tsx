@@ -44,11 +44,19 @@ export const YoutubePlayer: React.FC<YoutubePlayerProps> = ({ playerToken, class
     }
   };
 
+  const getBackendUrl = () => {
+    if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+        return `http://${hostname}:5000`;
+      }
+      return `https://${hostname}`;
+    }
+    return 'https://nermaiiasacademy-519c8.web.app';
+  };
+  const API_BASE_URL = getBackendUrl();
   const deviceId = 'mobile-device-id';
   const sessionId = 'mobile-session-id';
-  const rawApiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1';
-  const API_BASE_URL = rawApiUrl.replace('/api/v1', '');
-
   const iframeSrc = `${API_BASE_URL}/player/${playerToken}?deviceId=${deviceId}&sessionId=${sessionId}`;
 
   return (

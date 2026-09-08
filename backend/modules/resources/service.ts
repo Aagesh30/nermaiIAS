@@ -43,11 +43,11 @@ export class ResourceService {
           buffer: file.buffer,
           subPath: 'LMS/Resources'
         });
-        if (driveResult && driveResult.previewUrl) {
-          finalStoragePath = driveResult.previewUrl;
+        if (driveResult && (driveResult.fileId || driveResult.previewUrl)) {
+          finalStoragePath = driveResult.fileId || driveResult.previewUrl;
           resolvedProvider = 'google_drive';
           driveSuccess = true;
-          console.log(`[Drive] Resource uploaded: ${driveResult.previewUrl}`);
+          console.log(`[Drive] Resource uploaded: ${driveResult.fileId}`);
         }
       } catch (driveErr: any) {
         console.warn('[Drive] Resource upload failed, falling back to Firebase Storage:', driveErr?.message);
@@ -305,6 +305,7 @@ export class ResourceService {
       resourceId,
       storagePath: resource.provider === 'firebase_storage' ? decryptedPath : undefined,
       tokenPayload: {
+        role: user.role,
         resourceType: resource.type,
         mimeType: resource.mimeType,
         checksum: resource.checksum,
@@ -319,7 +320,11 @@ export class ResourceService {
     });
 
     let viewerUrl = access.signedUrl;
-    let viewerType = 'pdf'; // Default to internal PDF viewer for Firebase Storage / generic PDFs
+    let viewerType = 'webview';
+    const isImageResource = resource.type?.toLowerCase() === 'image' || 
+                            resource.type?.toLowerCase() === 'png' || 
+                            resource.type?.toLowerCase() === 'jpg' || 
+                            resource.mimeType?.toLowerCase()?.startsWith('image/');
 
     if (resource.provider === 'google_drive' && decryptedPath) {
       let fileId = decryptedPath;
@@ -327,16 +332,24 @@ export class ResourceService {
         const match = decryptedPath.match(/[-\w]{25,}/);
         if (match) fileId = match[0];
       }
-      viewerUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-      viewerType = 'webview';
-    } else if (resource.provider === 'firebase_storage' && access.signedUrl) {
+      if (isImageResource) {
+        viewerUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
+        viewerType = 'image';
+      } else {
+        viewerUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+        viewerType = 'webview';
+      }
+    } else if (resource.provider === 'firebase_storage' || access.signedUrl) {
       // Use the absolute backend proxy secure-stream path to bypass CORS issues on the client browser.
       const baseUrl = (protocol && host) ? `${protocol}://${host}` : '';
       viewerUrl = `${baseUrl}/api/resources/${resource.id}/secure-stream?token=${access.token}`;
-      viewerType = 'pdf';
+      viewerType = isImageResource ? 'image' : 'pdf';
     } else if (resource.provider === 'external_link' && decryptedPath) {
       viewerUrl = decryptedPath;
-      viewerType = 'webview';
+      viewerType = isImageResource ? 'image' : 'webview';
+    } else if (decryptedPath) {
+      viewerUrl = decryptedPath;
+      viewerType = isImageResource ? 'image' : 'webview';
     }
 
     // Log the open event asynchronously
@@ -397,6 +410,9 @@ export class ResourceService {
       resourceType: 'resource',
       resourceId,
       storagePath: resource.provider === 'firebase_storage' ? decryptedPath : undefined,
+      tokenPayload: {
+        role: user.role
+      },
       visibilityRule: {
         visibility: resource.visibility,
         targetBatchIds: resource.targetBatchIds,
@@ -434,21 +450,31 @@ export class ResourceService {
 
     const { stream } = streamResult;
 
+    const isImageRes = resource.type?.toLowerCase() === 'image' || 
+                       resource.type?.toLowerCase() === 'png' || 
+                       resource.type?.toLowerCase() === 'jpg' || 
+                       resource.type?.toLowerCase() === 'jpeg' || 
+                       resource.mimeType?.toLowerCase()?.startsWith('image/');
+
+    const responseMimeType = isImageRes 
+      ? (resource.mimeType && resource.mimeType.toLowerCase().startsWith('image/') ? resource.mimeType : 'image/png')
+      : (resource.mimeType || 'application/pdf');
+
     if (rangeHeader && fileSize) {
-      logger.setProviderInfo(resource.provider, fileSize, resource.mimeType, resource.version, resource.checksum, rangeHeader);
+      logger.setProviderInfo(resource.provider, fileSize, responseMimeType, resource.version, resource.checksum, rangeHeader);
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': (end - start) + 1,
-        'Content-Type': resource.mimeType,
+        'Content-Type': responseMimeType,
         'ETag': `"${resource.checksum}"`,
         'Last-Modified': new Date(resource.updatedAt).toUTCString()
       });
     } else {
-      logger.setProviderInfo(resource.provider, fileSize, resource.mimeType, resource.version, resource.checksum);
+      logger.setProviderInfo(resource.provider, fileSize, responseMimeType, resource.version, resource.checksum);
       res.writeHead(200, {
         'Content-Length': fileSize,
-        'Content-Type': resource.mimeType,
+        'Content-Type': responseMimeType,
         'Accept-Ranges': 'bytes',
         'ETag': `"${resource.checksum}"`,
         'Last-Modified': new Date(resource.updatedAt).toUTCString()
@@ -659,11 +685,11 @@ YES
         buffer: file.buffer,
         subPath: 'LMS/Resources'
       });
-      if (driveResult && driveResult.previewUrl) {
-        newStoragePath = driveResult.previewUrl;
+      if (driveResult && (driveResult.fileId || driveResult.previewUrl)) {
+        newStoragePath = driveResult.fileId || driveResult.previewUrl;
         newProvider = 'google_drive';
         driveSuccess = true;
-        console.log(`[Drive] Resource version uploaded: ${driveResult.previewUrl}`);
+        console.log(`[Drive] Resource version uploaded: ${driveResult.fileId}`);
       }
     } catch (driveErr: any) {
       console.warn('[Drive] Version upload failed, falling back to Firebase Storage:', driveErr?.message);

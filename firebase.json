@@ -15,6 +15,10 @@
         "function": "api"
       },
       {
+        "source": "/player/**",
+        "function": "api"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
@@ -38,11 +42,24 @@
         ]
       },
       {
-        "source": "**/*.@(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)",
+        "source": "**/*.@(js|css|png|jpg|jpeg|gif|ico|svg)",
         "headers": [
           {
             "key": "Cache-Control",
             "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(ttf|woff|woff2|eot|otf)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, must-revalidate"
+          },
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
           }
         ]
       }

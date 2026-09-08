@@ -55,30 +55,69 @@ async function buildAccessContext(userId: string, tenantId: string): Promise<Acc
   const programs: string[] = [];
 
   // FIX (Bug 2): collection is 'students', not 'student_profiles'
-  const profileDoc = await db.collection('students').doc(userId).get();
+  let studentDoc = await db.collection('students').doc(userId).get();
+  let userDoc = await db.collection('users').doc(userId).get();
+  
+  if (!studentDoc.exists && userDoc.exists && userDoc.data()?.studentId) {
+    studentDoc = await db.collection('students').doc(userDoc.data()!.studentId).get();
+  }
 
-  if (profileDoc.exists) {
-    const profile = profileDoc.data()!;
-    // FIX (Bug 2): field is 'displayName', not 'name'
-    if (profile.displayName) studentName = profile.displayName;
+  const profilesToInspect = [studentDoc, userDoc].filter(d => d && d.exists).map(d => d.data()!);
+
+  for (const profile of profilesToInspect) {
+    if (profile.displayName || profile.name || profile.fullName) studentName = profile.displayName || profile.name || profile.fullName;
     if (profile.email) studentEmail = profile.email;
     if (profile.role) role = profile.role;
     if (profile.membershipVersion) version = profile.membershipVersion;
 
-    // Derive all batch IDs exclusively from programMemberships[]
     if (Array.isArray(profile.programMemberships)) {
       for (const m of profile.programMemberships) {
         if (m.status === 'active' && m.batchId) {
-          batchIds.push(m.batchId);
+          if (!batchIds.includes(String(m.batchId))) batchIds.push(String(m.batchId));
           if (m.program) programs.push(m.program);
         }
       }
     }
+    const legacyBatches: string[] = Array.isArray(profile.batches)
+      ? profile.batches
+      : (profile.batch ? [profile.batch] : []);
+    for (const b of legacyBatches) {
+      if (b && !batchIds.includes(String(b))) {
+        batchIds.push(String(b));
+      }
+    }
+  }
+
+  // Resolve batch UUIDs for any string batch names (e.g. batch name '43' -> batch UUID) AND vice versa
+  const currentBatchIdentifiers = [...batchIds];
+  for (const bIdentifier of currentBatchIdentifiers) {
+    try {
+      // 1. Try matching by batchName
+      const byNameSnap = await db.collection('batches')
+        .where('batchName', '==', String(bIdentifier).trim())
+        .where('isDeleted', '==', false)
+        .limit(1)
+        .get();
+      if (!byNameSnap.empty) {
+        const bDoc = byNameSnap.docs[0];
+        const bId = bDoc.id;
+        const bName = bDoc.data()?.batchName;
+        if (bId && !batchIds.includes(bId)) batchIds.push(bId);
+        if (bName && !batchIds.includes(String(bName))) batchIds.push(String(bName));
+      } else {
+        // 2. Try fetching by doc ID directly to get batchName
+        const bDoc = await db.collection('batches').doc(String(bIdentifier).trim()).get();
+        if (bDoc.exists && !bDoc.data()?.isDeleted) {
+          const bName = bDoc.data()?.batchName || bDoc.data()?.name;
+          if (bName && !batchIds.includes(String(bName))) batchIds.push(String(bName));
+        }
+      }
+    } catch (e) { }
   }
 
   // Derive resolved access profiles
   const accessProfiles: AccessContext['accessProfiles'] = ['public'];
-  if (batchIds.length > 0) {
+  if (batchIds.length > 0 || profilesToInspect.some(p => (p?.type && p?.type !== 'free') || (p?.role && p?.role === 'student'))) {
     accessProfiles.push('batch');
   }
 

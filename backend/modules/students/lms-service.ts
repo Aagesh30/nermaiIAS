@@ -30,6 +30,7 @@ const sacsService = new AccessRulesService();
 // ─── Student profile resolution ───────────────────────────────────────────────
 
 interface StudentContext {
+  role: string;
   batchIds: string[];          // resolved UUID batch IDs
   studentType: string;         // 'offline' | 'online' | 'recorded' | ''
   studentTypes: string[];      // all allowed modes
@@ -50,6 +51,7 @@ interface StudentContext {
  */
 async function resolveStudentContext(userId: string): Promise<StudentContext> {
   const result: StudentContext = {
+    role: '',
     batchIds: [],
     studentType: '',
     studentTypes: [],
@@ -63,6 +65,7 @@ async function resolveStudentContext(userId: string): Promise<StudentContext> {
   let studentData: any = null;
   if (userDoc.exists) {
     const userData = userDoc.data();
+    result.role = userData?.role || '';
     if (userData?.studentId) {
       result.studentId = userData.studentId;
       const sDoc = await db.collection('students').doc(userData.studentId).get();
@@ -80,6 +83,9 @@ async function resolveStudentContext(userId: string): Promise<StudentContext> {
     const studentBatches: string[] = studentData.batches || (studentData.batch ? [studentData.batch] : []);
     for (const bName of studentBatches) {
       if (bName) {
+        if (!result.batchIds.includes(String(bName))) {
+          result.batchIds.push(String(bName));
+        }
         const batchSnap = await db.collection('batches')
           .where('batchName', '==', String(bName))
           .where('isDeleted', '==', false)
@@ -88,7 +94,9 @@ async function resolveStudentContext(userId: string): Promise<StudentContext> {
 
         if (!batchSnap.empty) {
           const bId = batchSnap.docs[0].id;
-          result.batchIds.push(bId);
+          if (!result.batchIds.includes(bId)) {
+            result.batchIds.push(bId);
+          }
           result.batchNameMap[bId] = bName;
         }
       }
@@ -141,25 +149,53 @@ function isVisibleToStudent(
   targetBatchIds: string[],
   accessLevel: string,
   studentBatchIds: string[],
-  studentType: string
+  studentType: string,
+  userRole?: string
 ): boolean {
   const isOffline = studentType === 'offline';
   const isEnrolled = studentBatchIds.length > 0;
+  const isGuestUser = userRole === 'guest' || (!isEnrolled && userRole !== 'student');
 
-  // No batches resolved → unassigned student, nothing visible
-  if (!isEnrolled) return false;
+  // Guest Only: Only visible if user is a guest user (unenrolled guest)
+  if (accessLevel === 'guest') {
+    return isGuestUser;
+  }
+
+  // Enroll Only (premium): Visible to any enrolled student
+  if (accessLevel === 'premium') {
+    return isEnrolled;
+  }
+
+  // Enroll Batch Wise (batch): Visible ONLY if user is enrolled and matches batch
+  if (accessLevel === 'batch') {
+    return isEnrolled && (
+      targetBatchIds.length === 0 ||
+      targetBatchIds.includes('all') ||
+      targetBatchIds.includes('all_paid') ||
+      studentBatchIds.some((bId) => targetBatchIds.includes(bId))
+    );
+  }
+
+  // Guest + Enroll (public / free / all): Visible to all users
+  const isPublicOrFree = accessLevel === 'public' || accessLevel === 'free' || accessLevel === 'all' || targetBatchIds.includes('all') || targetBatchIds.includes('all_free');
+
+  // If not enrolled and content is not public/free and not guest → hide
+  if (!isEnrolled && !isPublicOrFree) return false;
+
+  // If enrolled student and accessLevel is guest → hide from enrolled student!
+  if (isEnrolled && accessLevel === 'guest') return false;
 
   // ── Batch matching ──────────────────────────────────────────────────────────
   let batchMatches: boolean;
   if (targetBatchIds.length === 0) {
-    // No batch restriction → visible to all enrolled students
-    batchMatches = true;
-  } else if (targetBatchIds.includes('all')) {
+    // No batch restriction → visible to all users (unless accessLevel is restricted above)
+    batchMatches = accessLevel !== 'guest' || !isEnrolled;
+  } else if (targetBatchIds.includes('all') || targetBatchIds.includes('all_free')) {
     batchMatches = true;
   } else if (targetBatchIds.includes('all_paid') && isEnrolled) {
     batchMatches = true;
-  } else if (targetBatchIds.includes('all_free') && !isEnrolled) {
-    batchMatches = true;
+  } else if (!isEnrolled) {
+    batchMatches = isPublicOrFree;
   } else {
     // Specific batch targeting
     batchMatches = studentBatchIds.some((bId) => targetBatchIds.includes(bId));
@@ -168,11 +204,9 @@ function isVisibleToStudent(
   if (!batchMatches) return false;
 
   // ── Student type visibility gating ─────────────────────────────────────────
-  // Offline students: batch match is sufficient for DISCOVERY (SACS controls actual access)
   if (isOffline) return true;
 
-  // Online/Recorded students: additionally respect accessLevel sentinels
-  if (accessLevel === 'free' || accessLevel === 'all') return true;
+  if (accessLevel === 'public' || accessLevel === 'free' || accessLevel === 'all') return true;
   if (accessLevel === 'paid' || accessLevel === '') return isEnrolled;
 
   return true;
@@ -232,7 +266,7 @@ export async function getMyLmsClasses(userId: string, tenantId: string): Promise
     const accessLevel: string = cls.accessLevel || '';
 
     // Layer 1 + 2: Visibility check
-    if (!isVisibleToStudent(targetBatchIds, accessLevel, ctx.batchIds, ctx.studentType)) continue;
+    if (!isVisibleToStudent(targetBatchIds, accessLevel, ctx.batchIds, ctx.studentType, ctx.role)) continue;
 
     // Layer 3: SACS access decision (additive — does NOT affect visibility)
     let access = { allowed: false, pendingRequest: false };
@@ -289,21 +323,24 @@ export async function getMyLmsResources(userId: string, tenantId: string): Promi
     const targetBatchIds: string[] = res.targetBatchIds || [];
     const accessLevel: string = res.visibility || '';
 
-    // isGeneral resources are visible to all enrolled students regardless of batch
-    const isGeneral: boolean = !!res.isGeneral;
-    if (!isGeneral && !isVisibleToStudent(targetBatchIds, accessLevel, ctx.batchIds, ctx.studentType)) continue;
-    if (isGeneral && ctx.batchIds.length === 0) continue; // unassigned student can't see general either
+    // Check visibility against targetBatchIds & accessLevel
+    if (!isVisibleToStudent(targetBatchIds, accessLevel, ctx.batchIds, ctx.studentType, ctx.role)) continue;
+    if (res.isGeneral && ctx.batchIds.length === 0 && accessLevel !== 'public' && accessLevel !== 'guest' && accessLevel !== 'free') continue;
 
     // Layer 3: SACS access decision
     let access = { allowed: false, pendingRequest: false };
-    try {
-      const lockStatus = await sacsService.getLockStatus(userId, res.id, 'resource', tenantId);
-      access = {
-        allowed: lockStatus.decision.allowed,
-        pendingRequest: !!lockStatus.pendingRequest,
-      };
-    } catch (e) {
-      access = { allowed: false, pendingRequest: false };
+    if (accessLevel === 'public' || accessLevel === 'guest' || accessLevel === 'free' || targetBatchIds.includes('all_free')) {
+      access = { allowed: true, pendingRequest: false };
+    } else {
+      try {
+        const lockStatus = await sacsService.getLockStatus(userId, res.id, 'resource', tenantId);
+        access = {
+          allowed: lockStatus.decision.allowed,
+          pendingRequest: !!lockStatus.pendingRequest,
+        };
+      } catch (e) {
+        access = { allowed: false, pendingRequest: false };
+      }
     }
 
     // storagePath is encrypted - do not expose it; access goes through /resources/:id/access

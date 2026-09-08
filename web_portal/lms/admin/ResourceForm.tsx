@@ -140,6 +140,7 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError('');
 
@@ -277,7 +278,7 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-1.5">Asset Type</label>
                       <select value={type} onChange={e=>setType(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2 text-white focus:border-red-500 focus:outline-none">
-                        {['PDF', 'DOC', 'PPT', 'IMAGE', 'ZIP', 'EXCEL', 'AUDIO', 'VIDEO_ATTACHMENT', 'LINK', 'HTML', 'CURRENT_AFFAIRS', 'QUESTION_BANK', 'COLLECTION'].map(t => (
+                        {['PDF', 'IMAGE'].map(t => (
                           <option key={t} value={t}>{t}</option>
                         ))}
                       </select>
@@ -359,9 +360,10 @@ export default function ResourceForm({ onClose, onSuccess, initialData }: Resour
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">Target Audience *</label>
                     <select value={visibility} onChange={e=>setVisibility(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2 text-white focus:border-red-500 focus:outline-none">
-                      <option value="public">All Users (Public)</option>
-                      <option value="premium">Enrolled All (All Enrolled Students)</option>
-                      <option value="batch">Enrolled Batch Wise (Specific Batches)</option>
+                      <option value="guest">Guest Only</option>
+                      <option value="public">Guest + Enroll</option>
+                      <option value="premium">Enroll Only</option>
+                      <option value="batch">Enroll Batch Wise</option>
                     </select>
                   </div>
                   <div>

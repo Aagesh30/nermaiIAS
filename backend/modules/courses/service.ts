@@ -666,6 +666,9 @@ export class CourseService {
       if (!classDoc.encryptedVideoId) throw new AppError('Video ID not configured for this class', 500);
       const videoId = decrypt(classDoc.encryptedVideoId);
 
+      const resolvedStudentName = user.displayName || user.name || user.fullName || (user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : '') || 'Student';
+      const resolvedStudentEmail = user.email || '';
+
       const access = await AccessEngine.evaluateAccess({
         userId: user.userId || user.id,
         tenantId: user.tenantId,
@@ -675,7 +678,9 @@ export class CourseService {
           videoId,
           classId,
           videoTitle: classDoc.title || 'Nermai IAS Video',
-          videoType: classDoc.classType
+          videoType: classDoc.classType,
+          studentName: resolvedStudentName,
+          studentEmail: resolvedStudentEmail
         },
         visibilityRule: { visibility: 'public' }
       });

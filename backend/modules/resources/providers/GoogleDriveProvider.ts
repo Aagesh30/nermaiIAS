@@ -9,9 +9,13 @@ import { StreamOptions, StreamResult } from './IResourceProvider';
 
 export class GoogleDriveProvider implements IResourceProvider {
   async getStream(resource: IResource, options?: StreamOptions): Promise<StreamResult> {
-    const fileId = decrypt(resource.storagePath);
+    let fileId = decrypt(resource.storagePath);
     if (!fileId) {
       throw new AppError('Invalid Google Drive File ID', 400);
+    }
+    if (fileId.startsWith('http') || fileId.includes('/')) {
+      const match = fileId.match(/[-\w]{25,}/);
+      if (match) fileId = match[0];
     }
     
     // We proxy the "Anyone with the link" download URL

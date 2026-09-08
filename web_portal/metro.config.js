@@ -34,6 +34,22 @@ const extraNodeModules = {
 
 config.resolver.extraNodeModules = extraNodeModules;
 
+// ─── 5. Web-only package stubs for native Android/iOS builds ─────────────────
+// These packages use browser APIs (window, document, IndexedDB) and must be
+// stubbed out on native platforms to prevent Gradle compilation failures.
+const WEB_ONLY_PACKAGES = [
+  '@zoom/meetingsdk',
+  'framer-motion',
+  'react-pdf',
+  'idb-keyval',
+  'lucide-react',
+  'react-router-dom',
+  'tailwindcss',
+  'autoprefixer',
+  'postcss',
+  'pdfjs-dist',
+];
+
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'lucide-react-native') {
@@ -76,6 +92,20 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     const target = path.resolve(__dirname, 'lms/core/live-core', sub);
     return (originalResolveRequest || context.resolveRequest)(context, target, platform);
   }
+
+  // Stub web-only packages on native platforms to prevent Gradle build failures
+  if (platform === 'android' || platform === 'ios') {
+    const isWebOnly = WEB_ONLY_PACKAGES.some(
+      (pkg) => moduleName === pkg || moduleName.startsWith(pkg + '/')
+    );
+    if (isWebOnly) {
+      return {
+        filePath: path.resolve(__dirname, 'lms/stubs/web-only-stub.js'),
+        type: 'sourceFile',
+      };
+    }
+  }
+
   return (originalResolveRequest || context.resolveRequest)(context, moduleName, platform);
 };
 

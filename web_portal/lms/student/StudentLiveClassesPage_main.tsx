@@ -84,7 +84,7 @@ const SessionCard = ({ cls, onJoin }: { cls: any; onJoin: (courseId: string, cla
             )}
             {cls.batchName && (
               <span className="px-2 py-0.5 text-xs font-semibold rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                Batch: {cls.batchName}
+                Batch: {cls.batchName.split(',').map((b: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(b.trim()) ? `Batch (${b.trim().substring(0,8)})` : b.trim()).join(', ')}
               </span>
             )}
           </div>
