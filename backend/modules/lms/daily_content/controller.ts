@@ -278,6 +278,11 @@ export class DailyContentController {
                     }
                     return true;
                 });
+            } else if (req.user && req.user.role === "guest") {
+                contentList = contentList.filter(c => {
+                    const aud = c.targetAudience || "all";
+                    return aud === "all" || aud === "guest" || aud === "free";
+                });
             }
 
             // Sort client-side by date desc, then createdAt desc to avoid requiring complex Firestore composite indexes

@@ -5141,6 +5141,8 @@ function MainApp() {
       loadCampaigns();
       loadTests();
       loadGuestPosters();
+      loadLmsDailyContent();
+      loadLmsResources();
     }
     setIsInitialLoading(false);
   }, [user, hostIp]);
@@ -14273,6 +14275,63 @@ function MainApp() {
               )}
 
 
+              {/* Daily IAS Study Content Section for Guests */}
+              {user && (() => {
+                const guestDailyContent = (lmsDailyContent || []).filter((c: any) => {
+                  const aud = c.targetAudience || "all";
+                  return aud === "all" || aud === "guest" || aud === "free";
+                });
+                if (guestDailyContent.length === 0) return null;
+
+                return (
+                  <View style={{ paddingHorizontal: 16, marginTop: 20, gap: 14 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#c62828" }} />
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>
+                        Daily IAS Study Content
+                      </Text>
+                    </View>
+                    {guestDailyContent.map((item: any, idx: number) => {
+                      const isImg = item.type === "image";
+                      const itemDate = item.date || (item.createdAt ? new Date(item.createdAt).toLocaleDateString("en-IN") : "Today");
+                      return (
+                        <View
+                          key={item.id || idx}
+                          style={[
+                            styles.card,
+                            darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" },
+                            { borderLeftWidth: 4, borderLeftColor: "#c62828" }
+                          ]}
+                        >
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                            <View style={{ flex: 1, paddingRight: 12 }}>
+                              <Text style={{ fontSize: 15, fontWeight: "800", color: "#c62828", marginBottom: 4 }}>
+                                {item.title}
+                              </Text>
+                              {item.description ? (
+                                <Text style={{ color: darkMode ? "#ccc" : "#555", fontSize: 13, marginBottom: 6, lineHeight: 18 }}>
+                                  {item.description}
+                                </Text>
+                              ) : null}
+                              <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#888" }}>
+                                {isImg ? "IMAGE" : "PDF"} • {itemDate}
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => setSelectedDailyContentPreview(item)}
+                              style={[styles.primaryBtn, { backgroundColor: "#c62828", paddingHorizontal: 16, paddingVertical: 8, marginVertical: 0 }]}
+                            >
+                              <Ionicons name={isImg ? "image-outline" : "document-text-outline"} size={14} color="#fff" />
+                              <Text style={styles.primaryBtnTxt}>{isImg ? "View Image" : "Open PDF"}</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+
               {/* Free Resources Section */}
               <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 20 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
@@ -14619,11 +14678,27 @@ function MainApp() {
               } else if (activeAttempt?.targetLanguages && Array.isArray(activeAttempt.targetLanguages) && activeAttempt.targetLanguages.length > 0) {
                 allowedLangs = activeAttempt.targetLanguages;
               } else {
-                // Dynamically detect from attemptQuestions for legacy tests
-                const hasEn = attemptQuestions.some((q: any) => !!(q.questionEn || q.question || q.options?.[0]));
-                const hasTa = attemptQuestions.some((q: any) => !!(q.questionTa || q.optionsTa?.[0]));
-                const hasMl = attemptQuestions.some((q: any) => !!(q.questionMl || q.optionsMl?.[0]));
-                const hasTe = attemptQuestions.some((q: any) => !!(q.questionTe || q.optionsTe?.[0]));
+                // Dynamically detect genuine non-empty content from attemptQuestions
+                const hasEn = attemptQuestions.some((q: any) => {
+                  const txt = (q.questionEn || q.question || "").trim();
+                  const opt = (q.options?.[0] || "").trim();
+                  return txt.length > 0 || (opt.length > 0 && !opt.startsWith("Option"));
+                });
+                const hasTa = attemptQuestions.some((q: any) => {
+                  const txt = (q.questionTa || "").trim();
+                  const opt = (q.optionsTa?.[0] || "").trim();
+                  return txt.length > 0 || (opt.length > 0 && opt !== "விடை A" && opt !== (q.options?.[0] || ""));
+                });
+                const hasMl = attemptQuestions.some((q: any) => {
+                  const txt = (q.questionMl || "").trim();
+                  const opt = (q.optionsMl?.[0] || "").trim();
+                  return txt.length > 0 && opt.length > 0 && opt !== (q.options?.[0] || "") && opt !== (q.optionsTa?.[0] || "");
+                });
+                const hasTe = attemptQuestions.some((q: any) => {
+                  const txt = (q.questionTe || "").trim();
+                  const opt = (q.optionsTe?.[0] || "").trim();
+                  return txt.length > 0 && opt.length > 0 && opt !== (q.options?.[0] || "") && opt !== (q.optionsTa?.[0] || "");
+                });
                 
                 if (hasEn) allowedLangs.push("English");
                 if (hasTa) allowedLangs.push("Tamil");
@@ -28750,6 +28825,8 @@ function MainApp() {
                         {/* Filter by Audience if Admin */}
                         {(() => {
                           const myStudent = getLoggedInStudent(user, students) || user;
+                          const aud = content.targetAudience || "all";
+                          const audLabel = aud === "paid" ? "Paid Only" : aud === "batch" ? `Batch: ${content.targetBatch || 'All'}` : "All (Guests & Students)";
                           const isPaid = (Number(myStudent?.feesPaid) > 0) || myStudent?.type === "paid" || user?.type === "paid" || (Number(myStudent?.totalFees) > 0 && Number(myStudent?.feesPaid) >= Number(myStudent?.totalFees));
 
                           const studentBatchesList: string[] = [];
