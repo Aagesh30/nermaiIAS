@@ -48,21 +48,11 @@ const DEFAULT_CONFIG: CustomFormConfig = {
   customFields: []
 };
 
-// In-memory cache for ultra-fast response
-let cachedFormConfig: CustomFormConfig | null = null;
-let lastCacheTime = 0;
-const CACHE_TTL_MS = 60 * 1000; // 1 minute cache
-
 export class CustomFormService {
   /**
-   * Get active form configuration (Cached for fast public access)
+   * Get active form configuration (Real-time public access)
    */
   static async getActiveForm(): Promise<CustomFormConfig> {
-    const now = Date.now();
-    if (cachedFormConfig && (now - lastCacheTime) < CACHE_TTL_MS) {
-      return cachedFormConfig;
-    }
-
     const doc = await db.collection(FORMS_COLLECTION).doc(DEFAULT_FORM_ID).get();
     if (!doc.exists) {
       // Seed default configuration if not exists
@@ -71,14 +61,10 @@ export class CustomFormService {
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
-      cachedFormConfig = DEFAULT_CONFIG;
-      lastCacheTime = now;
       return DEFAULT_CONFIG;
     }
 
-    cachedFormConfig = { id: doc.id, ...(doc.data() as any) };
-    lastCacheTime = now;
-    return cachedFormConfig!;
+    return { id: doc.id, ...(doc.data() as any) };
   }
 
   /**

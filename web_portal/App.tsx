@@ -153,6 +153,13 @@ const DEFAULT_HOST_IP = "192.168.0.120";
 // Timeout in ms for all API calls — 30s to handle Firebase Cloud Function cold starts
 const API_TIMEOUT_MS = 30000;
 
+// ─── SCREENSHOT BLOCK TOGGLE ────────────────────────────────────────────────
+// Set to `false` to allow screenshots (e.g. for bug reports / debugging).
+// Only affects student and guest roles on the Test Portal.
+// Does NOT touch super_admin, admin, staff, teacher, or any other role.
+const SCREENSHOT_BLOCK_ENABLED = true;
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Native & Web Universal PDF Export Helper
 const downloadPdfDocument = async (html: string, fileName: string) => {
   try {
@@ -2050,6 +2057,8 @@ function MainApp() {
   const [fees, setFees] = useState<any[]>([]);
   const [tests, setTests] = useState<any[]>([]);
   const [nowTick, setNowTick] = useState<number>(Date.now()); // live clock for test expiry checks
+  // Mobile screenshot block: overlay shown when app goes to background while on test portal
+  const [showTestSecureOverlay, setShowTestSecureOverlay] = useState(false);
   const [questions, setQuestions] = useState<any[]>([]);
   const [admissions, setAdmissions] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
@@ -2474,6 +2483,7 @@ function MainApp() {
   const [admissionForm, setAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", preferredCourse: "", preferredMode: "" });
   // Guest Posters + per-course application forms
   const [guestPosters, setGuestPosters] = useState<any[]>([]);
+  const [guestCustomAppConfig, setGuestCustomAppConfig] = useState<any | null>(null);
   const [selectedCourseForm, setSelectedCourseForm] = useState<string | null>(null);
   const [courseAdmissionForm, setCourseAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", mode: "" });
   const [submittingCourseAdmission, setSubmittingCourseAdmission] = useState(false);
@@ -5408,6 +5418,8 @@ function MainApp() {
       setIsInitialLoading(false);
     };
     checkPersistedSession();
+    loadGuestCustomForm();
+    loadGuestPosters();
   }, []);
 
   // Fetch initial data — only runs when user identity changes
@@ -5454,11 +5466,17 @@ function MainApp() {
       loadCampaigns();
       loadTests();
       loadGuestPosters();
+      loadGuestCustomForm();
       loadLmsDailyContent();
       loadLmsResources();
     }
     setIsInitialLoading(false);
   }, [user, hostIp]);
+
+  // Keep guest application form config in sync on tab navigation or modal open
+  useEffect(() => {
+    loadGuestCustomForm();
+  }, [guestContentTab, showDynamicAppModal]);
 
   // Auto-resolve student profile and load my profile request on login/data load
   useEffect(() => {
@@ -5706,6 +5724,107 @@ function MainApp() {
     if (!user || activeTab !== "test" || testSub !== "available") return;
     loadTests(true); // Silent load on tab focus
   }, [user, activeTab, testSub]);
+
+  // ── Screenshot blocking for Test Portal (student & guest only) ──────────────
+  // Toggle SCREENSHOT_BLOCK_ENABLED at the top of this file to disable for debugging.
+  // Covers:
+  //   Web  — CSS print blackout, user-select:none, blocks PrintScreen / Ctrl+P / Ctrl+Shift+S
+  //   Mobile — opaque overlay while app is backgrounded (prevents screen-recorder capture)
+  // Super admin, admin, staff, teacher are NEVER affected.
+  useEffect(() => {
+    const isStudentOrGuest = user?.role === "student" || user?.role === "guest";
+    const isTestTab = activeTab === "test";
+    const shouldBlock = SCREENSHOT_BLOCK_ENABLED && isStudentOrGuest && isTestTab;
+
+    if (Platform.OS === "web") {
+      if (typeof document === "undefined" || typeof window === "undefined") return;
+
+      const STYLE_ID = "nermai-screenshot-block-style";
+
+      if (shouldBlock) {
+        // ── Inject CSS ──────────────────────────────────────────────────────
+        if (!document.getElementById(STYLE_ID)) {
+          const style = document.createElement("style");
+          style.id = STYLE_ID;
+          style.textContent = `
+            /* NERMAI — Test Portal Screenshot / Print Block */
+            @media print {
+              body * { visibility: hidden !important; }
+              body::after {
+                content: 'Screenshot & printing is disabled in the Test Portal.' !important;
+                visibility: visible !important;
+                position: fixed !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                font-size: 1.5rem !important;
+                color: #c62828 !important;
+                text-align: center !important;
+              }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+
+        // ── Block screenshot / print keyboard shortcuts ──────────────────
+        const handleKeyDown = (e: KeyboardEvent) => {
+          const key = e.key;
+          // PrintScreen
+          if (key === "PrintScreen" || key === "Snapshot") {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+          }
+          // Ctrl+P (print), Ctrl+Shift+S (save as), Ctrl+Shift+P (print preview)
+          if (e.ctrlKey && (key === "p" || key === "P")) { e.preventDefault(); return false; }
+          if (e.ctrlKey && e.shiftKey && (key === "s" || key === "S")) { e.preventDefault(); return false; }
+          if (e.ctrlKey && e.shiftKey && (key === "p" || key === "P")) { e.preventDefault(); return false; }
+          // Win+PrintScreen (Windows) — key combo fires as Meta+PrintScreen in some browsers
+          if (e.metaKey && (key === "PrintScreen" || key === "Snapshot")) { e.preventDefault(); return false; }
+        };
+
+        document.addEventListener("keydown", handleKeyDown, true);
+
+        return () => {
+          document.removeEventListener("keydown", handleKeyDown, true);
+          const el = document.getElementById(STYLE_ID);
+          if (el) el.remove();
+        };
+      } else {
+        // Cleanup if we navigated away from test tab or role changed
+        const el = document.getElementById(STYLE_ID);
+        if (el) el.remove();
+      }
+    }
+    // Mobile (React Native) — AppState approach: show opaque overlay when app goes to background.
+    // This prevents screen-recording apps from capturing exam content.
+    if (Platform.OS !== "web") {
+      const { AppState } = require("react-native");
+      const isStudentOrGuest = user?.role === "student" || user?.role === "guest";
+      const isTestTab = activeTab === "test";
+      const shouldBlock = SCREENSHOT_BLOCK_ENABLED && isStudentOrGuest && isTestTab;
+
+      if (!shouldBlock) {
+        setShowTestSecureOverlay(false);
+        return;
+      }
+
+      const handleAppStateChange = (nextState: string) => {
+        // Show overlay when app is backgrounded or inactive (screen recorder captures background)
+        if (nextState === "background" || nextState === "inactive") {
+          setShowTestSecureOverlay(true);
+        } else if (nextState === "active") {
+          setShowTestSecureOverlay(false);
+        }
+      };
+
+      const subscription = AppState.addEventListener("change", handleAppStateChange);
+      return () => {
+        subscription?.remove?.();
+        setShowTestSecureOverlay(false);
+      };
+    }
+  }, [user, activeTab, SCREENSHOT_BLOCK_ENABLED]);
 
   // ── Session revocation check on tab visibility (single-device policy) ─────────
   // Fires once each time the tab becomes visible again (event-driven, not polling).
@@ -7708,6 +7827,21 @@ function MainApp() {
       setGuestPosters(Array.isArray(list) ? list : []);
     } catch (e) {
       console.log("Failed loading guest posters:", e);
+    }
+  };
+
+  // Load active custom application form config (public)
+  const loadGuestCustomForm = async () => {
+    try {
+      // api.get() already unwraps the response via handleResponse (returns data.data directly)
+      // So `res` here IS the config object — not a wrapper around it
+      const res = await api.get("/crm/custom-form/active");
+      const config = (res && typeof res === "object" && "isActive" in res) ? res : (res?.data || null);
+      if (config) {
+        setGuestCustomAppConfig(config);
+      }
+    } catch (e) {
+      console.log("Failed loading guest custom form config:", e);
     }
   };
 
@@ -14887,50 +15021,52 @@ function MainApp() {
               )}
 
               {/* Prominent Mock Test / Custom Application Form Card on Guest Home */}
-              <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (!user) { setPendingGuestTab("courses"); setShowGuestGoogleAuthModal(true); return; }
-                    setShowDynamicAppModal(true);
-                  }}
-                  style={[
-                    styles.card,
-                    darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
-                    {
-                      backgroundColor: darkMode ? "#241212" : "#fef2f2",
-                      borderColor: "#b91c1c",
-                      borderWidth: 1.5,
-                      borderRadius: 14,
-                      padding: 16,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 14,
-                      shadowColor: "#b91c1c",
-                      shadowOpacity: 0.1,
-                      shadowRadius: 6
-                    }
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ fontSize: 22 }}>📝</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>Mock Test Application Form</Text>
-                      <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                        <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
-                      </View>
+              {guestCustomAppConfig?.isActive && (
+                <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!user) { setPendingGuestTab("courses"); setShowGuestGoogleAuthModal(true); return; }
+                      setShowDynamicAppModal(true);
+                    }}
+                    style={[
+                      styles.card,
+                      darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
+                      {
+                        backgroundColor: darkMode ? "#241212" : "#fef2f2",
+                        borderColor: "#b91c1c",
+                        borderWidth: 1.5,
+                        borderRadius: 14,
+                        padding: 16,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 14,
+                        shadowColor: "#b91c1c",
+                        shadowOpacity: 0.1,
+                        shadowRadius: 6
+                      }
+                    ]}
+                    activeOpacity={0.85}
+                  >
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 22 }}>📝</Text>
                     </View>
-                    <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
-                      Register for upcoming academy mock tests and scholarship evaluation.
-                    </Text>
-                  </View>
-                  <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>{guestCustomAppConfig?.title || "Mock Test Application Form"}</Text>
+                        <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
+                        {guestCustomAppConfig?.bannerText || guestCustomAppConfig?.subtitle || "Register for upcoming academy mock tests and scholarship evaluation."}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Daily IAS Study Content Section for Guests */}
               {user && (() => {
@@ -15112,48 +15248,50 @@ function MainApp() {
           {guestContentTab === "apply" && (
             <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
               {/* Prominent Mock Test Application Form Card */}
-              <TouchableOpacity
-                onPress={() => {
-                  if (!user) { setPendingGuestTab("apply"); setShowGuestGoogleAuthModal(true); return; }
-                  setShowDynamicAppModal(true);
-                }}
-                style={[
-                  styles.card,
-                  darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
-                  {
-                    backgroundColor: darkMode ? "#241212" : "#fef2f2",
-                    borderColor: "#b91c1c",
-                    borderWidth: 1.5,
-                    borderRadius: 14,
-                    padding: 16,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 14,
-                    shadowColor: "#b91c1c",
-                    shadowOpacity: 0.1,
-                    shadowRadius: 6
-                  }
-                ]}
-                activeOpacity={0.85}
-              >
-                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
-                  <Text style={{ fontSize: 22 }}>📝</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>Mock Test Application Form</Text>
-                    <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                      <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
-                    </View>
+              {guestCustomAppConfig?.isActive && (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!user) { setPendingGuestTab("apply"); setShowGuestGoogleAuthModal(true); return; }
+                    setShowDynamicAppModal(true);
+                  }}
+                  style={[
+                    styles.card,
+                    darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
+                    {
+                      backgroundColor: darkMode ? "#241212" : "#fef2f2",
+                      borderColor: "#b91c1c",
+                      borderWidth: 1.5,
+                      borderRadius: 14,
+                      padding: 16,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 14,
+                      shadowColor: "#b91c1c",
+                      shadowOpacity: 0.1,
+                      shadowRadius: 6
+                    }
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 22 }}>📝</Text>
                   </View>
-                  <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
-                    Register for upcoming academy mock tests and scholarship evaluation.
-                  </Text>
-                </View>
-                <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
-                </View>
-              </TouchableOpacity>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>{guestCustomAppConfig?.title || "Mock Test Application Form"}</Text>
+                      <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
+                      {guestCustomAppConfig?.bannerText || guestCustomAppConfig?.subtitle || "Register for upcoming academy mock tests and scholarship evaluation."}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
 
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4, marginTop: 4 }}>
                 <View style={{ width: 4, height: 22, borderRadius: 2, backgroundColor: "#2e7d32" }} />
@@ -17794,6 +17932,31 @@ function MainApp() {
             <PageLockedBanner pageTitle="Test Portal" message={lockedPages["test"]?.message} darkMode={darkMode} />
           ) : (
             <View style={styles.splitLayout}>
+              {/* Mobile Screenshot Security Overlay — shown when app goes to background.
+                  Prevents screen recording apps from capturing exam content.
+                  Controlled by SCREENSHOT_BLOCK_ENABLED toggle at top of file. */}
+              {Platform.OS !== "web" && showTestSecureOverlay && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    zIndex: 99999,
+                    backgroundColor: "#000000",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  pointerEvents="none"
+                >
+                  <Ionicons name="lock-closed" size={48} color="#c62828" />
+                  <Text style={{ color: "#ffffff", fontSize: 18, fontWeight: "700", marginTop: 16, textAlign: "center" }}>
+                    Screenshot Disabled
+                  </Text>
+                  <Text style={{ color: "#aaaaaa", fontSize: 13, marginTop: 8, textAlign: "center", paddingHorizontal: 32 }}>
+                    Screen capture is not allowed in the Test Portal.
+                  </Text>
+                </View>
+              )}
+
               {/* Backdrop for mobile */}
               {isMobile && !testSidebarCollapsed && (
                 <TouchableOpacity

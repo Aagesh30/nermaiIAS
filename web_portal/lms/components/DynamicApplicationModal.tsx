@@ -191,19 +191,18 @@ export default function DynamicApplicationModal({
               <ActivityIndicator size="large" color="#b91c1c" />
               <Text style={{ marginTop: 12, color: '#64748b', fontSize: 13 }}>Loading application form...</Text>
             </View>
-          ) : submitted ? (
-            /* SUCCESS CONFIRMATION */
+          ) : formConfig?.isActive === false ? (
+            /* INACTIVE FORM NOTICE */
             <View style={styles.successBox}>
-              <View style={styles.successIconCircle}>
-                <MaterialCommunityIcons name="check-bold" size={36} color="#16a34a" />
+              <View style={[styles.successIconCircle, { backgroundColor: '#fef2f2' }]}>
+                <MaterialCommunityIcons name="clock-alert-outline" size={36} color="#b91c1c" />
               </View>
-              <Text style={styles.successTitle}>Application Submitted Successfully!</Text>
+              <Text style={[styles.successTitle, { color: '#991b1b' }]}>Applications Closed</Text>
               <Text style={styles.successSubtitle}>
-                Thank you! Your registration for{' '}
-                <Text style={{ fontWeight: '700' }}>{formConfig?.title || 'Mock Test'}</Text> has been received. Our academy counselor will contact you shortly.
+                Registration for <Text style={{ fontWeight: '700' }}>{formConfig?.title || 'this application'}</Text> is currently inactive or closed. Please contact academy support or check back later.
               </Text>
-              <TouchableOpacity style={styles.successDoneBtn} onPress={onClose}>
-                <Text style={styles.successDoneBtnText}>Done</Text>
+              <TouchableOpacity style={[styles.successDoneBtn, { backgroundColor: '#475569' }]} onPress={onClose}>
+                <Text style={styles.successDoneBtnText}>Close</Text>
               </TouchableOpacity>
             </View>
           ) : (

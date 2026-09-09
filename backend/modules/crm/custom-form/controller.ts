@@ -65,7 +65,7 @@ export class CustomFormController {
         title,
         subtitle: subtitle || "",
         bannerText: bannerText || "",
-        isActive: isActive !== false,
+        isActive: typeof isActive === "boolean" ? isActive : true,
         defaultFields: defaultFields || {
           name: { label: "Full Name", required: true, enabled: true },
           phone: { label: "Phone Number", required: true, enabled: true },
