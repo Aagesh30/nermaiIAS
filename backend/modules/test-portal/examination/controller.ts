@@ -507,8 +507,10 @@ export class ExaminationController {
                         ...clientQuestion
                     } = data;
                     
+                    const resolvedImageUrl = data.imageBase64 || data.imageUrl || data.driveUrl || data.questionImage || null;
                     return {
                         ...clientQuestion,
+                        imageUrl: resolvedImageUrl,
                         options,
                         optionsTa
                     };
@@ -1099,7 +1101,7 @@ export class ExaminationController {
                         correctAnswer: data.correctAnswer || null,
                         explanation: data.explanation || "",
                         marks: data.marks || 1,
-                        imageUrl: data.imageUrl || data.questionImage || null
+                        imageUrl: data.imageBase64 || data.imageUrl || data.driveUrl || data.questionImage || null
                     };
                 });
 

@@ -292,13 +292,19 @@ export const listClassesBySubtopic = async (req: Request, res: Response, next: N
 
 export const syncSyllabusFromExcel = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { courseId } = req.body;
+    const { courseId, subjects, filePath } = req.body;
     if (!courseId) throw new AppError('courseId is required', 400);
     const { userId, tenantId } = req.user!;
-    
-    const filePath = 'D:\\unistrix\\NERMAI_IAS_ACADEMY\\Nermai_Faculty_Tracker (2).xlsx';
-    
-    const result = await courseService.syncSyllabusFromExcel(courseId, filePath, userId, tenantId);
+
+    let result;
+    if (Array.isArray(subjects) && subjects.length > 0) {
+      result = await courseService.syncStructuredSyllabus(courseId, subjects, userId, tenantId);
+    } else {
+      const targetFilePath = filePath || 'D:\\unistrix\\NERMAI_IAS_ACADEMY\\Nermai_Faculty_Tracker (2).xlsx';
+      result = await courseService.syncSyllabusFromExcel(courseId, targetFilePath, userId, tenantId);
+    }
+
     res.status(200).json(result);
   } catch (error) { next(error); }
 };
+

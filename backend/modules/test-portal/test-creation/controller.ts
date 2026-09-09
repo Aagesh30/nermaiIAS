@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { uploadFileToGoogleDrive } from "../../../services/google_drive";
 import { testDetailsCache, testQuestionsCache } from "../../../shared/utils/cache";
+import { TestPortalCleanupService } from "./cleanupService";
 
 const db = admin.firestore();
 const COLLECTION = "tests";
@@ -572,6 +573,12 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
 
                     const exp = q.explanation || q.notes || "";
 
+                    const dUrl1 = q.driveUrl || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("http") ? q.imageUrl : "");
+                    const b641 = q.imageBase64 || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("data:") ? q.imageUrl : "") || (typeof q.questionImage === "string" && q.questionImage.startsWith("data:") ? q.questionImage : "");
+
+                    // Primary image stored in Firestore is the compressed base64 image (so Test Portal displays directly from Firestore)
+                    const firestoreImg1 = b641 || dUrl1 || "";
+
                     batch.set(qRef, {
                         id: qId,
                         question: questionText,
@@ -581,8 +588,10 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                         type: "MCQ",
                         marks: marksPerQuestion || 1,
                         negativeMarks: negativeMarks || 0.33,
-                        imageUrl: q.imageUrl || q.questionImage || (Array.isArray(q.images) ? q.images[0] : q.images) || "",
-                        questionImage: q.questionImage || q.imageUrl || "",
+                        imageUrl: firestoreImg1,
+                        imageBase64: firestoreImg1.startsWith("data:") ? firestoreImg1 : "",
+                        driveUrl: dUrl1 || "",
+                        driveFileId: q.driveFileId || q.fileId || "",
                         images: q.images || [],
                         isDeleted: false,
                         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -653,6 +662,12 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                         ];
                     }
 
+                    const dUrl2 = q.driveUrl || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("http") ? q.imageUrl : "");
+                    const b642 = q.imageBase64 || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("data:") ? q.imageUrl : "") || (typeof q.questionImage === "string" && q.questionImage.startsWith("data:") ? q.questionImage : "");
+
+                    // Primary image stored in Firestore is the compressed base64 image (so Test Portal displays directly from Firestore)
+                    const firestoreImg2 = b642 || dUrl2 || "";
+
                     batch.set(qRef, {
                         id: qId,
                         question: q.questionEn || q.question || "",
@@ -665,8 +680,10 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                         marks: marksPerQuestion || 1,
                         negativeMarks: negativeMarks || 0.33,
                         source: "pdf_extraction",
-                        imageUrl: q.imageUrl || q.questionImage || (Array.isArray(q.images) ? q.images[0] : q.images) || "",
-                        questionImage: q.questionImage || q.imageUrl || "",
+                        imageUrl: firestoreImg2,
+                        imageBase64: firestoreImg2.startsWith("data:") ? firestoreImg2 : "",
+                        driveUrl: dUrl2 || "",
+                        driveFileId: q.driveFileId || q.fileId || "",
                         images: q.images || [],
                         draftId: draftId || null,
                         isDeleted: false,
@@ -1030,6 +1047,8 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
 
             testDetailsCache.delete(`test_${id}`);
             testQuestionsCache.delete(`test_${id}`);
+            // Clean up Base64 images from Firestore questions on test deletion
+            TestPortalCleanupService.cleanTestImagesOnDelete(id).catch(() => {});
             // Also delete all permission requests for this test
             try {
                 const reqSnap = await db.collection(OFFLINE_REQUESTS_COLLECTION).where("testId", "==", id).get();
@@ -1158,13 +1177,15 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 return res.status(500).json({ success: false, message: "Failed to upload image to Google Drive. Please check Drive configuration." });
             }
 
-            // Return the sharable Drive thumbnail URL (displays inline in img tags)
+            // Return the Base64 data for local instant display during exam + Google Drive permanent URL
             const driveId = driveResult.fileId;
             const thumbnailUrl = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
 
             return res.status(200).json({
                 success: true,
-                imageUrl: thumbnailUrl,
+                imageUrl: base64,
+                imageBase64: base64,
+                driveUrl: thumbnailUrl,
                 previewUrl: driveResult.previewUrl,
                 webViewLink: driveResult.webViewLink,
                 fileId: driveId

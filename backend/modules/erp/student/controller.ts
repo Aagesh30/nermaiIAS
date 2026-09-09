@@ -266,6 +266,198 @@ export class StudentController {
     }
 
     /**
+     * BULK CREATE STUDENTS FROM EXCEL UPLOAD
+     * POST /api/erp/student/bulk
+     */
+    static async bulkCreate(req: Request, res: Response) {
+        try {
+            const { students } = req.body;
+            if (!Array.isArray(students) || students.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "An array of student records is required"
+                });
+            }
+
+            const currentUserId = (req as any).user?.userId || "system";
+            const tenantId = (req as any).user?.tenantId || "default_tenant";
+
+            let createdCount = 0;
+            const skipped: string[] = [];
+            const errors: string[] = [];
+
+            for (const s of students) {
+                try {
+                    const roll = String(s.loginUsername || s.rollNumber || "").trim();
+                    const phone = String(s.phone || "").trim();
+                    const studentName = String(s.firstName || s.name || s.studentName || "").trim();
+
+                    if (!roll || !studentName) {
+                        errors.push(`Row missing required name or roll number: ${JSON.stringify(s)}`);
+                        continue;
+                    }
+
+                    // Check if username / roll number already exists
+                    const existingSnapshot = await db.collection("users")
+                        .where("username", "==", roll)
+                        .where("isDeleted", "==", false)
+                        .limit(1)
+                        .get();
+
+                    if (!existingSnapshot.empty) {
+                        skipped.push(roll);
+                        continue;
+                    }
+
+                    // Password calculation fallback: Username + Last 4 digits of Phone
+                    let rawPassword = String(s.loginPassword || "").trim();
+                    if (!rawPassword) {
+                        const last4 = phone.length >= 4 ? phone.slice(-4) : phone;
+                        rawPassword = roll + last4;
+                    }
+
+                    const passwordHash = await bcrypt.hash(rawPassword, 12);
+                    const id = randomUUID();
+
+                    const finalBatches = Array.isArray(s.batches) ? s.batches : (s.batch ? [s.batch] : []);
+                    const finalBatchModes = (s.batchModes && typeof s.batchModes === "object") ? s.batchModes : {};
+                    finalBatches.forEach((bName: string) => {
+                        if (!finalBatchModes[bName]) {
+                            finalBatchModes[bName] = [s.type || "offline"];
+                        }
+                    });
+
+                    const totalFees = s.totalFees !== undefined ? Number(s.totalFees) : 0;
+                    const feesPaid = s.feesPaid !== undefined ? Number(s.feesPaid) : 0;
+                    const modeOfPayment = s.modeOfPayment || "cash";
+                    const transactionId = s.transactionId || "";
+
+                    const payload: any = {
+                        id,
+                        tenantId,
+                        admissionNumber: s.admissionNumber || roll,
+                        rollNumber: roll,
+                        firstName: studentName,
+                        lastName: s.lastName || "",
+                        name: studentName,
+                        displayName: studentName,
+                        dateOfBirth: s.dateOfBirth || s.dob || "",
+                        dob: s.dob || s.dateOfBirth || "",
+                        gender: s.gender || "",
+                        bloodGroup: s.bloodGroup || "",
+                        community: s.community || "",
+                        fatherName: s.fatherName || "",
+                        occupation: s.occupation || "",
+                        altPhone: s.altPhone || "",
+                        qualification: s.qualification || "",
+                        college: s.college || "",
+                        referralSource: s.referralSource || "",
+                        email: s.email || "",
+                        phone: phone,
+                        address: s.address || "",
+                        city: s.city || "",
+                        state: s.state || "",
+                        pincode: s.pincode || "",
+                        batches: finalBatches,
+                        batchModes: finalBatchModes,
+                        batch: finalBatches[0] || "",
+                        course: s.course || "",
+                        academicYear: s.academicYear || "",
+                        type: (finalBatches[0] && finalBatchModes[finalBatches[0]] && finalBatchModes[finalBatches[0]][0]) || s.type || "offline",
+                        totalFees,
+                        feesPaid,
+                        joiningDate: s.joiningDate || new Date().toISOString().split('T')[0],
+                        attendedDays: s.attendedDays !== undefined ? Number(s.attendedDays) : 24,
+                        totalDays: s.totalDays !== undefined ? Number(s.totalDays) : 28,
+                        status: s.status || "active",
+                        profileComplete: false,
+                        profileEditPermission: true,
+                        photoUrl: s.photoUrl || "",
+                        photoBase64: "",
+                        photoIdBase64: "",
+                        photoIdType: "",
+                        motherName: s.motherName || "",
+                        guardianName: s.guardianName || "",
+                        fatherPhone: s.fatherPhone || "",
+                        motherPhone: s.motherPhone || "",
+                        guardianPhone: s.guardianPhone || "",
+                        emergencyContact: s.emergencyContact || "",
+                        previousSchool: s.previousSchool || "",
+                        previousClass: s.previousClass || "",
+                        previousMarks: s.previousMarks || 0,
+                        loginUsername: roll,
+                        passwordHash,
+                        courseDuration: s.courseDuration || "12 Months",
+                        modeOfPayment,
+                        transactionId,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        createdBy: currentUserId,
+                        updatedBy: currentUserId,
+                        isDeleted: false,
+                        deletedAt: null,
+                        deletedBy: null,
+                        feeInstallments: []
+                    };
+
+                    if (feesPaid > 0) {
+                        payload.feeInstallments = [{
+                            installmentNo: 1,
+                            amount: feesPaid,
+                            date: s.joiningDate || new Date().toISOString(),
+                            modeOfPayment,
+                            transactionId,
+                            recordedBy: currentUserId,
+                            note: "Initial payment at admission (Bulk Upload)"
+                        }];
+                    }
+
+                    // Save student document
+                    await db.collection(COLLECTION).doc(id).set(payload);
+
+                    // Save user authentication document
+                    const userId = randomUUID();
+                    const userPayload = {
+                        id: userId,
+                        tenantId,
+                        username: roll,
+                        passwordHash,
+                        name: studentName,
+                        email: s.email || "",
+                        role: "student",
+                        studentId: id,
+                        profileComplete: false,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        createdBy: currentUserId,
+                        isDeleted: false,
+                        deletedAt: null,
+                        deletedBy: null
+                    };
+                    await db.collection("users").doc(userId).set(userPayload);
+
+                    createdCount++;
+                } catch (rowErr: any) {
+                    errors.push(rowErr.message || `Error creating student: ${s.loginUsername || s.rollNumber}`);
+                }
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: `Bulk registration completed: ${createdCount} created, ${skipped.length} skipped (already exist).`,
+                count: createdCount,
+                skipped,
+                errors
+            });
+        } catch (error: any) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "An error occurred during bulk student registration"
+            });
+        }
+    }
+
+    /**
      * GET ALL STUDENTS (WITH SEARCH, FILTER, PAGINATION, SORTING)
      * GET /api/erp/student
      */

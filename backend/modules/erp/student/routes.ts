@@ -31,6 +31,9 @@ router.get("/:id", requirePermission("student_management", "R"), StudentControll
 // Create student
 router.post("/", requirePermission("student_management", "C"), StudentController.create);
 
+// Bulk Create students from Excel upload
+router.post("/bulk", requirePermission("student_management", "C"), StudentController.bulkCreate);
+
 // Update student
 router.put("/:id", (req, res, next) => {
   let featureKey = "student_management";

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BookOpen, Layers, Search, RefreshCw, CheckCircle, 
   AlertCircle, ChevronDown, ChevronRight, User, Calendar, 
-  Clock, Award, HelpCircle as HelpIcon 
+  Clock, Award, HelpCircle as HelpIcon, FileSpreadsheet 
 } from 'lucide-react';
 import { CourseApi } from '../core/services';
+import { ExcelSyllabusModal } from '../components/ExcelSyllabusModal';
 
 export const SyllabusTrackerPage = () => {
   const [courses, setCourses] = useState<any[]>([]);
@@ -19,6 +20,7 @@ export const SyllabusTrackerPage = () => {
   
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ type: 'idle' | 'success' | 'error', message: string }>({ type: 'idle', message: '' });
   
   // Track expanded subjects and topics in the list
@@ -185,7 +187,7 @@ export const SyllabusTrackerPage = () => {
       .map(item => item.facultyName)
       .filter(Boolean)
       .map(f => String(f).trim());
-    return [...new Set(list)];
+    return Array.from(new Set(list));
   }, [trackedItems]);
 
   // Filtering trackable items by search and dropdowns
@@ -357,12 +359,12 @@ export const SyllabusTrackerPage = () => {
             ))}
           </select>
           <button
-            onClick={handleSyncExcel}
-            disabled={isSyncing || !selectedCourse}
-            className="flex items-center justify-center gap-2 px-5 py-2 bg-[#8B0000] hover:bg-[#a00000] text-white font-bold text-sm rounded-xl transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:scale-100 shrink-0"
+            onClick={() => setIsExcelModalOpen(true)}
+            disabled={!selectedCourse}
+            className="flex items-center justify-center gap-2 px-5 py-2 bg-gradient-to-r from-[#8B0000] to-[#b71c1c] hover:brightness-110 text-white font-bold text-sm rounded-xl transition-all shadow-sm hover:shadow-[#8B0000]/25 active:scale-95 disabled:opacity-50 disabled:scale-100 shrink-0 cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Syncing...' : 'Sync Excel Tracker'}
+            <FileSpreadsheet className="w-4 h-4 text-white" />
+            Upload / Sync Excel
           </button>
         </div>
       </div>
@@ -714,6 +716,20 @@ export const SyllabusTrackerPage = () => {
           </div>
         </>
       )}
+
+      {/* Excel Syllabus Upload Modal */}
+      <ExcelSyllabusModal
+        isOpen={isExcelModalOpen}
+        onClose={() => setIsExcelModalOpen(false)}
+        courses={courses}
+        defaultCourseId={selectedCourse}
+        onSyncSuccess={(syncedCourseId) => {
+          if (syncedCourseId) {
+            setSelectedCourse(syncedCourseId);
+          }
+          fetchData(true);
+        }}
+      />
     </div>
   );
 };

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, BookOpen, Search, Sparkles } from 'lucide-react';
+import { Plus, BookOpen, Search, Sparkles, FileSpreadsheet } from 'lucide-react';
 import { AdminTable, AdminModal, AdminInput, AdminSelect, AdminButton, DeleteConfirm } from '../components/admin-ui';
 import { CourseApi } from '../core/services';
+import { ExcelSyllabusModal } from '../components/ExcelSyllabusModal';
 
 export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval }: { permission?: string; executeEditOrApproval?: any }) => {
   const [courses, setCourses] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
+  const [selectedCourseForExcel, setSelectedCourseForExcel] = useState<string>('');
   const [editingCourse, setEditingCourse] = useState<any>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -24,6 +27,15 @@ export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval 
   };
 
   useEffect(() => { fetchCourses(); }, []);
+
+  const handleOpenExcelModal = (courseId?: string) => {
+    if (courseId) {
+      setSelectedCourseForExcel(courseId);
+    } else if (courses.length > 0) {
+      setSelectedCourseForExcel(courses[0].id);
+    }
+    setIsExcelModalOpen(true);
+  };
 
   const handleDelete = (course: any) => setDeleteConfirm(course.id);
 
@@ -123,6 +135,24 @@ export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval 
           {val > 0 ? `₹${Number(val).toLocaleString()}` : <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Free</span>}
         </span>
       )
+    },
+    {
+      key: 'syllabus_action',
+      label: 'Syllabus',
+      render: (_: any, row: any) => (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenExcelModal(row.id);
+          }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200/60 dark:border-emerald-700/40 transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-95"
+          title="Import / Sync Excel Syllabus for this course"
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" />
+          Sync Syllabus
+        </button>
+      )
     }
   ];
 
@@ -139,11 +169,19 @@ export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval 
           </div>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage master academy courses, offerings, and pricing.</p>
         </div>
-        {permission !== 'view' && (
-          <AdminButton onClick={() => handleOpenModal()}>
-            <Plus className="w-4 h-4" /> Create Course
-          </AdminButton>
-        )}
+        <div className="flex items-center gap-3">
+          {permission !== 'view' && (
+            <AdminButton variant="secondary" onClick={() => handleOpenExcelModal()}>
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              Upload Syllabus Excel
+            </AdminButton>
+          )}
+          {permission !== 'view' && (
+            <AdminButton onClick={() => handleOpenModal()}>
+              <Plus className="w-4 h-4" /> Create Course
+            </AdminButton>
+          )}
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -205,9 +243,21 @@ export const CoursesPage = ({ permission = 'edit_direct', executeEditOrApproval 
         </form>
       </AdminModal>
 
+      {/* Excel Syllabus Upload Modal */}
+      <ExcelSyllabusModal
+        isOpen={isExcelModalOpen}
+        onClose={() => setIsExcelModalOpen(false)}
+        courses={courses}
+        defaultCourseId={selectedCourseForExcel}
+        onSyncSuccess={() => {
+          fetchCourses();
+        }}
+      />
+
       <DeleteConfirm isOpen={!!deleteConfirm} title="Delete Course" message="Are you sure you want to delete this course? This action cannot be undone." isDeleting={isDeleting} onConfirm={() => deleteConfirm && performDelete(deleteConfirm)} onCancel={() => setDeleteConfirm(null)} />
     </div>
   );
 };
+
 
 

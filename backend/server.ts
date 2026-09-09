@@ -37,13 +37,15 @@ if (isClusterEnabled && cluster.isPrimary) {
         const { LiveSyncService } = require("./services/liveSync.service");
         const { startPersistenceDrainer } = require("./modules/interaction-engine/worker");
         const { attendanceAnalyticsWorker } = require("./modules/analytics/attendance.worker");
+        const { TestPortalCleanupService } = require("./modules/test-portal/test-creation/cleanupService");
 
         ProviderRegistry.registerProvider("zoom", new ZoomProvider());
         ProviderRegistry.registerProvider("youtube", new YouTubeProvider());
         LiveSyncService.getInstance().init();
         startPersistenceDrainer();
         attendanceAnalyticsWorker.start();
-        console.log("✅ Live providers, LiveSyncService, Interaction drainer, and Attendance analytics worker initialized.");
+        TestPortalCleanupService.startPeriodicCleanup();
+        console.log("✅ Live providers, LiveSyncService, Interaction drainer, Attendance analytics worker, and TestPortal cleanup initialized.");
     } catch (err: any) {
         console.error("⚠️ Background services initialization error:", err.message || err);
     }

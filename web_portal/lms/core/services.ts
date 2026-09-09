@@ -17,7 +17,7 @@ export const CourseApi = {
   createCourse: (data: any) => api.post('/courses', data),
   updateCourse: (id: string, data: any) => api.put(`/courses/${id}`, data),
   deleteCourse: (id: string) => api.delete(`/courses/${id}`),
-  syncSyllabus: (courseId: string) => api.post('/courses/syllabus/sync', { courseId }),
+  syncSyllabus: (courseId: string, data?: any) => api.post('/courses/syllabus/sync', { courseId, ...(data || {}) }),
 
   // Subjects
   listAllSubjects: () => api.get('/subjects'),

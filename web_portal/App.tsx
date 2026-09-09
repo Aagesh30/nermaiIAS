@@ -44,6 +44,10 @@ const ResourceViewer = React.lazy(() => import('./lms/student/ResourceViewer').t
 const QRCodePermissionsPage = React.lazy(() => import('./lms/admin/QRCodePermissionsPage').then(m => ({ default: m.QRCodePermissionsPage })));
 const StudentPayFeesPage = React.lazy(() => import('./lms/student/StudentPayFeesPage').then(m => ({ default: m.StudentPayFeesPage })));
 const TeacherDashboard = React.lazy(() => import('./lms/staff/TeacherDashboard').then(m => ({ default: m.TeacherDashboard })));
+const BulkStudentUploadModal = React.lazy(() => import('./lms/components/BulkStudentUploadModal').then(m => ({ default: m.BulkStudentUploadModal })));
+const CustomizeApplicationPage = React.lazy(() => import('./lms/admin/CustomizeApplicationPage'));
+const CustomLeadsPage = React.lazy(() => import('./lms/admin/CustomLeadsPage'));
+const DynamicApplicationModal = React.lazy(() => import('./lms/components/DynamicApplicationModal'));
 import { RNSkeleton, RNDashboardSkeleton, RNTableSkeleton, RNCardGridSkeleton, RNProfileSkeleton, RNFormSkeleton, RNContainerSkeleton, RNNoticeCardSkeleton, RNNoticeSectionSkeleton, RNSystemAlertCardSkeleton, RNClosedTestCardSkeleton, RNClosedTestsSectionSkeleton } from './lms/components/ui/RNSkeleton';
 
 const getDirectImageUrl = (url: string): string => {
@@ -887,10 +891,12 @@ const getSavedNav = () => {
           activeTabVal = main;
           if (sub) {
             hasExplicitSub = true;
-            if (main === "erp") erpSubVal = sub;
-            if (main === "lms") lmsSubVal = sub;
-            if (main === "crm") crmSubVal = sub;
-            if (main === "test") testSubVal = sub;
+            let normSub = sub;
+            if (main === "lms" && (normSub === "daily_content" || normSub === "dailycontent")) normSub = "daily-content";
+            if (main === "erp") erpSubVal = normSub;
+            if (main === "lms") lmsSubVal = normSub;
+            if (main === "crm") crmSubVal = normSub;
+            if (main === "test") testSubVal = normSub;
           }
         }
       }
@@ -2060,6 +2066,8 @@ function MainApp() {
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
+
+
   const getStudentName = (s: any) => {
     if (!s) return "";
     const first = s.firstName || "";
@@ -2079,10 +2087,14 @@ function MainApp() {
     }
     return trimmed;
   };
-  const resolveFileUrl = (fileUrl: string) => {
+  const resolveFileUrl = (fileUrl: string, itemType?: string) => {
     if (!fileUrl) return "";
     if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://") || fileUrl.startsWith("data:") || fileUrl.startsWith("blob:")) {
       return fileUrl;
+    }
+    if (fileUrl.startsWith("iVBORw0KGgo") || fileUrl.startsWith("/9j/") || fileUrl.startsWith("JVBERi") || fileUrl.length > 500) {
+      const mime = itemType === "image" ? "image/jpeg" : "application/pdf";
+      return `data:${mime};base64,${fileUrl}`;
     }
     const baseUrl = getBaseUrl();
     const cleanPath = fileUrl.startsWith("/") ? fileUrl : `/${fileUrl}`;
@@ -2465,6 +2477,7 @@ function MainApp() {
   const [selectedCourseForm, setSelectedCourseForm] = useState<string | null>(null);
   const [courseAdmissionForm, setCourseAdmissionForm] = useState({ name: "", phone: "", email: "", city: "", mode: "" });
   const [submittingCourseAdmission, setSubmittingCourseAdmission] = useState(false);
+  const [showDynamicAppModal, setShowDynamicAppModal] = useState(false);
   // CRM Guest Posters admin state
   const [guestPosterList, setGuestPosterList] = useState<any[]>([]);
   const [guestPosterUploading, setGuestPosterUploading] = useState(false);
@@ -2673,6 +2686,7 @@ function MainApp() {
   const [aiChatInput, setAiChatInput] = useState('');
   const [aiChatLoading, setAiChatLoading] = useState(false);
   const [showStudentForm, setShowStudentForm] = useState(false);
+  const [showBulkStudentModal, setShowBulkStudentModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [videoPlayerModal, setVideoPlayerModal] = useState<{ visible: boolean, playerToken: string }>({ visible: false, playerToken: "" });
@@ -2716,6 +2730,7 @@ function MainApp() {
   const [showPdfTopicDropdown, setShowPdfTopicDropdown] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState("");
   const [guestPhoneInput, setGuestPhoneInput] = useState("");
+  const [guestConsentChecked, setGuestConsentChecked] = useState(false);
   const [guestContentTab, setGuestContentTab] = useState<"resources" | "tests" | "apply">("resources");
   const [showNoticesPanel, setShowNoticesPanel] = useState(false);
   const [showContactPanel, setShowContactPanel] = useState(false);
@@ -3165,10 +3180,12 @@ function MainApp() {
           if (sub) setGuestTab(sub);
         } else {
           setActiveTab(main);
-          if (main === "erp" && sub) setErpSub(sub);
-          if (main === "lms" && sub) setLmsSub(sub);
-          if (main === "crm" && sub) setCrmSub(sub);
-          if (main === "test" && sub) setTestSub(sub);
+          let normSub = sub;
+          if (main === "lms" && (normSub === "daily_content" || normSub === "dailycontent")) normSub = "daily-content";
+          if (main === "erp" && sub) setErpSub(normSub);
+          if (main === "lms" && sub) setLmsSub(normSub);
+          if (main === "crm" && sub) setCrmSub(normSub);
+          if (main === "test" && sub) setTestSub(normSub);
         }
       }
     };
@@ -3828,6 +3845,7 @@ function MainApp() {
   const [calendarTarget, setCalendarTarget] = useState<"newStudent" | "editingStudent" | "profileForm">("newStudent");
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [calendarView, setCalendarView] = useState<"days" | "months" | "years">("days");
+  const [uploadingImageQIdx, setUploadingImageQIdx] = useState<number | null>(null);
 
   const [newStaff, setNewStaff] = useState<any>({ firstName: "", lastName: "", employeeId: "", designation: "Faculty", department: "Polity", email: "", phone: "", loginUsername: "", loginPassword: "", role: "admin", customPermissions: {} });
   const [customRoles, setCustomRoles] = useState<string[]>([]);
@@ -4262,8 +4280,63 @@ function MainApp() {
   const [showInstructions, setShowInstructions] = useState(false);
   // Ref that counts how many times the student hid the tab during an exam
   const tabLeaveCountRef = useRef<number>(0);
+  const tabLeaveStartTimeRef = useRef<number | null>(null);
+  const lastViolationTimeRef = useRef<number>(0);
+  const submitTestAttemptRef = useRef<((isTimeout?: boolean) => Promise<void>) | null>(null);
+  const [proctorWarning, setProctorWarning] = useState<{
+    visible: boolean;
+    reason: string;
+    strikes: number;
+    maxStrikes: number;
+    isSubmitting: boolean;
+    durationAway?: number;
+  }>({
+    visible: false,
+    reason: "",
+    strikes: 0,
+    maxStrikes: 2,
+    isSubmitting: false,
+    durationAway: 0,
+  });
+
+  const enterFullscreen = () => {
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      try {
+        const elem = document.documentElement as any;
+        if (elem.requestFullscreen) {
+          elem.requestFullscreen().catch(() => {});
+        } else if (elem.webkitRequestFullscreen) {
+          elem.webkitRequestFullscreen();
+        } else if (elem.mozRequestFullScreen) {
+          elem.mozRequestFullScreen();
+        } else if (elem.msRequestFullscreen) {
+          elem.msRequestFullscreen();
+        }
+      } catch (_) {}
+    }
+  };
+
+  const exitFullscreen = () => {
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      try {
+        const doc = document as any;
+        if (doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement) {
+          if (doc.exitFullscreen) {
+            doc.exitFullscreen().catch(() => {});
+          } else if (doc.webkitExitFullscreen) {
+            doc.webkitExitFullscreen();
+          } else if (doc.mozCancelFullScreen) {
+            doc.mozCancelFullScreen();
+          } else if (doc.msExitFullscreen) {
+            doc.msExitFullscreen();
+          }
+        }
+      } catch (_) {}
+    }
+  };
   const [testFeedbacks, setTestFeedbacks] = useState<any[]>([]);
   const [loadingTestFeedbacks, setLoadingTestFeedbacks] = useState(false);
+  const [expandedFeedbackTests, setExpandedFeedbackTests] = useState<Record<string, boolean>>({});
   const [manualQuestionsJson, setManualQuestionsJson] = useState("");
   const [manualNumQuestions, setManualNumQuestions] = useState("");
   const [newInquiry, setNewInquiry] = useState({ name: "", email: "", phone: "", course: "", message: "" });
@@ -4649,10 +4722,24 @@ function MainApp() {
     }
     try {
       const res = await api.get(`/test-portal/evaluation/test/${testId}`);
-      setErpTestResults(res || []);
+      const data = res?.data || res || [];
+      if (Array.isArray(data) && data.length > 0) {
+        setErpTestResults(data);
+      } else {
+        const lbRes = await api.get(`/test-portal/review/leaderboard/${testId}`);
+        const lbData = lbRes?.data || lbRes || [];
+        setErpTestResults(Array.isArray(lbData) ? lbData : []);
+      }
     } catch (e) {
-      console.log("Failed loading test results for ERP:", e);
-      setErpTestResults([]);
+      console.log("Failed loading test results for ERP, trying leaderboard fallback:", e);
+      try {
+        const lbRes = await api.get(`/test-portal/review/leaderboard/${testId}`);
+        const lbData = lbRes?.data || lbRes || [];
+        setErpTestResults(Array.isArray(lbData) ? lbData : []);
+      } catch (err) {
+        console.log("Failed loading leaderboard fallback for ERP:", err);
+        setErpTestResults([]);
+      }
     }
   };
 
@@ -4823,6 +4910,214 @@ function MainApp() {
               source={{ uri: previewImageUri }}
               style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
             />
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderProctorWarningModal = () => {
+    if (!proctorWarning.visible) return null;
+
+    const strikes = proctorWarning.strikes;
+    const remainingStrikes = Math.max(0, 2 - strikes);
+    const duration = proctorWarning.durationAway || 10;
+
+    let warningTitle = "⚠️ Exam Proctoring Warning";
+    let warningBody = "";
+
+    if (proctorWarning.isSubmitting || strikes >= 2) {
+      warningTitle = "🔒 Exam Locked & Auto-Submitting";
+      warningBody = `Maximum violation limit reached (2 of 2 strikes)! You switched tabs, exited fullscreen, or left the exam window twice. Your exam attempt has been eliminated and your test is submitting right now.`;
+    } else {
+      warningTitle = "🚨 FINAL WARNING: Strike 1 of 2";
+      warningBody = `You switched tabs, exited fullscreen, or left the exam window (${proctorWarning.reason || `away for ${duration}s`}). You have only 1 strike remaining! If you leave or switch tabs again, your exam will be eliminated and automatically submitted immediately.`;
+    }
+
+    if (Platform.OS === "web") {
+      return (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: "100vw",
+          height: "100vh",
+          backgroundColor: "rgba(0, 0, 0, 0.92)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2147483647,
+          fontFamily: "system-ui, -apple-system, sans-serif"
+        }}>
+          <div style={{
+            width: "92%",
+            maxWidth: 480,
+            backgroundColor: "#ffffff",
+            borderRadius: 18,
+            padding: "32px 26px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
+            borderTop: `8px solid ${proctorWarning.isSubmitting || strikes >= 2 ? "#d32f2f" : "#e65100"}`,
+            boxSizing: "border-box"
+          }}>
+            <div style={{
+              width: 68,
+              height: 68,
+              borderRadius: 34,
+              backgroundColor: proctorWarning.isSubmitting || strikes >= 2 ? "#ffebee" : "#fff3e0",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 16,
+              fontSize: 34
+            }}>
+              {proctorWarning.isSubmitting || strikes >= 2 ? "🔒" : "⚠️"}
+            </div>
+
+            <h3 style={{
+              margin: "0 0 10px 0",
+              fontSize: 21,
+              fontWeight: 800,
+              color: proctorWarning.isSubmitting || strikes >= 2 ? "#d32f2f" : "#c62828",
+              textAlign: "center"
+            }}>
+              {warningTitle}
+            </h3>
+
+            <p style={{
+              margin: "0 0 20px 0",
+              fontSize: 14,
+              color: "#424242",
+              textAlign: "center",
+              lineHeight: "1.55",
+              fontWeight: 500
+            }}>
+              {warningBody}
+            </p>
+
+            {/* Visual Strike Counter */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              backgroundColor: "#f5f5f5",
+              padding: "12px 18px",
+              borderRadius: 10,
+              marginBottom: 24,
+              gap: 10,
+              border: "1px solid #e0e0e0"
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>Strikes Used:</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[1, 2].map(sNum => (
+                  <div
+                    key={sNum}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: sNum <= strikes ? "#d32f2f" : "#e0e0e0",
+                      color: sNum <= strikes ? "#ffffff" : "#757575",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 13,
+                      fontWeight: 800,
+                      boxShadow: sNum <= strikes ? "0 2px 6px rgba(211,47,47,0.4)" : "none"
+                    }}
+                  >
+                    {sNum}
+                  </div>
+                ))}
+              </div>
+              <span style={{
+                fontSize: 12,
+                color: remainingStrikes === 0 ? "#d32f2f" : "#d84315",
+                fontWeight: 800,
+                marginLeft: 4
+              }}>
+                {remainingStrikes === 0 ? "(Limit Reached!)" : `(${remainingStrikes} strike remaining)`}
+              </span>
+            </div>
+
+            {proctorWarning.isSubmitting || strikes >= 2 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#d32f2f", fontWeight: 700, fontSize: 14 }}>
+                <span>Submitting and locking your test now...</span>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  enterFullscreen();
+                  setProctorWarning(prev => ({ ...prev, visible: false }));
+                }}
+                style={{
+                  backgroundColor: "#c62828",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "14px 28px",
+                  fontSize: 15,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  boxShadow: "0 4px 15px rgba(198,40,40,0.35)",
+                  transition: "all 0.2s ease"
+                }}
+              >
+                <span>⛶ I Understand — Return to Exam (Fullscreen)</span>
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Modal
+        visible={proctorWarning.visible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: "rgba(0, 0, 0, 0.9)",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 20
+        }}>
+          <View style={{
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            padding: 24,
+            maxWidth: 440,
+            width: "100%",
+            alignItems: "center"
+          }}>
+            <Text style={{ fontSize: 18, fontWeight: "bold", color: "#c62828", marginBottom: 8, textAlign: "center" }}>
+              {warningTitle}
+            </Text>
+            <Text style={{ fontSize: 13, color: "#616161", textAlign: "center", marginBottom: 16, lineHeight: 18 }}>
+              {warningBody}
+            </Text>
+            {!proctorWarning.isSubmitting && strikes < 2 && (
+              <TouchableOpacity
+                style={{ backgroundColor: "#c62828", padding: 12, borderRadius: 8, width: "100%", alignItems: "center" }}
+                onPress={() => {
+                  enterFullscreen();
+                  setProctorWarning(prev => ({ ...prev, visible: false }));
+                }}
+              >
+                <Text style={{ color: "#ffffff", fontWeight: "bold" }}>I Understand — Return to Exam</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -5091,6 +5386,24 @@ function MainApp() {
             console.log("Auto-login failed:", e);
           }
         }
+      }
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        try {
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistrations().then(registrations => {
+              for (const registration of registrations) {
+                registration.unregister();
+              }
+            }).catch(() => {});
+          }
+          if (typeof caches !== "undefined") {
+            caches.keys().then(names => {
+              for (const name of names) {
+                caches.delete(name);
+              }
+            }).catch(() => {});
+          }
+        } catch (_) {}
       }
       setIsInitialLoading(false);
     };
@@ -5452,85 +5765,166 @@ function MainApp() {
     return () => clearInterval(timer);
   }, [waitingRoomTest]);
 
-  // Anti-malpractice: block screenshots, clipboard, context menu during active exam
-  useEffect(() => {
-    return; // Disabled for development
-    if (!activeAttempt || Platform.OS !== "web") return;
 
-    // Block keyboard shortcuts used for screenshot/copy/inspect
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const blocked = [
-        e.key === "PrintScreen",
-        e.key === "F12",
-        (e.ctrlKey || e.metaKey) && ["c", "C", "x", "X", "p", "P", "s", "S", "u", "U", "a", "A"].includes(e.key),
-        (e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "I", "j", "J", "c", "C"].includes(e.key),
-      ];
-      if (blocked.some(Boolean)) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-
-    // Block right-click context menu
-    const handleContextMenu = (e: MouseEvent) => { e.preventDefault(); };
-
-    // Block copy/cut/paste events so content can't be clipboard-transferred
-    const handleCopy = (e: ClipboardEvent) => { e.preventDefault(); };
-    const handleCut = (e: ClipboardEvent) => { e.preventDefault(); };
-
-    // Apply CSS that causes most software screen-recorders to capture black
-    const styleEl = document.createElement("style");
-    styleEl.id = "exam-security-css";
-    styleEl.textContent = `
-      .exam-protected {
-        -webkit-user-select: none !important;
-        user-select: none !important;
-      }
-      /* Canvas-based isolation causes OBS/browser-extension recorders to see black */
-      .exam-protected-root {
-        isolation: isolate;
-        mix-blend-mode: normal;
-        will-change: transform;
-      }
-    `;
-    document.head.appendChild(styleEl);
-
-    document.addEventListener("keydown", handleKeyDown, true);
-    document.addEventListener("contextmenu", handleContextMenu, true);
-    document.addEventListener("copy", handleCopy, true);
-    document.addEventListener("cut", handleCut, true);
-
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown, true);
-      document.removeEventListener("contextmenu", handleContextMenu, true);
-      document.removeEventListener("copy", handleCopy, true);
-      document.removeEventListener("cut", handleCut, true);
-      const el = document.getElementById("exam-security-css");
-      if (el) el.remove();
-    };
-  }, [activeAttempt]);
-
-  // Tab-leave tracker: counts how many times the student hides the tab during an exam
+  // Proctoring tracker: enforces fullscreen, tracks tab-switches / focus loss and 2-strike auto-submit
   useEffect(() => {
     if (!activeAttempt || Platform.OS !== "web") return;
     tabLeaveCountRef.current = 0;
+    tabLeaveStartTimeRef.current = null;
+    lastViolationTimeRef.current = 0;
+    setProctorWarning({
+      visible: false,
+      reason: "",
+      strikes: 0,
+      maxStrikes: 2,
+      isSubmitting: false,
+      durationAway: 0,
+    });
 
-    const handleVisibilityChange = async () => {
+    // Enter fullscreen when starting/resuming exam
+    enterFullscreen();
+
+    const triggerViolationStrike = (reason: string, awaySecs: number = 1) => {
+      if (submitInProgressRef.current) return;
+
+      const now = Date.now();
+      if (now - lastViolationTimeRef.current < 1500) return;
+      lastViolationTimeRef.current = now;
+
+      tabLeaveCountRef.current += 1;
+      const currentStrikes = tabLeaveCountRef.current;
+      const maxStrikes = 2;
+      const durationSeconds = Math.max(1, awaySecs);
+
+      try {
+        api.post(
+          `/test-portal/examination/focus-event/${activeAttempt.attemptId}`,
+          { event: "blur", tabLeaveCount: currentStrikes, durationSeconds, reason },
+          { "user-id": user?.userId || "" }
+        ).catch(() => {});
+      } catch (_) {}
+
+      if (currentStrikes >= maxStrikes) {
+        setProctorWarning({
+          visible: true,
+          reason: `${reason} (${durationSeconds}s)`,
+          strikes: currentStrikes,
+          maxStrikes: 2,
+          isSubmitting: true,
+          durationAway: durationSeconds,
+        });
+
+        // Auto-submit test attempt
+        setTimeout(() => {
+          if (submitTestAttemptRef.current) {
+            submitTestAttemptRef.current(false);
+          }
+        }, 2500);
+      } else {
+        setProctorWarning({
+          visible: true,
+          reason: `${reason} (${durationSeconds}s)`,
+          strikes: currentStrikes,
+          maxStrikes: 2,
+          isSubmitting: false,
+          durationAway: durationSeconds,
+        });
+      }
+    };
+
+    const onUserLeft = (reason: string) => {
+      if (submitInProgressRef.current) return;
+      if (!tabLeaveStartTimeRef.current) {
+        tabLeaveStartTimeRef.current = Date.now();
+      }
+    };
+
+    const onUserReturned = (reason: string = "Tab switched / focus lost") => {
+      if (submitInProgressRef.current) return;
+      let durationSeconds = 1;
+      if (tabLeaveStartTimeRef.current) {
+        const timeAwayMs = Date.now() - tabLeaveStartTimeRef.current;
+        durationSeconds = Math.max(1, Math.round(timeAwayMs / 1000));
+        tabLeaveStartTimeRef.current = null;
+      }
+      triggerViolationStrike(reason, durationSeconds);
+    };
+
+    // Periodic check while away: if student stays away continuously for > 5s while in background
+    const awayWatcher = setInterval(() => {
+      if (submitInProgressRef.current) return;
+      if (tabLeaveStartTimeRef.current) {
+        const awaySeconds = Math.round((Date.now() - tabLeaveStartTimeRef.current) / 1000);
+        if (awaySeconds >= 5 && tabLeaveCountRef.current >= 1) {
+          tabLeaveStartTimeRef.current = null;
+          triggerViolationStrike("Away from exam continuously", awaySeconds);
+        }
+      }
+    }, 1000);
+
+    const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        tabLeaveCountRef.current += 1;
-        // Notify backend so the count persists in attempt document
-        try {
-          await api.post(
-            `/test-portal/examination/focus-event/${activeAttempt.attemptId}`,
-            { event: "blur", tabLeaveCount: tabLeaveCountRef.current },
-            { "user-id": user?.userId || "" }
-          );
-        } catch (_) { /* non-critical, ignore network errors */ }
+        onUserLeft("Tab switched / minimized");
+      } else {
+        onUserReturned("Tab switched / minimized");
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      const doc = document as any;
+      const isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+      if (!isFullscreen && !submitInProgressRef.current) {
+        onUserReturned("Exited fullscreen mode");
+      }
+    };
+
+    const handleWindowBlur = () => {
+      onUserLeft("Window blur / focus lost");
+    };
+
+    const handleWindowFocus = () => {
+      onUserReturned("Window blur / focus lost");
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      return false;
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && ["I", "i", "J", "j", "C", "c"].includes(e.key)) ||
+        (e.ctrlKey && ["u", "U", "c", "C", "v", "V", "a", "A", "p", "P"].includes(e.key))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("focus", handleWindowFocus);
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      clearInterval(awayWatcher);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("focus", handleWindowFocus);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [activeAttempt]);
 
   // Periodic background sync of answers from LocalStorage to Server (every 60s) to minimize DB write spikes.
@@ -7709,45 +8103,64 @@ function MainApp() {
     fileInput.onchange = async (e: any) => {
       const file = e.target?.files?.[0];
       if (!file) return;
+      setUploadingImageQIdx(qIdx);
       try {
-        // First compress locally (keeps bandwidth reasonable)
-        const compressedBase64 = await compressFileImage(file, 1200, 1200, 0.85);
+        // First compress locally (keeps bandwidth reasonable and prevents Firestore size limit errors)
+        const compressedBase64 = await compressFileImage(file, 800, 800, 0.7);
 
         // Try uploading to Google Drive via backend
         let finalImageUrl: string = compressedBase64;
         let uploadedToDrive = false;
+        let driveRes: any = null;
+
         try {
-          const driveRes = await api.current.post("/test-portal/test-creation/upload-question-image", {
+          driveRes = await api.post("/test-portal/test-creation/upload-question-image", {
             base64: compressedBase64,
             fileName: `q${qIdx + 1}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
             testTitle: newPdfTest.title || "Test"
           });
-          if (driveRes?.imageUrl) {
-            finalImageUrl = driveRes.imageUrl;
+          if (driveRes?.driveUrl || driveRes?.imageUrl) {
             uploadedToDrive = true;
           }
         } catch (driveErr: any) {
           console.warn("[Drive] Question image upload failed, falling back to base64:", driveErr?.message);
         }
 
-        // Update extractedQuestions and editingQData with the final URL (Drive URL or base64)
+        const driveUrl = driveRes?.driveUrl || (typeof driveRes?.imageUrl === "string" && driveRes.imageUrl.startsWith("http") ? driveRes.imageUrl : "");
+        const driveFileId = driveRes?.fileId || "";
+
+        // Update extractedQuestions and editingQData with local Base64 (for instant live test) + Drive URL (for backup)
         setExtractedQuestions(prev => {
           const updated = [...prev];
-          updated[qIdx] = { ...updated[qIdx], imageUrl: finalImageUrl };
+          updated[qIdx] = {
+            ...updated[qIdx],
+            imageUrl: compressedBase64,
+            imageBase64: compressedBase64,
+            driveUrl: driveUrl,
+            driveFileId: driveFileId
+          };
           return updated;
         });
         if (editingQIdx === qIdx && editingQData) {
-          setEditingQData((prev: any) => prev ? { ...prev, imageUrl: finalImageUrl } : null);
+          setEditingQData((prev: any) => prev ? {
+            ...prev,
+            imageUrl: compressedBase64,
+            imageBase64: compressedBase64,
+            driveUrl: driveUrl,
+            driveFileId: driveFileId
+          } : null);
         }
 
         Alert.alert(
           "Image Attached!",
           uploadedToDrive
-            ? `Image uploaded to Google Drive and attached to Question #${qIdx + 1}.`
+            ? `Image uploaded to Google Drive & saved for live exam on Question #${qIdx + 1}.`
             : `Image attached to Question #${qIdx + 1} (stored locally — Drive upload unavailable).`
         );
       } catch (err: any) {
         Alert.alert("Upload Error", err.message || "Could not read image file.");
+      } finally {
+        setUploadingImageQIdx(null);
       }
     };
     fileInput.click();
@@ -7843,6 +8256,8 @@ function MainApp() {
 
   // Clears all active exam state — must be called on every login/logout to prevent session leaks
   const clearExamState = () => {
+    exitFullscreen();
+    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 3, isSubmitting: false });
     setActiveAttempt(null);
     setExamEndTime(null);
     setTimeLeft(0);
@@ -9260,6 +9675,7 @@ function MainApp() {
           targetLanguages: test?.targetLanguages || attemptRes?.targetLanguages,
           creationMode: test?.creationMode || attemptRes?.creationMode
         });
+        enterFullscreen();
 
         // Load questions: prefer local draft if available, otherwise fetch from server
         let qList = localDraft?.questions || [];
@@ -9310,6 +9726,7 @@ function MainApp() {
         targetLanguages: test?.targetLanguages || attemptData?.targetLanguages,
         creationMode: test?.creationMode || attemptData?.creationMode
       });
+      enterFullscreen();
 
       const remSec = attemptData.remainingTime ?? (attemptData.durationMinutes * 60);
       setTimeLeft(remSec);
@@ -9372,6 +9789,8 @@ function MainApp() {
     const answersToFlush = { ...selectedAnswers };
 
     // IMMEDIATELY CLOSE THE EXAM VIEW so the student is never stuck on 00:00 or questions page
+    exitFullscreen();
+    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 3, isSubmitting: false });
     setActiveAttempt(null);
     setExamEndTime(0);
     setReviewLoading(true);
@@ -9466,9 +9885,11 @@ function MainApp() {
       loadTests();
       await launchReview(attemptId);
     } finally {
+      submitInProgressRef.current = false;
       setReviewLoading(false);
     }
   };
+  submitTestAttemptRef.current = submitTestAttempt;
 
 
   // ================== DEVELOPER PORTAL ==================
@@ -9656,6 +10077,7 @@ function MainApp() {
             </View>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+
             <View style={{ backgroundColor: darkMode ? "rgba(46, 125, 50, 0.15)" : "#e8f5e9", borderWidth: 1, borderColor: "#2e7d32", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}>
               <Text style={{ color: "#2e7d32", fontSize: 10, fontWeight: "bold" }}>● DB ONLINE</Text>
             </View>
@@ -11231,58 +11653,173 @@ function MainApp() {
                     <Text style={{ color: "#888", marginTop: 10, fontSize: 12, fontWeight: "bold" }}>No Feedback Received Yet</Text>
                     <Text style={{ color: "#aaa", marginTop: 4, fontSize: 11, textAlign: "center" }}>Create a test with feedback enabled and take it to populate this section.</Text>
                   </View>
-                ) : (
-                  testFeedbacks.map((f: any) => (
-                    <View key={f.id} style={{
-                      padding: 14,
-                      borderRadius: 12,
-                      borderWidth: 1.5,
-                      borderColor: darkMode ? "#333" : "#e0e0e0",
-                      backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
-                      marginBottom: 12,
-                      shadowColor: "#000",
-                      shadowOffset: { width: 0, height: 1 },
-                      shadowOpacity: 0.05,
-                      shadowRadius: 2,
-                      elevation: 1
-                    }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8, alignItems: "center" }}>
-                        <Text style={{ fontWeight: "800", color: darkMode ? "#ffb74d" : "#e65100", fontSize: 13, flex: 1, marginRight: 8 }}>
-                          {f.testTitle}
-                        </Text>
-                        <View style={{ flexDirection: "row" }}>
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <Ionicons
-                              key={i}
-                              name={i < (f.rating || 5) ? "star" : "star-outline"}
-                              size={14}
-                              color="#fbc02d"
-                            />
-                          ))}
-                        </View>
-                      </View>
-                      <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#212121", fontStyle: "italic", marginBottom: 10, lineHeight: 18 }}>
-                        "{f.comments}"
-                      </Text>
-                      <View style={{
-                        flexDirection: "row",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        borderTopWidth: 0.5,
-                        borderTopColor: darkMode ? "#333" : "#eee",
-                        paddingTop: 8,
-                        marginTop: 4
-                      }}>
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                          <Text style={{ fontSize: 11, color: darkMode ? "#fff" : "#212121", fontWeight: "700" }}>{f.studentName}</Text>
-                        </View>
-                        <Text style={{ fontSize: 10, color: "#888" }}>
-                          {f.submittedAt ? new Date(f.submittedAt).toLocaleString() : ""}
-                        </Text>
-                      </View>
+                ) : (() => {
+                  const groupedMap = new Map<string, { title: string; testId: string; list: any[]; avgRating: number }>();
+                  testFeedbacks.forEach((f: any) => {
+                    const tKey = f.testTitle || f.testId || "Untitled Test";
+                    if (!groupedMap.has(tKey)) {
+                      groupedMap.set(tKey, { title: tKey, testId: f.testId || "", list: [], avgRating: 0 });
+                    }
+                    groupedMap.get(tKey)!.list.push(f);
+                  });
+
+                  const testGroups = Array.from(groupedMap.values()).map(g => {
+                    const totalRating = g.list.reduce((sum, item) => sum + (Number(item.rating) || 5), 0);
+                    g.avgRating = g.list.length > 0 ? (totalRating / g.list.length) : 5;
+                    return g;
+                  });
+
+                  return (
+                    <View style={{ gap: 12 }}>
+                      {testGroups.map((group, gIdx) => {
+                        const isExpanded = expandedFeedbackTests[group.title] ?? true;
+                        return (
+                          <View
+                            key={group.title + gIdx}
+                            style={{
+                              borderRadius: 12,
+                              borderWidth: 1.5,
+                              borderColor: darkMode ? "#333" : "#e0e0e0",
+                              backgroundColor: darkMode ? "#1e1e1e" : "#f9fbfd",
+                              overflow: "hidden",
+                              shadowColor: "#000",
+                              shadowOffset: { width: 0, height: 1 },
+                              shadowOpacity: 0.05,
+                              shadowRadius: 2,
+                              elevation: 1
+                            }}
+                          >
+                            <TouchableOpacity
+                              onPress={() => {
+                                setExpandedFeedbackTests(prev => ({
+                                  ...prev,
+                                  [group.title]: !isExpanded
+                                }));
+                              }}
+                              activeOpacity={0.7}
+                              style={{
+                                paddingHorizontal: 16,
+                                paddingVertical: 14,
+                                flexDirection: "row",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                backgroundColor: darkMode ? "#262626" : "#f0f4f8",
+                                borderBottomWidth: isExpanded ? 1 : 0,
+                                borderBottomColor: darkMode ? "#333" : "#e2e8f0"
+                              }}
+                            >
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1, marginRight: 10 }}>
+                                <View style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 8,
+                                  backgroundColor: darkMode ? "#332222" : "#ffebee",
+                                  alignItems: "center",
+                                  justifyContent: "center"
+                                }}>
+                                  <Ionicons name="clipboard" size={16} color="#c62828" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontSize: 14, fontWeight: "800", color: darkMode ? "#ffffff" : "#1a202c" }}>
+                                    {group.title}
+                                  </Text>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+                                    <Text style={{ fontSize: 11, color: darkMode ? "#a0aec0" : "#718096", fontWeight: "600" }}>
+                                      {group.list.length} {group.list.length === 1 ? "Review" : "Reviews"}
+                                    </Text>
+                                    <Text style={{ fontSize: 11, color: darkMode ? "#a0aec0" : "#718096" }}>•</Text>
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                                      <Ionicons name="star" size={11} color="#fbc02d" />
+                                      <Text style={{ fontSize: 11, fontWeight: "700", color: darkMode ? "#ecc94b" : "#b7791f" }}>
+                                        {group.avgRating.toFixed(1)}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                </View>
+                              </View>
+
+                              <View style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 14,
+                                backgroundColor: darkMode ? "#333" : "#e2e8f0",
+                                alignItems: "center",
+                                justifyContent: "center"
+                              }}>
+                                <Ionicons
+                                  name={isExpanded ? "chevron-up" : "chevron-down"}
+                                  size={16}
+                                  color={darkMode ? "#fff" : "#4a5568"}
+                                />
+                              </View>
+                            </TouchableOpacity>
+
+                            {isExpanded && (
+                              <View style={{ padding: 14, gap: 10, backgroundColor: darkMode ? "#1a1a1a" : "#ffffff" }}>
+                                {group.list.map((f: any, fIdx: number) => (
+                                  <View
+                                    key={f.id || fIdx}
+                                    style={{
+                                      padding: 12,
+                                      borderRadius: 10,
+                                      borderWidth: 1,
+                                      borderColor: darkMode ? "#2d3748" : "#edf2f7",
+                                      backgroundColor: darkMode ? "#222" : "#fbfcfe"
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                        <View style={{
+                                          width: 22,
+                                          height: 22,
+                                          borderRadius: 11,
+                                          backgroundColor: darkMode ? "#2b6cb0" : "#ebf8ff",
+                                          alignItems: "center",
+                                          justifyContent: "center"
+                                        }}>
+                                          <Ionicons name="person" size={11} color="#3182ce" />
+                                        </View>
+                                        <Text style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#e2e8f0" : "#2d3748" }}>
+                                          {f.studentName || "Student"}
+                                        </Text>
+                                        {f.studentEmail ? (
+                                          <Text style={{ fontSize: 11, color: darkMode ? "#718096" : "#a0aec0" }}>
+                                            ({f.studentEmail})
+                                          </Text>
+                                        ) : null}
+                                      </View>
+
+                                      <View style={{ flexDirection: "row", alignItems: "center", gap: 1 }}>
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                          <Ionicons
+                                            key={i}
+                                            name={i < (Number(f.rating) || 5) ? "star" : "star-outline"}
+                                            size={13}
+                                            color="#fbc02d"
+                                          />
+                                        ))}
+                                      </View>
+                                    </View>
+
+                                    <Text style={{ fontSize: 13, color: darkMode ? "#cbd5e0" : "#4a5568", fontStyle: "italic", marginBottom: 6, lineHeight: 18 }}>
+                                      "{f.comments || "No comments provided."}"
+                                    </Text>
+
+                                    <View style={{ flexDirection: "row", justifyContent: "flex-end", borderTopWidth: 0.5, borderTopColor: darkMode ? "#2d3748" : "#edf2f7", paddingTop: 4 }}>
+                                      <Text style={{ fontSize: 10, color: darkMode ? "#718096" : "#a0aec0" }}>
+                                        {f.submittedAt ? new Date(f.submittedAt).toLocaleString() : ""}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
                     </View>
-                  ))
-                )}
+                  );
+                })()}
               </ScrollView>
             )}
 
@@ -12378,9 +12915,33 @@ function MainApp() {
                         />
                       </View>
 
+                      {/* User Data Consent Checkbox */}
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => setGuestConsentChecked(prev => !prev)}
+                        style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginVertical: 4 }}
+                      >
+                        <View style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 4,
+                          borderWidth: 1.5,
+                          borderColor: guestConsentChecked ? "#c62828" : "#9e9e9e",
+                          backgroundColor: guestConsentChecked ? "#c62828" : "#ffffff",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginTop: 1
+                        }}>
+                          {guestConsentChecked && <Ionicons name="checkmark" size={14} color="#ffffff" />}
+                        </View>
+                        <Text style={{ flex: 1, fontSize: 12, color: "#424242", lineHeight: 17 }}>
+                          I agree and consent to the collection and use of my data for communication & registration purposes.
+                        </Text>
+                      </TouchableOpacity>
+
                       {(() => {
                         const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
-                        const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
+                        const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10 && guestConsentChecked;
                         return (
                           <View style={{ gap: 8 }}>
                             <TouchableOpacity
@@ -12393,7 +12954,7 @@ function MainApp() {
                             </TouchableOpacity>
                             {!isFormFilled && (
                               <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
-                                {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
+                                {!guestNameInput.trim() ? "* Please enter your name." : cleanPhoneVal.length !== 10 ? `* Phone must be 10 digits (${cleanPhoneVal.length}/10).` : "* Please consent to user data terms to continue."}
                               </Text>
                             )}
                           </View>
@@ -13611,9 +14172,34 @@ function MainApp() {
                         onChangeText={v => setGuestPhoneInput(cleanPhone(v))}
                       />
                     </View>
+
+                    {/* User Data Consent Checkbox */}
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => setGuestConsentChecked(prev => !prev)}
+                      style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginVertical: 4 }}
+                    >
+                      <View style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 4,
+                        borderWidth: 1.5,
+                        borderColor: guestConsentChecked ? "#1565c0" : "#9e9e9e",
+                        backgroundColor: guestConsentChecked ? "#1565c0" : "#ffffff",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginTop: 1
+                      }}>
+                        {guestConsentChecked && <Ionicons name="checkmark" size={14} color="#ffffff" />}
+                      </View>
+                      <Text style={{ flex: 1, fontSize: 12, color: "#424242", lineHeight: 17 }}>
+                        I agree and consent to the collection and use of my data for communication & registration purposes.
+                      </Text>
+                    </TouchableOpacity>
+
                     {(() => {
                       const cleanPhoneVal = guestPhoneInput.trim().replace(/\D/g, "");
-                      const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10;
+                      const isFormFilled = guestNameInput.trim() !== "" && cleanPhoneVal.length === 10 && guestConsentChecked;
                       return (
                         <View style={{ gap: 8 }}>
                           <TouchableOpacity
@@ -13626,7 +14212,7 @@ function MainApp() {
                           </TouchableOpacity>
                           {!isFormFilled && (
                             <Text style={{ fontSize: 11, color: "#c62828", textAlign: "center", fontStyle: "italic" }}>
-                              {!guestNameInput.trim() ? "* Please enter your name." : `* Phone must be 10 digits (${guestPhoneInput.replace(/\D/g, "").length}/10).`}
+                              {!guestNameInput.trim() ? "* Please enter your name." : cleanPhoneVal.length !== 10 ? `* Phone must be 10 digits (${cleanPhoneVal.length}/10).` : "* Please consent to user data terms to continue."}
                             </Text>
                           )}
                         </View>
@@ -13988,13 +14574,37 @@ function MainApp() {
                     maxLength={10}
                   />
                 </View>
+
+                {/* User Data Consent Checkbox */}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setGuestConsentChecked(prev => !prev)}
+                  style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginVertical: 4 }}
+                >
+                  <View style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: 4,
+                    borderWidth: 1.5,
+                    borderColor: guestConsentChecked ? "#4285F4" : "#9e9e9e",
+                    backgroundColor: guestConsentChecked ? "#4285F4" : "#ffffff",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginTop: 1
+                  }}>
+                    {guestConsentChecked && <Ionicons name="checkmark" size={14} color="#ffffff" />}
+                  </View>
+                  <Text style={{ flex: 1, fontSize: 12, color: "#424242", lineHeight: 17 }}>
+                    I agree and consent to the collection and use of my data for communication & registration purposes.
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               {/* Firebase Google Sign In Button */}
               {(() => {
                 const cleanGuestPhone = guestPhoneInput.trim().replace(/\D/g, "");
                 const isPhoneValid = cleanGuestPhone.length === 10;
-                const isFormFilled = guestNameInput.trim() !== "" && isPhoneValid;
+                const isFormFilled = guestNameInput.trim() !== "" && isPhoneValid && guestConsentChecked;
                 return (
                   <View style={{ gap: 8 }}>
                     <TouchableOpacity
@@ -14028,7 +14638,9 @@ function MainApp() {
                           ? "* Please enter your Name to proceed."
                           : !isPhoneValid
                             ? `* Contact number must be exactly 10 digits (Current: ${cleanGuestPhone.length}/10).`
-                            : "* Ready to sign in."}
+                            : !guestConsentChecked
+                              ? "* Please consent to user data terms to continue."
+                              : "* Ready to sign in."}
                       </Text>
                     )}
                   </View>
@@ -14274,6 +14886,51 @@ function MainApp() {
                 </View>
               )}
 
+              {/* Prominent Mock Test / Custom Application Form Card on Guest Home */}
+              <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!user) { setPendingGuestTab("courses"); setShowGuestGoogleAuthModal(true); return; }
+                    setShowDynamicAppModal(true);
+                  }}
+                  style={[
+                    styles.card,
+                    darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
+                    {
+                      backgroundColor: darkMode ? "#241212" : "#fef2f2",
+                      borderColor: "#b91c1c",
+                      borderWidth: 1.5,
+                      borderRadius: 14,
+                      padding: 16,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 14,
+                      shadowColor: "#b91c1c",
+                      shadowOpacity: 0.1,
+                      shadowRadius: 6
+                    }
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 22 }}>📝</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>Mock Test Application Form</Text>
+                      <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
+                      Register for upcoming academy mock tests and scholarship evaluation.
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                    <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
 
               {/* Daily IAS Study Content Section for Guests */}
               {user && (() => {
@@ -14454,10 +15111,54 @@ function MainApp() {
           {/* ── APPLY TAB — Per-Course Application Forms ─────────────────────── */}
           {guestContentTab === "apply" && (
             <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              {/* Prominent Mock Test Application Form Card */}
+              <TouchableOpacity
+                onPress={() => {
+                  if (!user) { setPendingGuestTab("apply"); setShowGuestGoogleAuthModal(true); return; }
+                  setShowDynamicAppModal(true);
+                }}
+                style={[
+                  styles.card,
+                  darkMode && { backgroundColor: "#1e1e1e", borderColor: "#333" },
+                  {
+                    backgroundColor: darkMode ? "#241212" : "#fef2f2",
+                    borderColor: "#b91c1c",
+                    borderWidth: 1.5,
+                    borderRadius: 14,
+                    padding: 16,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 14,
+                    shadowColor: "#b91c1c",
+                    shadowOpacity: 0.1,
+                    shadowRadius: 6
+                  }
+                ]}
+                activeOpacity={0.85}
+              >
+                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "#b91c1c22", alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 22 }}>📝</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "900", color: "#b91c1c" }}>Mock Test Application Form</Text>
+                    <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>SPECIAL</Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#4b5563", marginTop: 2 }}>
+                    Register for upcoming academy mock tests and scholarship evaluation.
+                  </Text>
+                </View>
+                <View style={{ backgroundColor: "#b91c1c", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                  <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>Apply</Text>
+                </View>
+              </TouchableOpacity>
+
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4, marginTop: 4 }}>
                 <View style={{ width: 4, height: 22, borderRadius: 2, backgroundColor: "#2e7d32" }} />
                 <View>
-                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Apply for a Course</Text>
+                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Apply for Regular Courses</Text>
                   <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#757575", marginTop: 1 }}>Select a course to apply</Text>
                 </View>
               </View>
@@ -14538,6 +15239,182 @@ function MainApp() {
             );
           })}
         </View>
+
+        {/* Dynamic Mock Test / Custom Application Modal for Guest Portal */}
+        {showDynamicAppModal && (
+          <Suspense fallback={null}>
+            <DynamicApplicationModal
+              visible={showDynamicAppModal}
+              onClose={() => setShowDynamicAppModal(false)}
+              prefillName={user?.name || ""}
+              prefillPhone={user?.phone || ""}
+              prefillEmail={user?.email || ""}
+            />
+          </Suspense>
+        )}
+
+        {/* Daily Content Preview Modal for Guest Portal */}
+        {selectedDailyContentPreview && (
+          <Modal
+            visible={true}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setSelectedDailyContentPreview(null)}
+          >
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.75)", justifyContent: "center", alignItems: "center", padding: 16 }}>
+              <View style={{
+                width: "100%",
+                maxWidth: 900,
+                height: "88%",
+                backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+                borderRadius: 12,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column"
+              }}>
+                {/* Modal Header */}
+                <View style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: 14,
+                  backgroundColor: "#c62828"
+                }}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={{ color: "#fff", fontSize: 15, fontWeight: "bold" }} numberOfLines={1}>
+                      {selectedDailyContentPreview.title || "Daily Study Material"}
+                    </Text>
+                    <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11 }}>
+                      {selectedDailyContentPreview.date} • {selectedDailyContentPreview.type ? selectedDailyContentPreview.type.toUpperCase() : 'PDF'}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    {isAdmin && (selectedDailyContentPreview.fileBase64 || selectedDailyContentPreview.url) && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (typeof window !== "undefined") {
+                            const targetSrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
+                            if (selectedDailyContentPreview.url) {
+                              window.open(targetSrc, "_blank");
+                            } else if (selectedDailyContentPreview.fileBase64) {
+                              const win = window.open();
+                              if (win) {
+                                win.document.write(`<iframe src="${targetSrc}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                              }
+                            }
+                          }
+                        }}
+                        style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.2)" }}
+                      >
+                        <Text style={{ color: "#fff", fontSize: 11, fontWeight: "bold" }}>Open In New Tab ↗</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => setSelectedDailyContentPreview(null)}>
+                      <Ionicons name="close-circle" size={24} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Modal Body */}
+                <View style={{ flex: 1, backgroundColor: darkMode ? "#111" : "#f5f5f5", justifyContent: "center", alignItems: "center", padding: 8 }}>
+                  {(() => {
+                    let rawSrc = selectedDailyContentPreview.fileBase64 || selectedDailyContentPreview.url;
+                    if (selectedDailyContentPreview.url && (selectedDailyContentPreview.url.startsWith("http://") || selectedDailyContentPreview.url.startsWith("https://"))) {
+                      rawSrc = selectedDailyContentPreview.url;
+                    }
+                    let displaySrc = resolveFileUrl(rawSrc, selectedDailyContentPreview.type);
+
+                    if (!displaySrc) {
+                      return <Text style={{ color: darkMode ? "#ccc" : "#333" }}>Preview is not available for this item.</Text>;
+                    }
+
+                    // Helper to extract Google Drive file ID
+                    const getGoogleDriveId = (urlStr: string) => {
+                      if (!urlStr) return null;
+                      const m1 = urlStr.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                      if (m1) return m1[1];
+                      const m2 = urlStr.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                      if (m2) return m2[1];
+                      return null;
+                    };
+
+                    const driveId = getGoogleDriveId(displaySrc);
+                    if (selectedDailyContentPreview.type === "image" && driveId) {
+                      displaySrc = `https://lh3.googleusercontent.com/d/${driveId}`;
+                    }
+
+                    // 1. If running on native mobile phone (Android / iOS), do NOT render HTML iframe or img tags to avoid crashes
+                    if (Platform.OS !== "web") {
+                      if (selectedDailyContentPreview.type === "image") {
+                        return <NativeDailyImageZoomView imgSrc={displaySrc} darkMode={darkMode} />;
+                      }
+                      // For PDFs and other documents — use WebView to render inline inside the modal
+                      const { WebView } = require("react-native-webview");
+                      const pdfViewUrl = displaySrc.startsWith("http")
+                        ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(displaySrc)}`
+                        : displaySrc;
+                      return (
+                        <WebView
+                          source={{ uri: pdfViewUrl }}
+                          style={{ flex: 1, width: "100%", backgroundColor: darkMode ? "#111" : "#fff" }}
+                          javaScriptEnabled={true}
+                          domStorageEnabled={true}
+                          startInLoadingState={true}
+                          renderLoading={() => (
+                            <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: darkMode ? "#111" : "#f5f5f5" }}>
+                              <ActivityIndicator size="large" color="#c62828" />
+                              <Text style={{ color: darkMode ? "#ccc" : "#555", marginTop: 10 }}>Loading document…</Text>
+                            </View>
+                          )}
+                        />
+                      );
+                    }
+
+                    if (selectedDailyContentPreview.type === "pdf" && !isAdmin && !displaySrc.includes("drive.google.com")) {
+                      displaySrc = `${displaySrc}#toolbar=0`;
+                    }
+                    if (selectedDailyContentPreview.type === "image") {
+                      const imgSrc = driveId
+                        ? `https://lh3.googleusercontent.com/d/${driveId}`
+                        : displaySrc;
+                      return <WebDailyImageZoomView imgSrc={imgSrc} alt={selectedDailyContentPreview.title} driveId={driveId} darkMode={darkMode} />;
+                    }
+
+                    // Ensure Google Drive file URLs are converted to /preview embed format
+                    const isDriveUrl = displaySrc.includes("drive.google.com") || displaySrc.includes("docs.google.com");
+                    if (isDriveUrl && !displaySrc.includes("/preview") && !displaySrc.includes("/embeddedfolderview")) {
+                      displaySrc = formatGoogleDriveUrl(displaySrc);
+                    }
+                    return (
+                      <View style={{ flex: 1, width: "100%", position: "relative" }}>
+                        <iframe
+                          key={displaySrc}
+                          src={displaySrc}
+                          title={selectedDailyContentPreview.title}
+                          style={{ width: "100%", height: "100%", border: "none", borderRadius: 8, backgroundColor: "#fff" }}
+                          allow="autoplay; encrypted-media; fullscreen"
+                          allowFullScreen
+                          referrerPolicy="no-referrer-when-downgrade"
+                        />
+                        {isDriveUrl && (
+                          <View style={{ position: "absolute", bottom: 12, right: 12 }}>
+                            <TouchableOpacity
+                              onPress={() => { if (typeof window !== "undefined") window.open(displaySrc.replace("/preview", "/view"), "_blank"); }}
+                              style={{ backgroundColor: "#1a73e8", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6 }}
+                            >
+                              <Ionicons name="open-outline" size={14} color="#fff" />
+                              <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>Open in Google Drive</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+            </View>
+          </Modal>
+        )}
 
         {/* Secure PDF Container Modal for Guest Portal */}
         {selectedResourceId && (
@@ -14625,7 +15502,6 @@ function MainApp() {
             <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT INSTRUCTIONS</Text>
             {[
               { icon: "🚫", text: "Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to the admin." },
-              { icon: "🚫", text: "Screen recording, screenshots, and PrintScreen shortcuts are disabled during the exam." },
               { icon: "🚫", text: "Right-click, Copy, and Cut operations are disabled — text cannot be extracted from the exam." },
               { icon: "✅", text: "You MUST visit ALL questions before the Submit button becomes available." },
               { icon: "⏰", text: "The exam auto-submits when the timer reaches 00:00. Ensure you click Submit before time runs out." },
@@ -14845,7 +15721,6 @@ function MainApp() {
               <Text style={{ fontWeight: "800", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>GENERAL RULES</Text>
               {[
                 "🚫 Do NOT switch tabs or minimize the browser during the test — each tab-switch is recorded.",
-                "🚫 Screenshot & screen-recording shortcuts are disabled.",
                 "🚫 Right-click, copy, and cut operations are blocked.",
                 "✅ You must visit ALL questions before the Submit button appears.",
                 "⏰ The exam auto-submits when the timer reaches 00:00.",
@@ -15133,6 +16008,7 @@ function MainApp() {
           </View>
         )}
         {renderUniversalImagePreviewModal()}
+        {renderProctorWarningModal()}
       </SafeAreaView>
     );
   }
@@ -15417,6 +16293,7 @@ function MainApp() {
         </ScrollView>
         {renderTestFeedbackModal()}
         {renderUniversalImagePreviewModal()}
+        {renderProctorWarningModal()}
       </SafeAreaView>
     );
   }
@@ -15468,6 +16345,8 @@ function MainApp() {
                 <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#212121" }}>Send Feedback</Text>
               </TouchableOpacity>
             )}
+
+
 
             <TouchableOpacity
               style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, gap: 10, borderRadius: 6 }}
@@ -18365,15 +19244,26 @@ function MainApp() {
                                           source={{ uri: editingQData.imageUrl || editingQData.questionImage }}
                                           style={{ width: 220, height: 130, borderRadius: 8, resizeMode: "contain", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e0e0e0" }}
                                         />
-                                        <View style={{ flexDirection: "row", gap: 8 }}>
+                                        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
                                           <TouchableOpacity
+                                            disabled={uploadingImageQIdx === editingQIdx}
                                             onPress={() => handleUploadQuestionImage(editingQIdx)}
-                                            style={{ backgroundColor: "#0288d1", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
+                                            style={{ backgroundColor: uploadingImageQIdx === editingQIdx ? "#0277bd" : "#0288d1", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6 }}
                                           >
-                                            <Ionicons name="image-outline" size={14} color="#ffffff" />
-                                            <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>Change Image File</Text>
+                                            {uploadingImageQIdx === editingQIdx ? (
+                                              <>
+                                                <ActivityIndicator size="small" color="#ffffff" />
+                                                <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>Uploading...</Text>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Ionicons name="image-outline" size={14} color="#ffffff" />
+                                                <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>Change Image File</Text>
+                                              </>
+                                            )}
                                           </TouchableOpacity>
                                           <TouchableOpacity
+                                            disabled={uploadingImageQIdx === editingQIdx}
                                             onPress={() => setEditingQData({ ...editingQData, imageUrl: "", questionImage: "" })}
                                             style={{ backgroundColor: "#c62828", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 4 }}
                                           >
@@ -18381,16 +19271,38 @@ function MainApp() {
                                             <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>Remove Image</Text>
                                           </TouchableOpacity>
                                         </View>
+                                        {uploadingImageQIdx === editingQIdx && (
+                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#e3f2fd", padding: 8, borderRadius: 6, borderWidth: 1, borderColor: "#90caf9", marginTop: 4 }}>
+                                            <ActivityIndicator size="small" color="#1976d2" />
+                                            <Text style={{ color: "#0d47a1", fontSize: 11, fontWeight: "bold" }}>Uploading image to Google Drive & compressing...</Text>
+                                          </View>
+                                        )}
                                       </View>
                                     ) : (
                                       <View style={{ gap: 8, marginBottom: 12 }}>
                                         <TouchableOpacity
+                                          disabled={uploadingImageQIdx === editingQIdx}
                                           onPress={() => handleUploadQuestionImage(editingQIdx)}
-                                          style={{ backgroundColor: "#2e7d32", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}
+                                          style={{ backgroundColor: uploadingImageQIdx === editingQIdx ? "#1b5e20" : "#2e7d32", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6, flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}
                                         >
-                                          <Ionicons name="image-outline" size={16} color="#ffffff" />
-                                          <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Upload Question Image File</Text>
+                                          {uploadingImageQIdx === editingQIdx ? (
+                                            <>
+                                              <ActivityIndicator size="small" color="#ffffff" />
+                                              <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Uploading Image...</Text>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Ionicons name="image-outline" size={16} color="#ffffff" />
+                                              <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "bold" }}>Upload Question Image File</Text>
+                                            </>
+                                          )}
                                         </TouchableOpacity>
+                                        {uploadingImageQIdx === editingQIdx && (
+                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#e3f2fd", padding: 8, borderRadius: 6, borderWidth: 1, borderColor: "#90caf9" }}>
+                                            <ActivityIndicator size="small" color="#1976d2" />
+                                            <Text style={{ color: "#0d47a1", fontSize: 11, fontWeight: "bold" }}>Uploading image to Google Drive & compressing...</Text>
+                                          </View>
+                                        )}
                                         <TextInput
                                           style={[styles.input, darkMode && styles.inputDark, { fontSize: 12, marginBottom: 0 }]}
                                           placeholder="Or paste Image URL (http://... or data:image/...)"
@@ -18451,6 +19363,7 @@ function MainApp() {
                                   {extractedQuestions.map((q: any, idx: number) => {
                                     const isCorrect = (opt: string) => q.correctAnswer === opt;
                                     const hasQuestionImage = !!(q.imageUrl || q.questionImage);
+                                    const isUploadingThisQ = uploadingImageQIdx === idx;
                                     return (
                                       <View
                                         key={idx}
@@ -18472,13 +19385,23 @@ function MainApp() {
 
                                           <View style={{ flexDirection: "row", gap: 6 }}>
                                             <TouchableOpacity
+                                              disabled={isUploadingThisQ}
                                               onPress={() => handleUploadQuestionImage(idx)}
-                                              style={{ flexDirection: "row", alignItems: "center", backgroundColor: hasQuestionImage ? "#2e7d32" : "#7b1fa2", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 4 }}
+                                              style={{ flexDirection: "row", alignItems: "center", backgroundColor: isUploadingThisQ ? "#f57c00" : (hasQuestionImage ? "#2e7d32" : "#7b1fa2"), paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 4 }}
                                             >
-                                              <Ionicons name={hasQuestionImage ? "image" : "image-outline"} size={14} color="#ffffff" />
-                                              <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>
-                                                {hasQuestionImage ? "Image Attached" : "Add Image"}
-                                              </Text>
+                                              {isUploadingThisQ ? (
+                                                <>
+                                                  <ActivityIndicator size="small" color="#ffffff" />
+                                                  <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>Uploading...</Text>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Ionicons name={hasQuestionImage ? "image" : "image-outline"} size={14} color="#ffffff" />
+                                                  <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "bold" }}>
+                                                    {hasQuestionImage ? "Image Attached" : "Add Image"}
+                                                  </Text>
+                                                </>
+                                              )}
                                             </TouchableOpacity>
 
                                             <TouchableOpacity
@@ -18526,6 +19449,14 @@ function MainApp() {
                                         {q.formula && <Text style={{ color: darkMode ? "#b39ddb" : "#512da8", fontSize: 11, marginTop: 4, fontWeight: "bold" }}>Formula: {q.formula}</Text>}
                                         {q.questionTa && <Text style={{ color: darkMode ? "#aaa" : "#555", fontSize: 11, marginTop: 2, fontStyle: "italic" }}>{q.questionTa}</Text>}
 
+                                        {/* Inline Uploading Indicator Banner */}
+                                        {isUploadingThisQ && (
+                                          <View style={{ marginTop: 8, marginBottom: 8, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fff3e0", padding: 10, borderRadius: 8, borderWidth: 1, borderColor: "#ffe0b2" }}>
+                                            <ActivityIndicator size="small" color="#e65100" />
+                                            <Text style={{ fontSize: 12, color: "#e65100", fontWeight: "bold" }}>Uploading Question #{idx + 1} Image to Google Drive...</Text>
+                                          </View>
+                                        )}
+
                                         {/* Question Image Attachment Preview & Actions */}
                                         {hasQuestionImage && (
                                           <View style={{ marginTop: 8, marginBottom: 8, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: darkMode ? "#1a2433" : "#f4f8fb", padding: 8, borderRadius: 8, borderWidth: 1, borderColor: "#e0e0e0" }}>
@@ -18553,11 +19484,21 @@ function MainApp() {
                                               </TouchableOpacity>
 
                                               <TouchableOpacity
+                                                disabled={isUploadingThisQ}
                                                 onPress={() => handleUploadQuestionImage(idx)}
                                                 style={{ backgroundColor: "#ffffff", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: "#0288d1", flexDirection: "row", alignItems: "center", gap: 4 }}
                                               >
-                                                <Ionicons name="image-outline" size={12} color="#0288d1" />
-                                                <Text style={{ fontSize: 10, color: "#0288d1", fontWeight: "bold" }}>Change Image</Text>
+                                                {isUploadingThisQ ? (
+                                                  <>
+                                                    <ActivityIndicator size="small" color="#0288d1" />
+                                                    <Text style={{ fontSize: 10, color: "#0288d1", fontWeight: "bold" }}>Uploading...</Text>
+                                                  </>
+                                                ) : (
+                                                  <>
+                                                    <Ionicons name="image-outline" size={12} color="#0288d1" />
+                                                    <Text style={{ fontSize: 10, color: "#0288d1", fontWeight: "bold" }}>Change Image</Text>
+                                                  </>
+                                                )}
                                               </TouchableOpacity>
 
                                               <TouchableOpacity
@@ -19101,11 +20042,11 @@ function MainApp() {
                       {testSub === "feedback" && (
                         <View style={{ gap: 12 }}>
                           <View style={[styles.card, darkMode && styles.cardDark]}>
-                            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                               <View style={{ flex: 1, marginRight: 10 }}>
                                 <Text style={[styles.sectionTitle, darkMode && styles.sectionTitleDark, { marginBottom: 4 }]}>Exams Feedback Logs</Text>
                                 <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#666" }}>
-                                  Feedback submitted by students upon completing tests with feedback forms enabled.
+                                  Feedback submitted by students grouped by test. Click a test to view all student reviews.
                                 </Text>
                               </View>
                               <TouchableOpacity
@@ -19124,45 +20065,176 @@ function MainApp() {
                                 <Ionicons name="chatbubbles-outline" size={40} color="#ccc" />
                                 <Text style={{ color: "#888", marginTop: 10, fontSize: 12 }}>No exam feedback logs found.</Text>
                               </View>
-                            ) : (
-                              testFeedbacks.map((f: any) => (
-                                <View key={f.id} style={{
-                                  padding: 12,
-                                  borderRadius: 10,
-                                  borderWidth: 1.5,
-                                  borderColor: darkMode ? "#333" : "#e0e0e0",
-                                  backgroundColor: darkMode ? "#222" : "#fafafa",
-                                  marginBottom: 10
-                                }}>
-                                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                                    <Text style={{ fontWeight: "bold", color: darkMode ? "#ffb74d" : "#e65100", fontSize: 13, flex: 1 }}>
-                                      {f.testTitle}
-                                    </Text>
-                                    <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                      {Array.from({ length: 5 }).map((_, i) => (
-                                        <Ionicons
-                                          key={i}
-                                          name={i < (f.rating || 5) ? "star" : "star-outline"}
-                                          size={14}
-                                          color="#fbc02d"
-                                        />
-                                      ))}
-                                    </View>
-                                  </View>
-                                  <Text style={{ fontSize: 13, color: darkMode ? "#e0e0e0" : "#212121", fontStyle: "italic", marginBottom: 8 }}>
-                                    "{f.comments}"
-                                  </Text>
-                                  <View style={{ flexDirection: "row", justifyContent: "space-between", borderTopWidth: 0.5, borderTopColor: darkMode ? "#444" : "#e0e0e0", paddingTop: 6 }}>
-                                    <Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161", fontWeight: "600" }}>
-                                      By: {f.studentName} ({f.studentEmail})
-                                    </Text>
-                                    <Text style={{ fontSize: 10, color: "#888" }}>
-                                      {f.submittedAt ? new Date(f.submittedAt).toLocaleString() : ""}
-                                    </Text>
-                                  </View>
+                            ) : (() => {
+                              // Group feedbacks by test title
+                              const groupedMap = new Map<string, { title: string; testId: string; list: any[]; avgRating: number }>();
+                              testFeedbacks.forEach((f: any) => {
+                                const tKey = f.testTitle || f.testId || "Untitled Test";
+                                if (!groupedMap.has(tKey)) {
+                                  groupedMap.set(tKey, { title: tKey, testId: f.testId || "", list: [], avgRating: 0 });
+                                }
+                                groupedMap.get(tKey)!.list.push(f);
+                              });
+
+                              const testGroups = Array.from(groupedMap.values()).map(g => {
+                                const totalRating = g.list.reduce((sum, item) => sum + (Number(item.rating) || 5), 0);
+                                g.avgRating = g.list.length > 0 ? (totalRating / g.list.length) : 5;
+                                return g;
+                              });
+
+                              return (
+                                <View style={{ gap: 12 }}>
+                                  {testGroups.map((group, gIdx) => {
+                                    const isExpanded = expandedFeedbackTests[group.title] ?? true;
+                                    return (
+                                      <View
+                                        key={group.title + gIdx}
+                                        style={{
+                                          borderRadius: 12,
+                                          borderWidth: 1.5,
+                                          borderColor: darkMode ? "#333" : "#e0e0e0",
+                                          backgroundColor: darkMode ? "#1e1e1e" : "#f9fbfd",
+                                          overflow: "hidden",
+                                          shadowColor: "#000",
+                                          shadowOffset: { width: 0, height: 1 },
+                                          shadowOpacity: 0.05,
+                                          shadowRadius: 2,
+                                          elevation: 1
+                                        }}
+                                      >
+                                        {/* Accordion Test Header Bar */}
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            setExpandedFeedbackTests(prev => ({
+                                              ...prev,
+                                              [group.title]: !isExpanded
+                                            }));
+                                          }}
+                                          activeOpacity={0.7}
+                                          style={{
+                                            paddingHorizontal: 16,
+                                            paddingVertical: 14,
+                                            flexDirection: "row",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            backgroundColor: darkMode ? "#262626" : "#f0f4f8",
+                                            borderBottomWidth: isExpanded ? 1 : 0,
+                                            borderBottomColor: darkMode ? "#333" : "#e2e8f0"
+                                          }}
+                                        >
+                                          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1, marginRight: 10 }}>
+                                            <View style={{
+                                              width: 32,
+                                              height: 32,
+                                              borderRadius: 8,
+                                              backgroundColor: darkMode ? "#332222" : "#ffebee",
+                                              alignItems: "center",
+                                              justifyContent: "center"
+                                            }}>
+                                              <Ionicons name="clipboard" size={16} color="#c62828" />
+                                            </View>
+                                            <View style={{ flex: 1 }}>
+                                              <Text style={{ fontSize: 14, fontWeight: "800", color: darkMode ? "#ffffff" : "#1a202c" }}>
+                                                {group.title}
+                                              </Text>
+                                              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+                                                <Text style={{ fontSize: 11, color: darkMode ? "#a0aec0" : "#718096", fontWeight: "600" }}>
+                                                  {group.list.length} {group.list.length === 1 ? "Review" : "Reviews"}
+                                                </Text>
+                                                <Text style={{ fontSize: 11, color: darkMode ? "#a0aec0" : "#718096" }}>•</Text>
+                                                <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                                                  <Ionicons name="star" size={11} color="#fbc02d" />
+                                                  <Text style={{ fontSize: 11, fontWeight: "700", color: darkMode ? "#ecc94b" : "#b7791f" }}>
+                                                    {group.avgRating.toFixed(1)}
+                                                  </Text>
+                                                </View>
+                                              </View>
+                                            </View>
+                                          </View>
+
+                                          <View style={{
+                                            width: 28,
+                                            height: 28,
+                                            borderRadius: 14,
+                                            backgroundColor: darkMode ? "#333" : "#e2e8f0",
+                                            alignItems: "center",
+                                            justifyContent: "center"
+                                          }}>
+                                            <Ionicons
+                                              name={isExpanded ? "chevron-up" : "chevron-down"}
+                                              size={16}
+                                              color={darkMode ? "#fff" : "#4a5568"}
+                                            />
+                                          </View>
+                                        </TouchableOpacity>
+
+                                        {/* Collapsible Content: Student Feedback Reviews */}
+                                        {isExpanded && (
+                                          <View style={{ padding: 14, gap: 10, backgroundColor: darkMode ? "#1a1a1a" : "#ffffff" }}>
+                                            {group.list.map((f: any, fIdx: number) => (
+                                              <View
+                                                key={f.id || fIdx}
+                                                style={{
+                                                  padding: 12,
+                                                  borderRadius: 10,
+                                                  borderWidth: 1,
+                                                  borderColor: darkMode ? "#2d3748" : "#edf2f7",
+                                                  backgroundColor: darkMode ? "#222" : "#fbfcfe"
+                                                }}
+                                              >
+                                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                                    <View style={{
+                                                      width: 22,
+                                                      height: 22,
+                                                      borderRadius: 11,
+                                                      backgroundColor: darkMode ? "#2b6cb0" : "#ebf8ff",
+                                                      alignItems: "center",
+                                                      justifyContent: "center"
+                                                    }}>
+                                                      <Ionicons name="person" size={11} color="#3182ce" />
+                                                    </View>
+                                                    <Text style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#e2e8f0" : "#2d3748" }}>
+                                                      {f.studentName || "Student"}
+                                                    </Text>
+                                                    {f.studentEmail ? (
+                                                      <Text style={{ fontSize: 11, color: darkMode ? "#718096" : "#a0aec0" }}>
+                                                        ({f.studentEmail})
+                                                      </Text>
+                                                    ) : null}
+                                                  </View>
+
+                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 1 }}>
+                                                    {Array.from({ length: 5 }).map((_, i) => (
+                                                      <Ionicons
+                                                        key={i}
+                                                        name={i < (Number(f.rating) || 5) ? "star" : "star-outline"}
+                                                        size={13}
+                                                        color="#fbc02d"
+                                                      />
+                                                    ))}
+                                                  </View>
+                                                </View>
+
+                                                <Text style={{ fontSize: 13, color: darkMode ? "#cbd5e0" : "#4a5568", fontStyle: "italic", marginBottom: 6, lineHeight: 18 }}>
+                                                  "{f.comments || "No comments provided."}"
+                                                </Text>
+
+                                                <View style={{ flexDirection: "row", justifyContent: "flex-end", borderTopWidth: 0.5, borderTopColor: darkMode ? "#2d3748" : "#edf2f7", paddingTop: 4 }}>
+                                                  <Text style={{ fontSize: 10, color: darkMode ? "#718096" : "#a0aec0" }}>
+                                                    {f.submittedAt ? new Date(f.submittedAt).toLocaleString() : ""}
+                                                  </Text>
+                                                </View>
+                                              </View>
+                                            ))}
+                                          </View>
+                                        )}
+                                      </View>
+                                    );
+                                  })}
                                 </View>
-                              ))
-                            )}
+                              );
+                            })()}
                           </View>
                         </View>
                       )}
@@ -19371,20 +20443,46 @@ function MainApp() {
                             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
                               <Text style={styles.sectionTitle}>Student Management Portal</Text>
                               {!isReadOnly("student_management") && (
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    setEditingStudent(null);
-                                    setShowStudentForm(true);
-                                  }}
-                                  style={[styles.primaryBtn, { minWidth: 170, marginVertical: 0, height: 38, paddingVertical: 0, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 6 }]}
-                                >
-                                  <Ionicons name="person-add-outline" size={16} color="#fff" />
-                                  <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
-                                    Register New Student
-                                  </Text>
-                                </TouchableOpacity>
+                                <View style={{ flexDirection: "row", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                                  <TouchableOpacity
+                                    onPress={() => setShowBulkStudentModal(true)}
+                                    style={[styles.outlineBtn, { minWidth: 165, marginVertical: 0, height: 38, paddingVertical: 0, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 6, borderColor: "#2e7d32", backgroundColor: darkMode ? "#1b2e1b" : "#e8f5e9" }]}
+                                  >
+                                    <Ionicons name="document-text-outline" size={16} color="#2e7d32" />
+                                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#2e7d32" }}>
+                                      Bulk Student Upload
+                                    </Text>
+                                  </TouchableOpacity>
+
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setEditingStudent(null);
+                                      setShowStudentForm(true);
+                                    }}
+                                    style={[styles.primaryBtn, { minWidth: 170, marginVertical: 0, height: 38, paddingVertical: 0, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 6 }]}
+                                  >
+                                    <Ionicons name="person-add-outline" size={16} color="#fff" />
+                                    <Text style={[styles.primaryBtnTxt, { fontSize: 13 }]}>
+                                      Register New Student
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
                               )}
                             </View>
+
+                            {/* Bulk Student Upload Modal */}
+                            {showBulkStudentModal && BulkStudentUploadModal && (
+                              <Suspense fallback={null}>
+                                <BulkStudentUploadModal
+                                  isOpen={showBulkStudentModal}
+                                  onClose={() => setShowBulkStudentModal(false)}
+                                  batches={batches}
+                                  onSuccess={() => {
+                                    loadStudents(true);
+                                  }}
+                                />
+                              </Suspense>
+                            )}
 
                             {showStudentForm && (
                               <Modal
@@ -25107,8 +26205,29 @@ function MainApp() {
                             <Text style={styles.sectionTitle}>Student Performance Marks Registry</Text>
                             {(() => {
                               const myStudent = getLoggedInStudent(user, students);
+                              const myStudentUserIds = new Set<string>([
+                                user?.userId,
+                                user?.id,
+                                user?.username,
+                                myStudent?.id,
+                                myStudent?.userId,
+                                myStudent?.rollNumber,
+                                myStudent?.loginUsername
+                              ].filter(Boolean).map(s => String(s).toLowerCase()));
+
                               const displayResults = user.role === "student"
-                                ? erpTestResults.filter((r: any) => r.studentId === user.userId || r.studentName === user.name || (myStudent && r.studentId === myStudent.id))
+                                ? erpTestResults.filter((r: any) => {
+                                    const rStudentId = String(r.studentId || "").toLowerCase();
+                                    const rRollNumber = String(r.rollNumber || r.rollNo || "").toLowerCase();
+                                    const rStudentName = String(r.studentName || "").toLowerCase();
+                                    const userName = String(user.name || user.fullName || "").toLowerCase();
+                                    const myStudName = myStudent ? String(getStudentName(myStudent) || "").toLowerCase() : "";
+
+                                    if (myStudentUserIds.has(rStudentId) || myStudentUserIds.has(rRollNumber)) return true;
+                                    if (userName && rStudentName && (rStudentName.includes(userName) || userName.includes(rStudentName))) return true;
+                                    if (myStudName && rStudentName && (rStudentName.includes(myStudName) || myStudName.includes(rStudentName))) return true;
+                                    return false;
+                                  })
                                 : erpTestResults;
 
                               if (displayResults.length === 0) {
@@ -25143,11 +26262,12 @@ function MainApp() {
 
                                   {/* Table Body */}
                                   {displayResults.map((r, idx) => {
-                                    const stud = students.find((s) => s.id === r.studentId || s.userId === r.studentId);
+                                    const stud = students.find((s) => s.id === r.studentId || s.userId === r.studentId || s.loginUsername === r.rollNumber || s.rollNumber === r.rollNumber);
                                     const lead = leads.find((ld) => ld.id === r.studentId || ld.userId === r.studentId);
-                                    const resolvedName = r.studentName || (stud ? getStudentName(stud) : (lead ? lead.name : `Guest: ${r.studentId.substring(0, 8)}`));
-                                    const resolvedRoll = r.rollNumber || (stud ? stud.rollNumber : "Guest");
-                                    const name = user.role === "student" ? `My Score (${resolvedRoll})` : `${resolvedName} (${resolvedRoll})`;
+                                    const resolvedName = r.studentName || (stud ? getStudentName(stud) : (lead ? lead.name : (r.studentId ? `Student (${String(r.studentId).substring(0, 8)})` : "Student")));
+                                    const resolvedRoll = (r.rollNumber && r.rollNumber !== "N/A") ? r.rollNumber : (stud ? (stud.rollNumber || stud.loginUsername) : "");
+                                    const rollLabel = resolvedRoll ? ` (${resolvedRoll})` : "";
+                                    const name = user.role === "student" ? `My Score${rollLabel}` : `${resolvedName}${rollLabel}`;
                                     const isPass = r.status === "pass" && (r.obtainedMarks || 0) > 0;
                                     const isLast = idx === displayResults.length - 1;
                                     return (
@@ -29167,7 +30287,11 @@ function MainApp() {
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS & LEADS</Text> : null}
                     {renderSidebarItem("admissions", crmSub, "Admission Application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile, "admissions")}
                     {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
+                    {renderSidebarItem("custom-leads", crmSub, "Custom Leads", "clipboard-outline", () => changeCrmSub("custom-leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
                     {renderSidebarItem("inquiries", crmSub, "Inquiries", "chatbubble-ellipses-outline", () => changeCrmSub("inquiries"), "crm-inquiries", undefined, crmSidebarCollapsed && !isMobile, "admissions")}
+
+                    {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>FORM BUILDER</Text> : null}
+                    {renderSidebarItem("custom-form", crmSub, "Customize Application", "create-outline", () => changeCrmSub("custom-form"), "crm-campaigns", undefined, crmSidebarCollapsed && !isMobile, "campaigns")}
 
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>CAMPAIGNS & ENGAGEMENT</Text> : null}
                     {renderSidebarItem("campaigns", crmSub, "Campaigns", "megaphone-outline", () => changeCrmSub("campaigns"), "crm-campaigns", undefined, crmSidebarCollapsed && !isMobile, "campaigns")}
@@ -29947,6 +31071,18 @@ function MainApp() {
                             )}
                           </View>
                         </View>
+                      )}
+
+                      {crmSub === "custom-form" && (
+                        <Suspense fallback={<View style={{ padding: 40, alignItems: "center" }}><ActivityIndicator size="large" color="#b91c1c" /></View>}>
+                          <CustomizeApplicationPage />
+                        </Suspense>
+                      )}
+
+                      {crmSub === "custom-leads" && (
+                        <Suspense fallback={<View style={{ padding: 40, alignItems: "center" }}><ActivityIndicator size="large" color="#b91c1c" /></View>}>
+                          <CustomLeadsPage />
+                        </Suspense>
                       )}
                     </>
                   )}
@@ -31114,7 +32250,11 @@ function MainApp() {
               {/* Modal Body */}
               <View style={{ flex: 1, backgroundColor: darkMode ? "#111" : "#f5f5f5", justifyContent: "center", alignItems: "center", padding: 8 }}>
                 {(() => {
-                  let displaySrc = resolveFileUrl(selectedDailyContentPreview.url || selectedDailyContentPreview.fileBase64);
+                  let rawSrc = selectedDailyContentPreview.fileBase64 || selectedDailyContentPreview.url;
+                  if (selectedDailyContentPreview.url && (selectedDailyContentPreview.url.startsWith("http://") || selectedDailyContentPreview.url.startsWith("https://"))) {
+                    rawSrc = selectedDailyContentPreview.url;
+                  }
+                  let displaySrc = resolveFileUrl(rawSrc, selectedDailyContentPreview.type);
 
                   if (!displaySrc) {
                     return <Text style={{ color: darkMode ? "#ccc" : "#333" }}>Preview is not available for this item.</Text>;
@@ -31159,22 +32299,6 @@ function MainApp() {
                           </View>
                         )}
                       />
-                    );
-                  }
-
-                  // 2. If running on web, verify that relative local files are not being previewed on the live deployed production URL
-                  const isLiveSite = typeof window !== "undefined" && window.location && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1";
-                  const isRelativeLocalFile = displaySrc.startsWith("/") || (typeof window !== "undefined" && displaySrc.startsWith(window.location.origin) && displaySrc.includes("/uploads/"));
-
-                  if (isLiveSite && isRelativeLocalFile) {
-                    return (
-                      <View style={{ padding: 20, alignItems: "center", justifyContent: "center" }}>
-                        <Ionicons name="cloud-offline-outline" size={48} color={darkMode ? "#aaa" : "#555"} />
-                        <Text style={{ color: darkMode ? "#fff" : "#333", fontWeight: "bold", marginTop: 10, textAlign: "center" }}>Local File Preview Offline</Text>
-                        <Text style={{ color: darkMode ? "#ccc" : "#666", fontSize: 12, marginTop: 6, textAlign: "center" }}>
-                          This file was saved locally during development. Please configure Google Drive to preview files on the live website.
-                        </Text>
-                      </View>
                     );
                   }
 
@@ -31382,7 +32506,7 @@ function MainApp() {
                     {/* Table Header */}
                     <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 10, borderRadius: 8, marginBottom: 6 }}>
                       <Text style={{ width: 45, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>#</Text>
-                      <Text style={{ width: 120, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>Roll Number</Text>
+                      <Text style={{ width: 150, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>Student / Roll No</Text>
                       <Text style={{ width: 85, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Attended</Text>
                       <Text style={{ width: 95, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Not Attended</Text>
                       <Text style={{ width: 85, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Correct Ans</Text>
@@ -31397,7 +32521,15 @@ function MainApp() {
                         const wrong = entry.wrong ?? entry.wrongCount ?? 0;
                         const skipped = entry.skipped ?? entry.unattended ?? entry.skippedCount ?? 0;
                         const attended = correct + wrong;
-                        const rollNo = entry.rollNumber || entry.rollNo || entry.studentId || "N/A";
+                        
+                        const resolvedStudent = students.find((s: any) => s.id === entry.studentId || s.userId === entry.studentId || s.loginUsername === entry.rollNumber || s.rollNumber === entry.rollNumber);
+                        const resolvedLead = leads.find((ld: any) => ld.id === entry.studentId || ld.userId === entry.studentId);
+                        const sName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName) : (resolvedLead ? resolvedLead.name : (entry.studentName && !entry.studentName.startsWith("Student (") ? entry.studentName : ""));
+                        const rollVal = resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername || (entry.rollNumber && entry.rollNumber !== "N/A" ? entry.rollNumber : "") || entry.rollNo || "";
+                        const studentLabel = sName 
+                          ? (rollVal && rollVal !== sName && rollVal !== "N/A" ? `${sName} (${rollVal})` : sName) 
+                          : (rollVal && rollVal !== "N/A" ? rollVal : (entry.studentId ? `Student (${String(entry.studentId).substring(0, 6)})` : "Student"));
+
                         const obtainedMarks = entry.obtainedMarks ?? entry.score ?? 0;
                         const totalMarks = entry.totalMarks ?? entry.totalScore ?? 0;
 
@@ -31417,8 +32549,8 @@ function MainApp() {
                             <Text style={{ width: 45, fontSize: 12, fontWeight: "bold", color: idx === 0 ? "#fbc02d" : idx === 1 ? "#9e9e9e" : idx === 2 ? "#cd7f32" : (darkMode ? "#aaa" : "#757575") }}>
                               #{idx + 1}
                             </Text>
-                            <Text style={{ width: 120, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>
-                              {rollNo}
+                            <Text style={{ width: 150, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>
+                              {studentLabel}
                             </Text>
                             <Text style={{ width: 85, fontSize: 12, color: "#1565c0", fontWeight: "bold", textAlign: "center" }}>
                               {attended}
@@ -31693,6 +32825,8 @@ function MainApp() {
           </Modal>
         );
       })()}
+
+      {renderProctorWarningModal()}
     </SafeAreaView>
   );
 }

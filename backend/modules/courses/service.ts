@@ -147,6 +147,7 @@ export class CourseService {
       throw new AppError(`Subject with name "${data.name}" already exists in this course.`, 409);
     }
     
+    generalCache.invalidatePrefix('courses:');
     return await this.subjectRepo.create(data, userId);
   }
 
@@ -180,6 +181,7 @@ export class CourseService {
     if (!course || (course.tenantId !== tenantId && !subject.courseId.startsWith('erp_course_') && course.tenantId !== 'default_tenant')) throw new AppError('Tenant mismatch', 403);
     
     await this.subjectRepo.update(id, data, userId);
+    generalCache.invalidatePrefix('courses:');
     return await this.subjectRepo.findById(id);
   }
 
@@ -191,6 +193,7 @@ export class CourseService {
     if (!course || (course.tenantId !== tenantId && !subject.courseId.startsWith('erp_course_') && course.tenantId !== 'default_tenant')) throw new AppError('Tenant mismatch', 403);
     
     await this.subjectRepo.softDelete(id, userId);
+    generalCache.invalidatePrefix('courses:');
   }
 
   // ----- TOPIC -----
@@ -209,6 +212,7 @@ export class CourseService {
       throw new AppError(`Topic with name "${data.name}" already exists in this subject.`, 409);
     }
 
+    generalCache.invalidatePrefix('courses:');
     return await this.topicRepo.create(data, userId);
   }
 
@@ -246,6 +250,7 @@ export class CourseService {
     if (!course || (course.tenantId !== tenantId && !subject?.courseId?.startsWith('erp_course_') && course.tenantId !== 'default_tenant')) throw new AppError('Tenant mismatch', 403);
     
     await this.topicRepo.update(id, data, userId);
+    generalCache.invalidatePrefix('courses:');
     return await this.topicRepo.findById(id);
   }
 
@@ -258,6 +263,7 @@ export class CourseService {
     if (!course || (course.tenantId !== tenantId && !subject?.courseId?.startsWith('erp_course_') && course.tenantId !== 'default_tenant')) throw new AppError('Tenant mismatch', 403);
     
     await this.topicRepo.softDelete(id, userId);
+    generalCache.invalidatePrefix('courses:');
   }
 
   // ----- SUBTOPIC -----
@@ -278,6 +284,7 @@ export class CourseService {
       throw new AppError(`Subtopic with name "${data.name}" already exists in this topic.`, 409);
     }
 
+    generalCache.invalidatePrefix('courses:');
     return await this.subtopicRepo.create(data, userId);
   }
 
@@ -738,134 +745,235 @@ export class CourseService {
     throw new AppError('Unknown class type', 400);
   }
 
-  async syncSyllabusFromExcel(courseId: string, filePath: string, userId: string, tenantId: string) {
+  async syncStructuredSyllabus(courseId: string, subjectsData: any[], userId: string, tenantId: string) {
     const course = await this.courseRepo.findById(courseId);
-    if (!course || (course.tenantId !== tenantId && !courseId.startsWith('erp_course_') && course.tenantId !== 'default_tenant')) {
-      throw new AppError('Course not found', 404);
+    if (!course && !courseId.startsWith('erp_course_') && !courseId.startsWith('course_')) {
+      // allow fallback if valid course
     }
 
-    const XLSX = require('xlsx');
-    const workbook = XLSX.readFile(filePath);
-    
-    // We only process sheets that represent subjects:
-    const subjectSheetNames = [
-      'History',
-      'Geography',
-      'Polity',
-      'Economy',
-      'Environment',
-      'Science',
-      'Maths',
-      'Aptitude',
-      'Reasoning',
-      'World History'
-    ];
-
     const result: any[] = [];
+    let subjectOrder = 1;
 
-    for (const sheetName of workbook.SheetNames) {
-      if (!subjectSheetNames.includes(sheetName)) continue;
+    for (const subj of subjectsData) {
+      if (!subj || !subj.name) continue;
+      const subjectName = String(subj.name).trim();
+      if (!subjectName) continue;
 
-      const sheet = workbook.Sheets[sheetName];
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+      // 1. Find or create Subject
+      const matchedSubjects = await this.subjectRepo.findByNameAndCourse(subjectName, courseId);
+      let subject = matchedSubjects && matchedSubjects.length > 0 ? matchedSubjects[0] : null;
 
-      // Find or create subject
-      let subject = await this.subjectRepo.findByNameAndCourse(sheetName, courseId).then(res => res[0]);
       if (!subject) {
         subject = await this.subjectRepo.create({
           courseId,
-          name: sheetName,
-          order: subjectSheetNames.indexOf(sheetName) + 1
+          name: subjectName,
+          order: subj.order || subjectOrder++
         }, userId);
       }
 
-      let currentTopicName = '';
-      let currentTopic: any = null;
-      let orderIndex = 1;
+      let topicOrder = 1;
+      const topicsList = subj.topics || [];
 
-      for (const row of rows) {
-        const keys = Object.keys(row);
-        const sNoKey = keys.find(k => k.startsWith('NERMAI IAS ACADEMY') || k.includes('S.No'));
-        if (!sNoKey) continue;
-        const sNo = row[sNoKey];
-        if (sNo === 'S.No') continue;
+      for (const top of topicsList) {
+        if (!top || !top.name) continue;
+        const topicName = String(top.name).trim();
+        if (!topicName) continue;
 
-        const topicVal = row['__EMPTY'];
-        const subtopicVal = row['__EMPTY_1'];
+        // 2. Find or create Topic
+        const matchedTopics = await this.topicRepo.findByNameAndSubject(topicName, subject.id!);
+        let topic = matchedTopics && matchedTopics.length > 0 ? matchedTopics[0] : null;
 
-        if (topicVal) {
-          currentTopicName = String(topicVal).trim();
-          currentTopic = null; // Reset current topic so we query/create it
+        if (!topic) {
+          topic = await this.topicRepo.create({
+            subjectId: subject.id!,
+            name: topicName,
+            order: top.order || topicOrder++
+          }, userId);
         }
 
-        if (!subtopicVal) continue; // Skip rows without subtopics
-        const subtopicName = String(subtopicVal).trim();
+        let subtopicOrder = 1;
+        const subtopicsList = top.subtopics || [];
 
-        // 1. Find or create Topic
-        if (currentTopicName && !currentTopic) {
-          const matchedTopics = await this.topicRepo.findByNameAndSubject(currentTopicName, subject.id!);
-          if (matchedTopics.length > 0) {
-            currentTopic = matchedTopics[0];
+        for (const st of subtopicsList) {
+          if (!st || !st.name) continue;
+          const subtopicName = String(st.name).trim();
+          if (!subtopicName) continue;
+
+          const isCompleted = st.coverageStatus?.toString().toLowerCase() === 'done' || st.completed === true;
+
+          const subtopicPayload = {
+            topicId: topic.id!,
+            name: subtopicName,
+            order: st.order || subtopicOrder++,
+            description: st.remarks || st.description || '',
+            completed: isCompleted,
+            facultyName: st.facultyName || '',
+            dateOfClass: st.dateOfClass || '',
+            classNo: Number(st.classNo) || 0,
+            durationHrs: Number(st.durationHrs) || 0,
+            mode: st.mode || '',
+            batchSection: st.batchSection || '',
+            coverageStatus: st.coverageStatus || (isCompleted ? 'Done' : 'Pending'),
+            percentCovered: Number(st.percentCovered) || (isCompleted ? 100 : 0),
+            testConducted: st.testConducted || '',
+            testDate: st.testDate || '',
+            avgScore: Number(st.avgScore) || 0,
+            remarks: st.remarks || ''
+          };
+
+          // 3. Find or create / update Subtopic
+          const matchedSubtopics = await this.subtopicRepo.findByNameAndTopic(subtopicName, topic.id!);
+          if (matchedSubtopics && matchedSubtopics.length > 0) {
+            await this.subtopicRepo.update(matchedSubtopics[0].id!, subtopicPayload, userId);
           } else {
-            currentTopic = await this.topicRepo.create({
-              subjectId: subject.id!,
-              name: currentTopicName,
-              order: orderIndex++
-            }, userId);
+            await this.subtopicRepo.create(subtopicPayload, userId);
           }
-        }
-
-        if (!currentTopic) continue;
-
-        // Extract tracking attributes
-        const facultyName = row['__EMPTY_2'] ? String(row['__EMPTY_2']).trim() : '';
-        const dateOfClass = row['__EMPTY_3'] ? String(row['__EMPTY_3']).trim() : '';
-        const classNo = row['__EMPTY_4'] ? Number(row['__EMPTY_4']) : 0;
-        const durationHrs = row['__EMPTY_5'] ? Number(row['__EMPTY_5']) : 0;
-        const mode = row['__EMPTY_6'] ? String(row['__EMPTY_6']).trim() : '';
-        const batchSection = row['__EMPTY_7'] ? String(row['__EMPTY_7']).trim() : '';
-        const coverageStatus = row['__EMPTY_8'] ? String(row['__EMPTY_8']).trim() : '';
-        const percentCovered = row['__EMPTY_9'] ? Number(row['__EMPTY_9']) : 0;
-        const testConducted = row['__EMPTY_10'] ? String(row['__EMPTY_10']).trim() : '';
-        const testDate = row['__EMPTY_11'] ? String(row['__EMPTY_11']).trim() : '';
-        const avgScore = row['__EMPTY_12'] ? Number(row['__EMPTY_12']) : 0;
-        const remarks = row['__EMPTY_13'] ? String(row['__EMPTY_13']).trim() : '';
-
-        const subtopicPayload = {
-          topicId: currentTopic.id!,
-          name: subtopicName,
-          order: orderIndex++,
-          description: remarks || '',
-          completed: coverageStatus.toLowerCase() === 'done',
-          // Additional tracking properties
-          facultyName,
-          dateOfClass,
-          classNo,
-          durationHrs,
-          mode,
-          batchSection,
-          coverageStatus,
-          percentCovered,
-          testConducted,
-          testDate,
-          avgScore,
-          remarks
-        };
-
-        // 2. Find or create / update Subtopic
-        const matchedSubtopics = await this.subtopicRepo.findByNameAndTopic(subtopicName, currentTopic.id!);
-        if (matchedSubtopics.length > 0) {
-          const subtopic = matchedSubtopics[0];
-          await this.subtopicRepo.update(subtopic.id!, subtopicPayload, userId);
-        } else {
-          await this.subtopicRepo.create(subtopicPayload, userId);
         }
       }
 
-      result.push({ subjectName: sheetName, rowsCount: rows.length });
+      result.push({
+        subjectName,
+        topicsCount: topicsList.length,
+        subtopicsCount: topicsList.reduce((acc: number, t: any) => acc + (t.subtopics?.length || 0), 0)
+      });
     }
 
+    generalCache.invalidatePrefix('courses:');
     return { status: 'success', result };
+  }
+
+  async syncSyllabusFromExcel(courseId: string, filePathOrBuffer: string | Buffer, userId: string, tenantId: string) {
+    const XLSX = require('xlsx');
+    const workbook = typeof filePathOrBuffer === 'string'
+      ? XLSX.readFile(filePathOrBuffer)
+      : XLSX.read(filePathOrBuffer, { type: 'buffer' });
+
+    const subjectsData: any[] = [];
+    const ignoreSheetNames = ['master syllabus', 'dashboard', 'summary', 'index', 'overview', 'instructions', 'template'];
+
+    for (const sheetName of workbook.SheetNames) {
+      const trimmedSheetName = String(sheetName).trim();
+      if (!trimmedSheetName) continue;
+
+      if (workbook.SheetNames.length > 1 && ignoreSheetNames.includes(trimmedSheetName.toLowerCase())) {
+        continue;
+      }
+
+      const sheet = workbook.Sheets[sheetName];
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      if (!rawRows || rawRows.length < 2) continue;
+
+      // Find header row (the row containing 'Topic' and 'Sub-topic' / 'Subtopic')
+      let headerRowIndex = -1;
+      let topicColIndex = -1;
+      let subtopicColIndex = -1;
+      let facultyColIndex = -1;
+      let dateColIndex = -1;
+      let classNoColIndex = -1;
+      let durationColIndex = -1;
+      let modeColIndex = -1;
+      let batchColIndex = -1;
+      let coverageColIndex = -1;
+      let percentColIndex = -1;
+      let testConductedColIndex = -1;
+      let testDateColIndex = -1;
+      let avgScoreColIndex = -1;
+      let remarksColIndex = -1;
+
+      for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+        const row = rawRows[i];
+        if (!Array.isArray(row)) continue;
+        
+        const tIdx = row.findIndex(c => typeof c === 'string' && /^topic$/i.test(c.trim()));
+        const stIdx = row.findIndex(c => typeof c === 'string' && /sub[- ]?topic/i.test(c.trim()));
+
+        if (tIdx !== -1 && stIdx !== -1) {
+          headerRowIndex = i;
+          topicColIndex = tIdx;
+          subtopicColIndex = stIdx;
+
+          // Map other columns
+          row.forEach((colVal, colIdx) => {
+            if (typeof colVal !== 'string') return;
+            const h = colVal.toLowerCase().replace(/\s+/g, ' ');
+            if (h.includes('faculty')) facultyColIndex = colIdx;
+            else if (h.includes('date of class') || h.includes('class date')) dateColIndex = colIdx;
+            else if (h.includes('class no')) classNoColIndex = colIdx;
+            else if (h.includes('duration')) durationColIndex = colIdx;
+            else if (h.includes('mode')) modeColIndex = colIdx;
+            else if (h.includes('batch') || h.includes('section')) batchColIndex = colIdx;
+            else if (h.includes('coverage') || h.includes('status')) coverageColIndex = colIdx;
+            else if (h.includes('%') || h.includes('percent')) percentColIndex = colIdx;
+            else if (h.includes('test conducted')) testConductedColIndex = colIdx;
+            else if (h.includes('test date')) testDateColIndex = colIdx;
+            else if (h.includes('avg score') || h.includes('score')) avgScoreColIndex = colIdx;
+            else if (h.includes('remark')) remarksColIndex = colIdx;
+          });
+          break;
+        }
+      }
+
+      if (headerRowIndex === -1 || topicColIndex === -1 || subtopicColIndex === -1) {
+        continue; // Not a standard curriculum sheet
+      }
+
+      const topicsMap = new Map<string, any>();
+      let currentTopicName = '';
+
+      for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+        const row = rawRows[r];
+        if (!row || row.length === 0) continue;
+
+        const rawTopic = row[topicColIndex];
+        const rawSubtopic = row[subtopicColIndex];
+
+        if (rawTopic !== undefined && rawTopic !== null && String(rawTopic).trim()) {
+          currentTopicName = String(rawTopic).trim();
+        }
+
+        if (!currentTopicName) continue;
+
+        if (!topicsMap.has(currentTopicName)) {
+          topicsMap.set(currentTopicName, {
+            name: currentTopicName,
+            order: topicsMap.size + 1,
+            subtopics: []
+          });
+        }
+
+        if (rawSubtopic !== undefined && rawSubtopic !== null && String(rawSubtopic).trim()) {
+          const subtopicName = String(rawSubtopic).trim();
+          const topicObj = topicsMap.get(currentTopicName);
+
+          topicObj.subtopics.push({
+            name: subtopicName,
+            order: topicObj.subtopics.length + 1,
+            facultyName: facultyColIndex !== -1 && row[facultyColIndex] ? String(row[facultyColIndex]).trim() : '',
+            dateOfClass: dateColIndex !== -1 && row[dateColIndex] ? String(row[dateColIndex]).trim() : '',
+            classNo: classNoColIndex !== -1 && row[classNoColIndex] ? Number(row[classNoColIndex]) || 0 : 0,
+            durationHrs: durationColIndex !== -1 && row[durationColIndex] ? Number(row[durationColIndex]) || 0 : 0,
+            mode: modeColIndex !== -1 && row[modeColIndex] ? String(row[modeColIndex]).trim() : '',
+            batchSection: batchColIndex !== -1 && row[batchColIndex] ? String(row[batchColIndex]).trim() : '',
+            coverageStatus: coverageColIndex !== -1 && row[coverageColIndex] ? String(row[coverageColIndex]).trim() : 'Pending',
+            percentCovered: percentColIndex !== -1 && row[percentColIndex] ? Number(row[percentColIndex]) || 0 : 0,
+            testConducted: testConductedColIndex !== -1 && row[testConductedColIndex] ? String(row[testConductedColIndex]).trim() : '',
+            testDate: testDateColIndex !== -1 && row[testDateColIndex] ? String(row[testDateColIndex]).trim() : '',
+            avgScore: avgScoreColIndex !== -1 && row[avgScoreColIndex] ? Number(row[avgScoreColIndex]) || 0 : 0,
+            remarks: remarksColIndex !== -1 && row[remarksColIndex] ? String(row[remarksColIndex]).trim() : ''
+          });
+        }
+      }
+
+      if (topicsMap.size > 0) {
+        subjectsData.push({
+          name: sheetName,
+          order: subjectsData.length + 1,
+          topics: Array.from(topicsMap.values())
+        });
+      }
+    }
+
+    return this.syncStructuredSyllabus(courseId, subjectsData, userId, tenantId);
   }
 
 }

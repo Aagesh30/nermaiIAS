@@ -122,13 +122,22 @@ export async function uploadFileToGoogleDrive(options: {
         payload.subPath = options.subPath.trim().replace(/^\/+|\/+$/g, ''); // strip leading/trailing slashes
       }
 
-      const response = await fetch(appsScriptUrl, {
-        method: "POST",
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const resData = await response.json().catch(() => null);
+      let resData: any = null;
+      try {
+        const axRes = await axios.post(appsScriptUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          maxRedirects: 10,
+          timeout: 30000
+        });
+        resData = axRes.data;
+      } catch (axErr: any) {
+        const fetchRes = await fetch(appsScriptUrl, {
+          method: "POST",
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).catch(() => null);
+        resData = await fetchRes?.json().catch(() => null);
+      }
 
       if (resData && (resData.success || resData.status === 'success') && resData.fileId) {
         const fileId = resData.fileId;

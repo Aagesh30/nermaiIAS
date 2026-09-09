@@ -22,6 +22,8 @@ import freebiesRouter from "../modules/crm/freebies";
 import coursesRouter from "../modules/crm/courses";
 import inquiryRouter from "../modules/crm/inquiry";
 import guestPostersRouter from "../modules/crm/guest-posters";
+import customFormRouter from "../modules/crm/custom-form/routes";
+import customLeadsRouter from "../modules/crm/custom-leads/routes";
 import adminDashboardRouter from "../modules/dashboard/admin";
 import erpDashboardRouter from "../modules/dashboard/erp";
 import studentDashboardRouter from "../modules/dashboard/student";
@@ -90,6 +92,8 @@ router.use("/crm/freebies", freebiesRouter);
 router.use("/crm/courses", coursesRouter);
 router.use("/crm/inquiry", inquiryRouter);
 router.use("/crm/guest-posters", guestPostersRouter);
+router.use("/crm/custom-form", customFormRouter);
+router.use("/crm/custom-leads", customLeadsRouter);
 
 // Dashboard Routes
 router.use("/dashboard/admin", adminDashboardRouter);

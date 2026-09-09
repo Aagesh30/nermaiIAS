@@ -41,9 +41,9 @@ router.get("/student/:studentId/test/:testId", EvaluationController.getStudentRe
 router.get("/student/:studentId", EvaluationController.getStudentAllResults);
 
 /**
- * Get all results of a test (admin/staff only)
+ * Get all results of a test (authenticated)
  */
-router.get("/test/:testId", requireRole(adminRoles), EvaluationController.getTestResults);
+router.get("/test/:testId", EvaluationController.getTestResults);
 
 /**
  * Recalculate result (admin/staff only)

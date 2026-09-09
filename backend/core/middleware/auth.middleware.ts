@@ -83,6 +83,9 @@ export const requireAuth = async (
       return next(new AppError(`Unauthorized: Token verification failed`, 401));
     }
   } catch (error) {
+    if (error instanceof AppError) {
+      return next(error);
+    }
     logger.warn('Authentication failed in wrapper', { error });
     next(new AppError('Unauthorized: Token verification failed completely', 401));
   }
