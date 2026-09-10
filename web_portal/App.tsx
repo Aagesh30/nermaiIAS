@@ -155,8 +155,6 @@ const API_TIMEOUT_MS = 30000;
 
 // ─── SCREENSHOT BLOCK TOGGLE ────────────────────────────────────────────────
 // Set to `false` to allow screenshots (e.g. for bug reports / debugging).
-// Only affects student and guest roles on the Test Portal.
-// Does NOT touch super_admin, admin, staff, teacher, or any other role.
 const SCREENSHOT_BLOCK_ENABLED = true;
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4930,18 +4928,19 @@ function MainApp() {
     if (!proctorWarning.visible) return null;
 
     const strikes = proctorWarning.strikes;
-    const remainingStrikes = Math.max(0, 2 - strikes);
+    const maxStrikes = proctorWarning.maxStrikes || 4;
+    const remainingStrikes = Math.max(0, maxStrikes - strikes);
     const duration = proctorWarning.durationAway || 10;
 
     let warningTitle = "⚠️ Exam Proctoring Warning";
     let warningBody = "";
 
-    if (proctorWarning.isSubmitting || strikes >= 2) {
-      warningTitle = "🔒 Exam Locked & Auto-Submitting";
-      warningBody = `Maximum violation limit reached (2 of 2 strikes)! You switched tabs, exited fullscreen, or left the exam window twice. Your exam attempt has been eliminated and your test is submitting right now.`;
+    if (proctorWarning.isSubmitting || strikes >= maxStrikes) {
+      warningTitle = `🔒 Exam Locked & Auto-Submitting (${strikes} of ${maxStrikes} Strikes)`;
+      warningBody = `Maximum violation limit reached (${strikes} of ${maxStrikes} strikes)! You switched tabs, exited fullscreen, or left the exam window. Your exam attempt has been eliminated and your test is submitting right now.`;
     } else {
-      warningTitle = "🚨 FINAL WARNING: Strike 1 of 2";
-      warningBody = `You switched tabs, exited fullscreen, or left the exam window (${proctorWarning.reason || `away for ${duration}s`}). You have only 1 strike remaining! If you leave or switch tabs again, your exam will be eliminated and automatically submitted immediately.`;
+      warningTitle = `🚨 PROCTORING WARNING: Strike ${strikes} of ${maxStrikes}`;
+      warningBody = `You switched tabs, exited fullscreen, or left the exam window (${proctorWarning.reason || `away for ${duration}s`}). You have ${remainingStrikes} warning strike${remainingStrikes === 1 ? "" : "s"} remaining! If you reach ${maxStrikes} strikes, your exam will be eliminated and automatically submitted immediately.`;
     }
 
     if (Platform.OS === "web") {
@@ -4971,28 +4970,28 @@ function MainApp() {
             flexDirection: "column",
             alignItems: "center",
             boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
-            borderTop: `8px solid ${proctorWarning.isSubmitting || strikes >= 2 ? "#d32f2f" : "#e65100"}`,
+            borderTop: `8px solid ${proctorWarning.isSubmitting || strikes >= maxStrikes ? "#d32f2f" : "#e65100"}`,
             boxSizing: "border-box"
           }}>
             <div style={{
               width: 68,
               height: 68,
               borderRadius: 34,
-              backgroundColor: proctorWarning.isSubmitting || strikes >= 2 ? "#ffebee" : "#fff3e0",
+              backgroundColor: proctorWarning.isSubmitting || strikes >= maxStrikes ? "#ffebee" : "#fff3e0",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               marginBottom: 16,
               fontSize: 34
             }}>
-              {proctorWarning.isSubmitting || strikes >= 2 ? "🔒" : "⚠️"}
+              {proctorWarning.isSubmitting || strikes >= maxStrikes ? "🔒" : "⚠️"}
             </div>
 
             <h3 style={{
               margin: "0 0 10px 0",
               fontSize: 21,
               fontWeight: 800,
-              color: proctorWarning.isSubmitting || strikes >= 2 ? "#d32f2f" : "#c62828",
+              color: proctorWarning.isSubmitting || strikes >= maxStrikes ? "#d32f2f" : "#c62828",
               textAlign: "center"
             }}>
               {warningTitle}
@@ -5022,7 +5021,7 @@ function MainApp() {
             }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>Strikes Used:</span>
               <div style={{ display: "flex", gap: 8 }}>
-                {[1, 2].map(sNum => (
+                {Array.from({ length: maxStrikes }, (_, i) => i + 1).map(sNum => (
                   <div
                     key={sNum}
                     style={{
@@ -5049,11 +5048,11 @@ function MainApp() {
                 fontWeight: 800,
                 marginLeft: 4
               }}>
-                {remainingStrikes === 0 ? "(Limit Reached!)" : `(${remainingStrikes} strike remaining)`}
+                {remainingStrikes === 0 ? "(Limit Reached!)" : `(${remainingStrikes} strike${remainingStrikes === 1 ? "" : "s"} remaining)`}
               </span>
             </div>
 
-            {proctorWarning.isSubmitting || strikes >= 2 ? (
+            {proctorWarning.isSubmitting || strikes >= maxStrikes ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#d32f2f", fontWeight: 700, fontSize: 14 }}>
                 <span>Submitting and locking your test now...</span>
               </div>
@@ -5117,7 +5116,7 @@ function MainApp() {
             <Text style={{ fontSize: 13, color: "#616161", textAlign: "center", marginBottom: 16, lineHeight: 18 }}>
               {warningBody}
             </Text>
-            {!proctorWarning.isSubmitting && strikes < 2 && (
+            {!proctorWarning.isSubmitting && strikes < maxStrikes && (
               <TouchableOpacity
                 style={{ backgroundColor: "#c62828", padding: 12, borderRadius: 8, width: "100%", alignItems: "center" }}
                 onPress={() => {
@@ -5725,12 +5724,9 @@ function MainApp() {
     loadTests(true); // Silent load on tab focus
   }, [user, activeTab, testSub]);
 
-  // ── Screenshot blocking for Test Portal (student & guest only) ──────────────
+  // ── Screenshot blocking for Tests & Exams module (student & guest only) ──────
   // Toggle SCREENSHOT_BLOCK_ENABLED at the top of this file to disable for debugging.
-  // Covers:
-  //   Web  — CSS print blackout, user-select:none, blocks PrintScreen / Ctrl+P / Ctrl+Shift+S
-  //   Mobile — opaque overlay while app is backgrounded (prevents screen-recorder capture)
-  // Super admin, admin, staff, teacher are NEVER affected.
+  // Super admin, admin, staff, teacher, developer are NEVER affected.
   useEffect(() => {
     const isStudentOrGuest = user?.role === "student" || user?.role === "guest";
     const isTestTab = activeTab === "test";
@@ -5742,16 +5738,16 @@ function MainApp() {
       const STYLE_ID = "nermai-screenshot-block-style";
 
       if (shouldBlock) {
-        // ── Inject CSS ──────────────────────────────────────────────────────
+        // ── Inject CSS: print blackout & text selection disable ──────────────────
         if (!document.getElementById(STYLE_ID)) {
           const style = document.createElement("style");
           style.id = STYLE_ID;
           style.textContent = `
-            /* NERMAI — Test Portal Screenshot / Print Block */
+            /* NERMAI — Tests & Exams Screenshot / Print Block */
             @media print {
               body * { visibility: hidden !important; }
               body::after {
-                content: 'Screenshot & printing is disabled in the Test Portal.' !important;
+                content: 'Screenshot & printing is disabled in the Tests & Exams section.' !important;
                 visibility: visible !important;
                 position: fixed !important;
                 top: 50% !important;
@@ -5762,6 +5758,14 @@ function MainApp() {
                 text-align: center !important;
               }
             }
+            /* Disable text selection and dragging in test area */
+            body, body * {
+              -webkit-user-select: none !important;
+              -moz-user-select: none !important;
+              -ms-user-select: none !important;
+              user-select: none !important;
+              -webkit-user-drag: none !important;
+            }
           `;
           document.head.appendChild(style);
         }
@@ -5769,35 +5773,41 @@ function MainApp() {
         // ── Block screenshot / print keyboard shortcuts ──────────────────
         const handleKeyDown = (e: KeyboardEvent) => {
           const key = e.key;
-          // PrintScreen
+          // PrintScreen / Snapshot
           if (key === "PrintScreen" || key === "Snapshot") {
             e.preventDefault();
-            e.stopPropagation();
+            e.stopImmediatePropagation();
             return false;
           }
-          // Ctrl+P (print), Ctrl+Shift+S (save as), Ctrl+Shift+P (print preview)
+          // Ctrl+P (print), Ctrl+Shift+S (save page as), Ctrl+Shift+P (print preview)
           if (e.ctrlKey && (key === "p" || key === "P")) { e.preventDefault(); return false; }
           if (e.ctrlKey && e.shiftKey && (key === "s" || key === "S")) { e.preventDefault(); return false; }
           if (e.ctrlKey && e.shiftKey && (key === "p" || key === "P")) { e.preventDefault(); return false; }
-          // Win+PrintScreen (Windows) — key combo fires as Meta+PrintScreen in some browsers
+          // Win+PrintScreen (Windows) — Meta+PrintScreen in some browsers
           if (e.metaKey && (key === "PrintScreen" || key === "Snapshot")) { e.preventDefault(); return false; }
+          // Alt+PrintScreen
+          if (e.altKey && (key === "PrintScreen" || key === "Snapshot")) { e.preventDefault(); return false; }
         };
 
         document.addEventListener("keydown", handleKeyDown, true);
 
+        // ── Right-click context menu block ──────────────────────────────
+        const handleContextMenu = (e: MouseEvent) => { e.preventDefault(); return false; };
+        document.addEventListener("contextmenu", handleContextMenu, true);
+
         return () => {
           document.removeEventListener("keydown", handleKeyDown, true);
-          const el = document.getElementById(STYLE_ID);
-          if (el) el.remove();
+          document.removeEventListener("contextmenu", handleContextMenu, true);
+          const styleEl = document.getElementById(STYLE_ID);
+          if (styleEl) styleEl.remove();
         };
       } else {
-        // Cleanup if we navigated away from test tab or role changed
-        const el = document.getElementById(STYLE_ID);
-        if (el) el.remove();
+        const styleEl = document.getElementById(STYLE_ID);
+        if (styleEl) styleEl.remove();
       }
     }
+
     // Mobile (React Native) — AppState approach: show opaque overlay when app goes to background.
-    // This prevents screen-recording apps from capturing exam content.
     if (Platform.OS !== "web") {
       const { AppState } = require("react-native");
       const isStudentOrGuest = user?.role === "student" || user?.role === "guest";
@@ -5810,7 +5820,6 @@ function MainApp() {
       }
 
       const handleAppStateChange = (nextState: string) => {
-        // Show overlay when app is backgrounded or inactive (screen recorder captures background)
         if (nextState === "background" || nextState === "inactive") {
           setShowTestSecureOverlay(true);
         } else if (nextState === "active") {
@@ -5885,18 +5894,22 @@ function MainApp() {
   }, [waitingRoomTest]);
 
 
-  // Proctoring tracker: enforces fullscreen, tracks tab-switches / focus loss and 2-strike auto-submit
+  // Proctoring tracker: enforces fullscreen, tracks tab-switches / focus loss and 4-strike auto-submit
   useEffect(() => {
     if (!activeAttempt || Platform.OS !== "web") return;
-    tabLeaveCountRef.current = 0;
+    
+    // Restore accumulated strike count from LocalStorage draft to survive page refreshes
+    const draft = examLocalStorage.getDraft(activeAttempt.attemptId);
+    const restoredStrikes = typeof draft?.tabLeaveCount === "number" ? draft.tabLeaveCount : 0;
+    tabLeaveCountRef.current = restoredStrikes;
     tabLeaveStartTimeRef.current = null;
     lastViolationTimeRef.current = 0;
     setProctorWarning({
-      visible: false,
-      reason: "",
-      strikes: 0,
-      maxStrikes: 2,
-      isSubmitting: false,
+      visible: restoredStrikes > 0,
+      reason: restoredStrikes > 0 ? `Restored ${restoredStrikes} previous violation strike(s)` : "",
+      strikes: restoredStrikes,
+      maxStrikes: 4,
+      isSubmitting: restoredStrikes >= 4,
       durationAway: 0,
     });
 
@@ -5912,8 +5925,17 @@ function MainApp() {
 
       tabLeaveCountRef.current += 1;
       const currentStrikes = tabLeaveCountRef.current;
-      const maxStrikes = 2;
+      const maxStrikes = 4;
       const durationSeconds = Math.max(1, awaySecs);
+
+      // Persist strike count into local draft immediately
+      try {
+        const currentDraft = examLocalStorage.getDraft(activeAttempt.attemptId) || {};
+        examLocalStorage.saveDraft(activeAttempt.attemptId, {
+          ...currentDraft,
+          tabLeaveCount: currentStrikes,
+        });
+      } catch (_) {}
 
       try {
         api.post(
@@ -5928,7 +5950,7 @@ function MainApp() {
           visible: true,
           reason: `${reason} (${durationSeconds}s)`,
           strikes: currentStrikes,
-          maxStrikes: 2,
+          maxStrikes: 4,
           isSubmitting: true,
           durationAway: durationSeconds,
         });
@@ -5944,7 +5966,7 @@ function MainApp() {
           visible: true,
           reason: `${reason} (${durationSeconds}s)`,
           strikes: currentStrikes,
-          maxStrikes: 2,
+          maxStrikes: 4,
           isSubmitting: false,
           durationAway: durationSeconds,
         });
@@ -6099,6 +6121,64 @@ function MainApp() {
       syncAnswers().catch(() => { });
     };
   }, [activeAttempt]);
+
+  // Network connection status toast listener during active examination
+  useEffect(() => {
+    if (!activeAttempt || Platform.OS !== "web" || typeof window === "undefined") return;
+
+    const handleOffline = () => {
+      showToast(
+        "📶 Network disconnected. You can continue answering all questions — your answers are saved locally and will sync automatically once reconnected.",
+        "warning"
+      );
+    };
+
+    const syncOfflineDrafts = async () => {
+      try {
+        if (typeof localStorage !== "undefined") {
+          const keys = Object.keys(localStorage).filter(k => k.startsWith("nermai_exam_draft_"));
+          for (const key of keys) {
+            const attemptId = key.replace("nermai_exam_draft_", "");
+            const draft = JSON.parse(localStorage.getItem(key) || "{}");
+            if (draft && draft.answers) {
+              const formattedBatch = Object.entries(draft.answers).map(([qId, val]) => ({
+                questionId: qId,
+                answer: val
+              }));
+              if (formattedBatch.length > 0) {
+                await api.post(`/test-portal/examination/autosave/${attemptId}`, { answers: formattedBatch }, { "user-id": user?.userId || "" }).catch(() => {});
+              }
+              await api.post(`/test-portal/examination/submit/${attemptId}`, {}, { "user-id": user?.userId || "" }).catch(() => {});
+              await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { "user-id": user?.userId || "" }).catch(() => {});
+              examLocalStorage.clearDraft(attemptId);
+            }
+          }
+        }
+      } catch (e) {
+        console.log("Offline draft sync note:", e);
+      }
+    };
+
+    // Run proactive sync check on component mount in case student refreshed while online
+    syncOfflineDrafts().then(() => loadTests());
+
+    const handleOnline = async () => {
+      showToast(
+        "✅ Network reconnected! Your answers and pending exam submissions are syncing to the server.",
+        "success"
+      );
+      await syncOfflineDrafts();
+      loadTests();
+    };
+
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [activeAttempt, user]);
 
   // Pre-fetch and populate student details, documents, and credentials when opening the profile editor
   useEffect(() => {
@@ -9707,7 +9787,18 @@ function MainApp() {
   const launchReview = async (attemptId: string) => {
     setReviewLoading(true);
     try {
-      const res = await api.get(`/test-portal/review/attempt/${attemptId}`);
+      let res: any = null;
+      try {
+        res = await api.get(`/test-portal/review/attempt/${attemptId}`);
+      } catch (firstErr: any) {
+        // If not evaluated yet, trigger evaluation automatically on the fly and retry
+        try {
+          await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { "user-id": user?.userId || "" });
+          res = await api.get(`/test-portal/review/attempt/${attemptId}`);
+        } catch (_) {
+          throw firstErr;
+        }
+      }
       const reviewPayload = res?.data || res;
 
       // Normalize options from legacy object format {A:{en,ta}, B:...} → flat string array
@@ -9748,7 +9839,11 @@ function MainApp() {
       setReviewData(reviewPayload);
       setReviewMode(true);
     } catch (e: any) {
-      Alert.alert("Error Fetching Review", e.message || "Could not load test review details.");
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        showToast("📶 Network disconnected. Reconnect to the internet to view test review.", "warning");
+      } else {
+        Alert.alert("Error Fetching Review", e.message || "Could not load test review details.");
+      }
     } finally {
       setReviewLoading(false);
     }
@@ -9920,7 +10015,11 @@ function MainApp() {
     const isTimeout = isTimeoutArg === true;
     const attemptId = activeAttempt.attemptId;
     const testId = activeAttempt.testId;
-    const answersToFlush = { ...selectedAnswers };
+    
+    // Read local draft from LocalStorage to guarantee all offline selected answers are merged
+    const localDraft = examLocalStorage.getDraft(attemptId);
+    const draftAnswers = localDraft && localDraft.answers ? localDraft.answers : {};
+    const answersToFlush = { ...draftAnswers, ...selectedAnswers };
 
     // IMMEDIATELY CLOSE THE EXAM VIEW so the student is never stuck on 00:00 or questions page
     exitFullscreen();
@@ -15637,18 +15736,19 @@ function MainApp() {
 
           {/* Instructions Card */}
           <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18 }}>
-            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT INSTRUCTIONS</Text>
+            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT EXAMINATION RULES & INSTRUCTIONS</Text>
             {[
-              { icon: "🚫", text: "Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to the admin." },
-              { icon: "🚫", text: "Right-click, Copy, and Cut operations are disabled — text cannot be extracted from the exam." },
-              { icon: "✅", text: "You MUST visit ALL questions before the Submit button becomes available." },
-              { icon: "⏰", text: "The exam auto-submits when the timer reaches 00:00. Ensure you click Submit before time runs out." },
-              { icon: "💾", text: "Your answers are saved automatically in real-time — no manual save needed." },
-              { icon: "📶", text: "Stay on a stable internet connection for the entire duration of the test." },
+              { icon: "📱", text: "Phone Call & DND Warning: Answering or receiving phone calls puts the browser in the background and logs a cheating violation strike. Please enable 'Do Not Disturb' (DND) mode before starting." },
+              { icon: "⚠️", text: "4-Strike Proctoring Policy: You get 3 warning chances for switching tabs or losing window focus. On the 4th violation, your test will AUTO-SUBMIT automatically." },
+              { icon: "📶", text: "Offline Answer Persistence: If your internet drops, keep answering! Your responses are saved safely in your browser storage and will sync & evaluate automatically when reconnected." },
+              { icon: "🚫", text: "No Tab Switch or Window Minimize: Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to academy admins." },
+              { icon: "🔒", text: "Copying & Shortcut Block: Right-click, Copy, Cut, and PrintScreen operations are disabled during the test." },
+              { icon: "✅", text: "Question Exploration: You MUST visit ALL questions before the Submit button becomes available." },
+              { icon: "⏰", text: "Auto-Submit on Time Expiry: The exam auto-submits when the timer reaches 00:00. Ensure you submit your final answers on time." },
             ].map((item, i) => (
-              <View key={i} style={{ flexDirection: "row", marginBottom: 10, gap: 10 }}>
+              <View key={i} style={{ flexDirection: "row", marginBottom: 12, gap: 10 }}>
                 <Text style={{ fontSize: 16 }}>{item.icon}</Text>
-                <Text style={{ flex: 1, color: "rgba(255,255,255,0.8)", fontSize: 12, lineHeight: 18 }}>{item.text}</Text>
+                <Text style={{ flex: 1, color: "rgba(255,255,255,0.85)", fontSize: 12, lineHeight: 18 }}>{item.text}</Text>
               </View>
             ))}
           </View>
@@ -15856,13 +15956,15 @@ function MainApp() {
               <View style={{ height: 1, backgroundColor: "#e0e0e0", marginVertical: 14 }} />
 
               {/* General rules */}
-              <Text style={{ fontWeight: "800", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>GENERAL RULES</Text>
+              <Text style={{ fontWeight: "800", fontSize: 12, color: "#555", marginBottom: 10, letterSpacing: 0.5 }}>EXAMINATION RULES & PROCTORING POLICY</Text>
               {[
-                "🚫 Do NOT switch tabs or minimize the browser during the test — each tab-switch is recorded.",
-                "🚫 Right-click, copy, and cut operations are blocked.",
-                "✅ You must visit ALL questions before the Submit button appears.",
-                "⏰ The exam auto-submits when the timer reaches 00:00.",
-                "💾 Your answers are saved automatically as you go.",
+                "📱 Phone Call & DND Warning: Answering or receiving phone calls puts the app in the background and triggers a cheating violation strike. Keep 'Do Not Disturb' (DND) ON.",
+                "⚠️ 4-Strike Proctoring Policy: You get 3 warning chances for tab switches / focus loss. On the 4th violation, your test AUTO-SUBMITS automatically.",
+                "📶 Offline Answer Persistence: If your internet drops, keep answering! Your responses save locally and will auto-submit & evaluate once reconnected.",
+                "🚫 No Tab Switch or Minimize: Tab switching, minimizing the browser, and DevTools are strictly monitored.",
+                "🔒 Copying & Shortcut Block: Right-click, Copy, Cut, and PrintScreen operations are blocked.",
+                "✅ Visit All Questions: You must visit ALL questions before the Submit button becomes active.",
+                "⏰ Auto-Submit on Time Expiry: The exam auto-submits when the timer reaches 00:00.",
               ].map((rule, i) => (
                 <Text key={i} style={{ fontSize: 12, color: "#424242", marginBottom: 6, lineHeight: 18 }}>{rule}</Text>
               ))}

@@ -239,12 +239,16 @@ export class DailyContentController {
             const snapshot = await query.get();
              let contentList = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const driveId = data.googleDriveFileId || (data.url ? (data.url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] || data.url.match(/[?&]id=([a-zA-Z0-9_-]+)/)?.[1]) : null);
+                const cdnUrl = driveId ? `https://lh3.googleusercontent.com/d/${driveId}` : (data.url || null);
                 return {
                     id: doc.id,
                     title: data.title,
                     type: data.type,
                     source: data.source,
                     url: data.url || null,
+                    cdnUrl: cdnUrl,
+                    googleDriveFileId: driveId || null,
                     fileBase64: data.fileBase64 || null,
                     fileName: data.fileName || null,
                     date: data.date,

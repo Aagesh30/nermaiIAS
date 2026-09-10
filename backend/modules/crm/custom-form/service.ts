@@ -4,6 +4,9 @@ const db = admin.firestore();
 const FORMS_COLLECTION = "custom_application_forms";
 const DEFAULT_FORM_ID = "mock_test_app";
 
+let cachedFormConfig: any = null;
+let lastCacheTime: number = 0;
+
 export interface CustomFieldConfig {
   id: string;
   label: string;

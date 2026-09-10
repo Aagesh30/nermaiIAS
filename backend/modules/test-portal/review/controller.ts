@@ -20,12 +20,29 @@ export class ReviewController {
         try {
             const { attemptId } = req.params;
 
-            const resultDoc = await db.collection("results").doc(attemptId).get();
+            let resultDoc = await db.collection("results").doc(attemptId).get();
             if (!resultDoc.exists) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Attempt review is not available. Ensure the attempt is evaluated."
-                });
+                // Auto-evaluate unevaluated attempts on-the-fly
+                try {
+                    const { EvaluationController } = await import("../evaluation/controller");
+                    const fakeReq = { params: { attemptId } } as any;
+                    let fakeStatus = 200;
+                    const fakeRes = {
+                        status: (code: number) => { fakeStatus = code; return fakeRes; },
+                        json: (data: any) => data
+                    } as any;
+                    await EvaluationController.evaluateAttempt(fakeReq, fakeRes);
+                    resultDoc = await db.collection("results").doc(attemptId).get();
+                } catch (e: any) {
+                    console.log("On-the-fly evaluation note:", e?.message);
+                }
+
+                if (!resultDoc.exists) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Attempt review is not available. Ensure the attempt is evaluated."
+                    });
+                }
             }
 
             const result = resultDoc.data()!;

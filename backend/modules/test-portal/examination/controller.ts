@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
 import { testQuestionsCache, testDetailsCache, attemptCache } from "../../../shared/utils/cache";
+import { EvaluationController } from "../evaluation/controller";
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -48,6 +49,15 @@ export class ExaminationController {
             submittedAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        // Auto-evaluate attempt so result document exists immediately
+        try {
+            const mockReq = { params: { attemptId } } as any;
+            const mockRes = { status: () => ({ json: () => {} }) } as any;
+            await EvaluationController.evaluateAttempt(mockReq, mockRes);
+        } catch (e) {
+            console.error("[handleAutoSubmit] Auto-evaluation warning:", e);
+        }
     }
 
     /**
@@ -666,23 +676,7 @@ export class ExaminationController {
                 });
             }
 
-            if (attempt.isSubmitted || attempt.status === "submitted" || attempt.status === "evaluated") {
-                return res.status(200).json({
-                    success: true,
-                    message: "Cannot auto-save for a submitted test",
-                    data: { countSaved: 0 }
-                });
-            }
-
-            const endTimeMs = ExaminationController.getMs(attempt.endTime);
-            if (Date.now() > endTimeMs) {
-                await ExaminationController.handleAutoSubmit(attemptId);
-                return res.status(400).json({
-                    success: false,
-                    message: "Time has expired. Test has been auto-submitted."
-                });
-            }
-
+            // Note: For offline sync, allow updating answers even if already marked submitted/evaluated
             attemptCache.delete(`attempt_${attemptId}`); // Invalidate cache so progress/resume load fresh answers map
             if (answers.length > 0) {
                 const updatePayload: Record<string, any> = {
@@ -694,6 +688,18 @@ export class ExaminationController {
                     updatePayload[`answers.${item.questionId}`] = item.answer !== undefined ? item.answer : null;
                 }
                 await db.collection("student_attempts").doc(attemptId).update(updatePayload);
+
+                // If attempt was already submitted/evaluated (e.g. offline sync post expiry), re-evaluate now with fresh answers
+                if (attempt.isSubmitted || attempt.status === "submitted" || attempt.status === "evaluated" || (attempt.endTime && Date.now() > ExaminationController.getMs(attempt.endTime))) {
+                    try {
+                        const { EvaluationController } = await import("../evaluation/controller");
+                        const fakeReq = { params: { attemptId } } as any;
+                        const fakeRes = { status: () => fakeRes, json: (data: any) => data } as any;
+                        await EvaluationController.evaluateAttempt(fakeReq, fakeRes);
+                    } catch (e) {
+                        console.log("Offline re-evaluation note:", e);
+                    }
+                }
             } else {
                 await db.collection("student_attempts").doc(attemptId).update({
                     lastActiveAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -836,6 +842,14 @@ export class ExaminationController {
                 submittedAt: submissionTime,
                 updatedAt: submissionTime
             });
+
+            // Automatically evaluate attempt so score cards and review answers are created immediately
+            try {
+                await EvaluationController.evaluateAttempt(req, res);
+                return;
+            } catch (evalErr) {
+                console.error("[submitTest] Auto-evaluation warning:", evalErr);
+            }
 
             return res.status(200).json({
                 success: true,
