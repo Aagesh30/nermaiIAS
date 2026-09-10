@@ -621,14 +621,53 @@ export class ReviewController {
                 entries = resultsSnapshot.docs.map(doc => doc.data()) as any[];
             }
 
-            // Read pre-saved student profile details directly (0 extra reads)
-            const enrichedEntries = entries.map(entry => {
+            const isGenericName = (name: string) => {
+                if (!name) return true;
+                const s = String(name).trim().toLowerCase();
+                return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+            };
+
+            const enrichedEntries = await Promise.all(entries.map(async entry => {
+                let sName = entry.studentName || "";
+                let rNum = entry.rollNumber || "";
+
+                if (isGenericName(sName) && entry.studentId) {
+                    try {
+                        const sid = entry.studentId;
+                        const leadDoc = await db.collection("leads").doc(sid).get();
+                        if (leadDoc.exists) {
+                            const lData = leadDoc.data()!;
+                            if (lData.name && !isGenericName(lData.name)) sName = lData.name;
+                            if (lData.phone || lData.name) rNum = lData.name || lData.phone;
+                        }
+                        if (isGenericName(sName)) {
+                            const userDoc = await db.collection("users").doc(sid).get();
+                            if (userDoc.exists) {
+                                const uData = userDoc.data()!;
+                                sName = uData.name || uData.fullName || uData.username || "";
+                                rNum = uData.username || sName;
+                            }
+                        }
+                        if (isGenericName(sName)) {
+                            const studentDoc = await db.collection("students").doc(sid).get();
+                            if (studentDoc.exists) {
+                                const stData = studentDoc.data()!;
+                                sName = `${stData.firstName || ""} ${stData.lastName || ""}`.trim() || stData.fullName || stData.name || "";
+                                rNum = stData.rollNumber || stData.rollNo || sName;
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                if (isGenericName(sName)) sName = "Guest User";
+                if (isGenericName(rNum)) rNum = sName;
+
                 return {
                     ...entry,
-                    studentName: entry.studentName || entry.displayName || (entry.studentId ? `Student (${entry.studentId.substring(0, 8)})` : "Unknown Student"),
-                    rollNumber: entry.rollNumber || "N/A"
+                    studentName: sName,
+                    rollNumber: rNum
                 };
-            });
+            }));
 
             // Sort by obtainedMarks desc, then by updatedAt asc to compute live dynamic ranks
             enrichedEntries.sort((a: any, b: any) => {
@@ -840,8 +879,10 @@ export class ReviewController {
 
                 // Build ranked entries with correct/wrong counts
                 const entries = testResults.map((r, idx) => {
-                    const rollNumber = r.rollNumber || r.studentId || `STU-${idx + 1}`;
-                    const studentName = r.studentName || r.studentId || "Unknown";
+                    const rawName = r.studentName || r.studentId || "Unknown Student";
+                    const isGuestRoll = !r.rollNumber || r.rollNumber === "N/A" || r.rollNumber === "Guest" || String(r.rollNumber).startsWith("STU-");
+                    const rollNumber = isGuestRoll ? rawName : r.rollNumber;
+                    const studentName = rawName;
 
                     // Compute correct/wrong from questionDetails
                     const details = r.questionDetails || [];

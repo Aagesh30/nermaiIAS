@@ -92,6 +92,88 @@ export const requireAuth = async (
 };
 
 /**
+ * requireAuthOrAttemptId — EXAM-SAFE dual-path authentication middleware.
+ *
+ * Primary path: standard JWT auth (same as requireAuth).
+ * Fallback path: when JWT is expired/revoked (e.g. mid-exam session rotation),
+ *   authenticates the request using the attempt document from Firestore.
+ *   The attemptId is a UUID v4 that only the student who started the exam
+ *   possesses (received from the backend /start endpoint). The attempt doc
+ *   contains the student's ID, which is used as the authenticated identity.
+ *
+ * SECURITY: This bypass is ONLY applied to exam write endpoints (autosave,
+ * submit, evaluate). Never use it for read/list/admin endpoints.
+ *
+ * This prevents answers from being silently lost when the JWT session expires
+ * mid-exam, which was the root cause of "all questions show Unattempted" bug.
+ */
+export const requireAuthOrAttemptId = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  // ── Step 1: Try normal JWT auth first (the happy path) ────────────────────
+  let jwtSucceeded = false;
+  await new Promise<void>((resolve) => {
+    requireAuth(req, res, (err?: any) => {
+      if (!err) jwtSucceeded = true;
+      resolve();
+    });
+  });
+
+  if (jwtSucceeded) return next();
+
+  // ── Step 2: JWT failed — try Firestore attempt-id fallback ───────────────
+  // Accept the attemptId from either the URL param or a dedicated header.
+  const attemptId = (req.params?.attemptId as string) || (req.headers['x-attempt-id'] as string);
+
+  if (!attemptId || attemptId.trim() === '') {
+    logger.warn('[ExamBypass] No attemptId available for fallback auth');
+    return next(new AppError('Unauthorized: Token expired and no attempt ID provided', 401));
+  }
+
+  try {
+    const attemptDoc = await db.collection('student_attempts').doc(attemptId).get();
+
+    if (!attemptDoc.exists) {
+      logger.warn(`[ExamBypass] Attempt ${attemptId} not found in Firestore`);
+      return next(new AppError('Unauthorized: Attempt not found', 401));
+    }
+
+    const attempt = attemptDoc.data()!;
+
+    if (attempt.isDeleted) {
+      logger.warn(`[ExamBypass] Attempt ${attemptId} is deleted`);
+      return next(new AppError('Unauthorized: Attempt has been deleted', 401));
+    }
+
+    if (!attempt.studentId) {
+      logger.warn(`[ExamBypass] Attempt ${attemptId} has no studentId`);
+      return next(new AppError('Unauthorized: Attempt has no student association', 401));
+    }
+
+    // Authenticated via attemptId — set req.user from the attempt document
+    req.user = {
+      userId: attempt.studentId,
+      tenantId: 'default_tenant',
+      role: 'student',
+      programMemberships: [],
+      studentId: attempt.studentId,
+      name: attempt.studentName || '',
+      email: '',
+      username: attempt.rollNumber || '',
+    };
+
+    logger.info(`[ExamBypass] Auth via attemptId ${attemptId} for student ${attempt.studentId}`);
+    return next();
+
+  } catch (e: any) {
+    logger.error('[ExamBypass] Firestore lookup failed during attempt-id auth', { error: e?.message });
+    return next(new AppError('Unauthorized: Attempt verification failed', 401));
+  }
+};
+
+/**
  * Like requireAuth but also accepts the token as a ?token= query parameter.
  * Used for the /content stream route so web browsers can open PDFs directly
  * (browsers cannot set Authorization headers on window.open / Linking.openURL calls).

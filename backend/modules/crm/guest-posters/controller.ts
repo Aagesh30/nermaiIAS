@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
-import { uploadFileToGoogleDrive } from "../../../services/google_drive";
+import { uploadFileToGoogleDrive, toDriveCdnUrl } from "../../../services/google_drive";
 
 const db = admin.firestore();
 const COLLECTION = "guestPosters";
@@ -19,8 +19,12 @@ export class GuestPostersController {
 
             const posters = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const rawUrl = data.posterUrl || "";
+                const cdnUrl = toDriveCdnUrl(rawUrl) || rawUrl;
                 return {
                     ...data,
+                    posterUrl: cdnUrl,
+                    rawPosterUrl: rawUrl,
                     id: doc.id,
                     createdAt: data.createdAt
                         ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString()

@@ -514,7 +514,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, darkMo
                                   {student.studentName}
                                 </div>
                                 <div className="text-[10px] text-gray-500 dark:text-gray-400">
-                                  Roll: {student.rollNumber}
+                                  Roll: {student.rollNumber && student.rollNumber !== 'N/A' && student.rollNumber !== 'Guest' && !String(student.rollNumber).startsWith('STU-') ? student.rollNumber : (student.studentName || 'Guest Student')}
                                 </div>
                               </div>
                               <div className="text-right shrink-0">

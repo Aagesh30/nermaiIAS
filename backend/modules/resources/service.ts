@@ -12,7 +12,7 @@ import { logResourceOpen } from './analytics';
 import { FirebaseStorageProvider } from './providers/FirebaseStorageProvider';
 import { GoogleDriveProvider } from './providers/GoogleDriveProvider';
 import { IResourceProvider } from './providers/IResourceProvider';
-import { uploadFileToGoogleDrive } from '../../services/google_drive';
+import { uploadFileToGoogleDrive, toDriveCdnUrl } from '../../services/google_drive';
 import { generalCache } from '../../shared/utils/cache';
 
 export class ResourceService {
@@ -373,6 +373,7 @@ export class ResourceService {
       // Delivery fields
       viewerUrl,
       viewerType,
+      cdnUrl: toDriveCdnUrl(viewerUrl || decryptedPath),
     };
   }
 

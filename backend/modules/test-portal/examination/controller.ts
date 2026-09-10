@@ -201,15 +201,28 @@ export class ExaminationController {
                     const userDoc = await db.collection("users").doc(studentId).get();
                     if (userDoc.exists) {
                         const uData = userDoc.data()!;
-                        studentName = uData.name || "";
-                        rollNumber = uData.username || uData.loginUsername || "";
+                        studentName = uData.name || uData.fullName || uData.username || uData.loginUsername || uData.email?.split("@")[0] || uData.phone || "";
+                        rollNumber = uData.username || uData.loginUsername || uData.rollNumber || uData.phone || studentName || "";
+                    }
+                }
+                if (!studentName) {
+                    const leadDoc = await db.collection("leads").doc(studentId).get();
+                    if (leadDoc.exists) {
+                        const lData = leadDoc.data()!;
+                        studentName = lData.name || lData.fullName || lData.username || lData.email?.split("@")[0] || lData.phone || "";
+                        rollNumber = lData.username || lData.loginUsername || lData.phone || studentName || "";
                     }
                 }
             } catch (e) {
                 console.log("Error loading student profile during startTest:", e);
             }
-            if (!studentName) studentName = "Student";
-            if (!rollNumber) rollNumber = "N/A";
+            if (!studentName && req.user) {
+                const u = req.user as any;
+                studentName = u.name || u.fullName || u.username || u.email?.split("@")[0] || u.phone || "";
+                rollNumber = u.username || u.loginUsername || u.rollNumber || u.phone || studentName || "";
+            }
+            if (!studentName || studentName === "Student") studentName = "Guest User";
+            if (!rollNumber || rollNumber === "N/A" || rollNumber === "Guest" || rollNumber === "Student") rollNumber = studentName;
 
             const attemptPayload = {
                 id: attemptId,
@@ -772,6 +785,14 @@ export class ExaminationController {
             const answeredCount = answeredQuestionIds.length;
             const remainingCount = Math.max(0, totalQuestions - answeredCount);
 
+            // Build full answer map for frontend to restore on resume/refresh.
+            // Each entry: { questionId: string, selectedAnswer: string }
+            // Local draft wins over this (merged in frontend), but this provides the
+            // server ground-truth for any answers submitted while online.
+            const answersArray = Object.entries(answers)
+                .filter(([_, val]) => val !== null && val !== undefined && val !== "")
+                .map(([questionId, selectedAnswer]) => ({ questionId, selectedAnswer: String(selectedAnswer) }));
+
             return res.status(200).json({
                 success: true,
                 message: "Progress retrieved successfully",
@@ -779,7 +800,8 @@ export class ExaminationController {
                     totalQuestions,
                     answeredQuestions: answeredCount,
                     remainingQuestions: remainingCount,
-                    answeredQuestionIds
+                    answeredQuestionIds,
+                    answers: answersArray
                 }
             });
 
@@ -1215,22 +1237,41 @@ export class ExaminationController {
             }
 
             // 2. Fetch student name & roll number from student collection or req.user
-            let studentName = "Student";
+            let studentName = "";
             let rollNumber = "";
-            
-            const studentDoc = await db.collection("students").doc(studentId).get();
-            if (studentDoc.exists) {
-                const sData = studentDoc.data()!;
-                studentName = `${sData.firstName || ""} ${sData.lastName || ""}`.trim() || sData.name || "Student";
-                rollNumber = sData.rollNumber || sData.rollNo || sData.loginUsername || "";
-            } else {
-                const userDoc = await db.collection("users").doc(studentId).get();
-                if (userDoc.exists) {
-                    const uData = userDoc.data()!;
-                    studentName = uData.name || "Student";
-                    rollNumber = uData.rollNumber || uData.username || "";
+            try {
+                const studentDoc = await db.collection("students").doc(studentId).get();
+                if (studentDoc.exists) {
+                    const sData = studentDoc.data()!;
+                    studentName = `${sData.firstName || ""} ${sData.lastName || ""}`.trim() || sData.fullName || sData.name || "";
+                    rollNumber = sData.rollNumber || sData.rollNo || sData.admissionNumber || sData.loginUsername || "";
                 }
+                if (!studentName) {
+                    const userDoc = await db.collection("users").doc(studentId).get();
+                    if (userDoc.exists) {
+                        const uData = userDoc.data()!;
+                        studentName = uData.name || uData.fullName || uData.username || uData.loginUsername || uData.email?.split("@")[0] || uData.phone || "";
+                        rollNumber = uData.username || uData.loginUsername || uData.rollNumber || uData.phone || studentName || "";
+                    }
+                }
+                if (!studentName) {
+                    const leadDoc = await db.collection("leads").doc(studentId).get();
+                    if (leadDoc.exists) {
+                        const lData = leadDoc.data()!;
+                        studentName = lData.name || lData.fullName || lData.username || lData.email?.split("@")[0] || lData.phone || "";
+                        rollNumber = lData.username || lData.loginUsername || lData.phone || studentName || "";
+                    }
+                }
+            } catch (e) {}
+
+            if (!studentName && req.user) {
+                const u = req.user as any;
+                studentName = u.name || u.fullName || u.username || u.email?.split("@")[0] || u.phone || "";
+                rollNumber = u.username || u.loginUsername || u.rollNumber || u.phone || studentName || "";
             }
+
+            if (!studentName || studentName === "Student") studentName = "Guest User";
+            if (!rollNumber || rollNumber === "N/A" || rollNumber === "Guest" || rollNumber === "Student") rollNumber = studentName;
 
             // 3. Write report log doc
             await logRef.set({
@@ -1280,18 +1321,58 @@ export class ExaminationController {
                 .where("testId", "==", testId)
                 .get();
 
-            const logs = snapshot.docs.map(doc => {
+            const isGenericName = (name: string) => {
+                if (!name) return true;
+                const s = String(name).trim().toLowerCase();
+                return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+            };
+
+            const logs = await Promise.all(snapshot.docs.map(async doc => {
                 const data = doc.data();
+                let sName = data.studentName || "";
+                let rNum = data.rollNumber || "";
+
+                if ((isGenericName(sName) || !rNum || rNum === "N/A") && data.studentId) {
+                    try {
+                        const sid = data.studentId;
+                        const leadDoc = await db.collection("leads").doc(sid).get();
+                        if (leadDoc.exists) {
+                            const lData = leadDoc.data()!;
+                            if (lData.name && !isGenericName(lData.name)) sName = lData.name;
+                            if (lData.phone || lData.name) rNum = lData.name || lData.phone;
+                        }
+                        if (isGenericName(sName)) {
+                            const userDoc = await db.collection("users").doc(sid).get();
+                            if (userDoc.exists) {
+                                const uData = userDoc.data()!;
+                                sName = uData.name || uData.fullName || uData.username || "";
+                                rNum = uData.username || sName;
+                            }
+                        }
+                        if (isGenericName(sName)) {
+                            const studentDoc = await db.collection("students").doc(sid).get();
+                            if (studentDoc.exists) {
+                                const stData = studentDoc.data()!;
+                                sName = `${stData.firstName || ""} ${stData.lastName || ""}`.trim() || stData.fullName || stData.name || "";
+                                rNum = stData.rollNumber || stData.rollNo || sName;
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                if (isGenericName(sName)) sName = "Guest User";
+                if (isGenericName(rNum) || !rNum) rNum = sName;
+
                 return {
                     id: doc.id,
                     testId: data.testId,
                     qIndex: data.qIndex,
                     studentId: data.studentId,
-                    studentName: data.studentName || "Student",
-                    rollNumber: data.rollNumber || "",
+                    studentName: sName,
+                    rollNumber: rNum,
                     reportedAt: data.reportedAt ? (data.reportedAt.toDate ? data.reportedAt.toDate().toISOString() : data.reportedAt) : null
                 };
-            });
+            }));
 
             // Sort in-memory to prevent missing Firestore index requirements
             logs.sort((a, b) => {

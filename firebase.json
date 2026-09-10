@@ -7,7 +7,8 @@
     "public": "web_portal/dist",
     "ignore": [
       "firebase.json",
-      "**/.*"
+      "**/.*",
+      "!**/assets/node_modules/**"
     ],
     "rewrites": [
       {

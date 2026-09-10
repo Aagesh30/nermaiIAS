@@ -86,26 +86,38 @@ const api: AxiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach token to every request
+// Attach token and user-id to every request
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = getTokenFromFolder1Auth();
   if (token && config.headers) {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
+  const userObj = getUserFromAuth();
+  if (userObj?.userId && config.headers && !config.headers['user-id']) {
+    config.headers['user-id'] = userObj.userId;
+  }
   return config;
 });
 
-// Handle 401 globally
+// Handle 401 globally (safeguarded against wiping session during active exams)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired — clear auth and reload
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem('nermai_auth_user');
-      }
-      if (typeof window !== 'undefined') {
-        window.location.reload();
+      // Check if user is currently taking an exam or viewing test portal
+      const currentUrl = typeof window !== 'undefined' ? (window.location.href || '') : '';
+      const isExamActive = currentUrl.includes('test') || currentUrl.includes('attempt') || currentUrl.includes('exam');
+
+      // Only clear auth & reload if NOT in an active exam page to protect offline answer drafts
+      if (!isExamActive) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('nermai_auth_user');
+        }
+        if (typeof window !== 'undefined') {
+          window.location.reload();
+        }
+      } else {
+        console.warn('[API] 401 encountered during active exam session. Preserving localStorage auth token and draft state.');
       }
     }
     return Promise.reject(error);

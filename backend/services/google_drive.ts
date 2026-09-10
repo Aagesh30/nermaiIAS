@@ -266,3 +266,16 @@ export async function deleteFileFromGoogleDrive(fileId: string): Promise<boolean
     return false;
   }
 }
+
+/**
+ * Converts a Google Drive file URL or File ID into a high-speed CDN URL (lh3.googleusercontent.com)
+ */
+export function toDriveCdnUrl(urlOrId?: string | null): string | null {
+  if (!urlOrId) return null;
+  const match = urlOrId.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || urlOrId.match(/[?&]id=([a-zA-Z0-9_-]+)/) || urlOrId.match(/^([a-zA-Z0-9_-]{25,})$/);
+  if (match && match[1]) {
+    return `https://lh3.googleusercontent.com/d/${match[1]}`;
+  }
+  return urlOrId;
+}
+

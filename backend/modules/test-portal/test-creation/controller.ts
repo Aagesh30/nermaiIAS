@@ -574,10 +574,13 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                     const exp = q.explanation || q.notes || "";
 
                     const dUrl1 = q.driveUrl || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("http") ? q.imageUrl : "");
-                    const b641 = q.imageBase64 || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("data:") ? q.imageUrl : "") || (typeof q.questionImage === "string" && q.questionImage.startsWith("data:") ? q.questionImage : "");
-
-                    // Primary image stored in Firestore is the compressed base64 image (so Test Portal displays directly from Firestore)
-                    const firestoreImg1 = b641 || dUrl1 || "";
+                    let driveId1 = q.driveFileId || q.fileId || "";
+                    if (!driveId1 && dUrl1) {
+                        const m = dUrl1.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || dUrl1.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                        if (m && m[1]) driveId1 = m[1];
+                    }
+                    const cdnUrl1 = driveId1 ? `https://lh3.googleusercontent.com/d/${driveId1}` : dUrl1;
+                    const firestoreImg1 = cdnUrl1 || (q.imageBase64 && q.imageBase64.startsWith("data:") ? q.imageBase64 : (q.imageUrl || ""));
 
                     batch.set(qRef, {
                         id: qId,
@@ -590,8 +593,8 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                         negativeMarks: negativeMarks || 0.33,
                         imageUrl: firestoreImg1,
                         imageBase64: firestoreImg1.startsWith("data:") ? firestoreImg1 : "",
-                        driveUrl: dUrl1 || "",
-                        driveFileId: q.driveFileId || q.fileId || "",
+                        driveUrl: cdnUrl1 || dUrl1 || "",
+                        driveFileId: driveId1 || q.driveFileId || q.fileId || "",
                         images: q.images || [],
                         isDeleted: false,
                         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -663,10 +666,13 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                     }
 
                     const dUrl2 = q.driveUrl || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("http") ? q.imageUrl : "");
-                    const b642 = q.imageBase64 || (typeof q.imageUrl === "string" && q.imageUrl.startsWith("data:") ? q.imageUrl : "") || (typeof q.questionImage === "string" && q.questionImage.startsWith("data:") ? q.questionImage : "");
-
-                    // Primary image stored in Firestore is the compressed base64 image (so Test Portal displays directly from Firestore)
-                    const firestoreImg2 = b642 || dUrl2 || "";
+                    let driveId2 = q.driveFileId || q.fileId || "";
+                    if (!driveId2 && dUrl2) {
+                        const m = dUrl2.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || dUrl2.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+                        if (m && m[1]) driveId2 = m[1];
+                    }
+                    const cdnUrl2 = driveId2 ? `https://lh3.googleusercontent.com/d/${driveId2}` : dUrl2;
+                    const firestoreImg2 = cdnUrl2 || (q.imageBase64 && q.imageBase64.startsWith("data:") ? q.imageBase64 : (q.imageUrl || ""));
 
                     batch.set(qRef, {
                         id: qId,
@@ -682,8 +688,8 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                         source: "pdf_extraction",
                         imageUrl: firestoreImg2,
                         imageBase64: firestoreImg2.startsWith("data:") ? firestoreImg2 : "",
-                        driveUrl: dUrl2 || "",
-                        driveFileId: q.driveFileId || q.fileId || "",
+                        driveUrl: cdnUrl2 || dUrl2 || "",
+                        driveFileId: driveId2 || q.driveFileId || q.fileId || "",
                         images: q.images || [],
                         draftId: draftId || null,
                         isDeleted: false,
@@ -1177,15 +1183,14 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 return res.status(500).json({ success: false, message: "Failed to upload image to Google Drive. Please check Drive configuration." });
             }
 
-            // Return the Base64 data for local instant display during exam + Google Drive permanent URL
             const driveId = driveResult.fileId;
-            const thumbnailUrl = `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
+            const cdnUrl = `https://lh3.googleusercontent.com/d/${driveId}`;
 
             return res.status(200).json({
                 success: true,
-                imageUrl: base64,
-                imageBase64: base64,
-                driveUrl: thumbnailUrl,
+                imageUrl: cdnUrl,
+                imageBase64: "", // Do not store giant base64 image payload in Firestore
+                driveUrl: cdnUrl,
                 previewUrl: driveResult.previewUrl,
                 webViewLink: driveResult.webViewLink,
                 fileId: driveId

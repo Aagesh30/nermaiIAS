@@ -353,15 +353,28 @@ export class EvaluationController {
                     const userDoc = await db.collection("users").doc(attempt.studentId).get();
                     if (userDoc.exists) {
                         const uData = userDoc.data()!;
-                        studentName = uData.name || "";
-                        rollNumber = uData.username || uData.loginUsername || "";
+                        studentName = uData.name || uData.fullName || uData.username || uData.loginUsername || uData.email?.split("@")[0] || uData.phone || "";
+                        rollNumber = uData.username || uData.loginUsername || uData.rollNumber || uData.phone || studentName || "";
+                    }
+                }
+                if (!studentName) {
+                    const leadDoc = await db.collection("leads").doc(attempt.studentId).get();
+                    if (leadDoc.exists) {
+                        const lData = leadDoc.data()!;
+                        studentName = lData.name || lData.fullName || lData.username || lData.email?.split("@")[0] || lData.phone || "";
+                        rollNumber = lData.username || lData.loginUsername || lData.phone || studentName || "";
                     }
                 }
             } catch (e) {
                 console.log("Error loading student profile during evaluation:", e);
             }
-            if (!studentName) studentName = "Student";
-            if (!rollNumber) rollNumber = "N/A";
+            if (!studentName && req.user) {
+                const u = req.user as any;
+                studentName = u.name || u.fullName || u.username || u.email?.split("@")[0] || u.phone || "";
+                rollNumber = u.username || u.loginUsername || u.rollNumber || u.phone || studentName || "";
+            }
+            if (!studentName || studentName === "Student") studentName = attempt.studentName && attempt.studentName !== "Student" ? attempt.studentName : (attempt.username || "Guest User");
+            if (!rollNumber || rollNumber === "N/A" || rollNumber === "Guest" || rollNumber === "Student") rollNumber = studentName;
 
             const resultPayload = {
                 id: attemptId,
@@ -486,7 +499,7 @@ export class EvaluationController {
                     const userDoc = await db.collection("users").doc(r.studentId).get();
                     if (userDoc.exists) {
                         const userData = userDoc.data()!;
-                        studentName = userData.name || studentName;
+                        studentName = userData.name || userData.fullName || userData.username || userData.email?.split("@")[0] || userData.phone || studentName;
                         
                         if (userData.studentId) {
                             const studentDoc2 = await db.collection("students").doc(userData.studentId).get();
@@ -499,15 +512,15 @@ export class EvaluationController {
                                 rollNumber = studentData2.rollNumber || "";
                             }
                         } else {
-                            rollNumber = userData.username || "";
+                            rollNumber = userData.username || userData.loginUsername || studentName;
                         }
                     } else {
                         // Try finding in leads (guests)
                         const leadDoc = await db.collection("leads").doc(r.studentId).get();
                         if (leadDoc.exists) {
                             const leadData = leadDoc.data()!;
-                            studentName = leadData.name || studentName;
-                            rollNumber = "Guest";
+                            studentName = leadData.name || leadData.fullName || leadData.username || leadData.email?.split("@")[0] || leadData.phone || studentName;
+                            rollNumber = leadData.username || leadData.rollNumber || leadData.phone || studentName;
                         }
                     }
                 }
@@ -519,9 +532,11 @@ export class EvaluationController {
             }
         }
         
-        if (!studentName) {
-            studentName = `Guest: ${r.studentId.substring(0, 8)}`;
-            rollNumber = "Guest";
+        if (!studentName || studentName === "Student") {
+            studentName = (r.studentName && r.studentName !== "Student") ? r.studentName : (r.username || r.name || (r.studentId ? `Guest: ${r.studentId.substring(0, 8)}` : "Guest User"));
+        }
+        if (!rollNumber || rollNumber === "N/A" || rollNumber === "Guest" || rollNumber === "Student") {
+            rollNumber = studentName;
         }
 
         let tabLeaveCount = r.tabLeaveCount;
@@ -556,8 +571,6 @@ export class EvaluationController {
                 .where("studentId", "==", studentId)
                 .where("testId", "==", testId)
                 .where("isDeleted", "==", false)
-                .orderBy("obtainedMarks", "desc")
-                .limit(1)
                 .get();
 
             if (snapshot.empty) {
@@ -567,7 +580,10 @@ export class EvaluationController {
                 });
             }
 
-            const enriched = await EvaluationController.enrichResult(snapshot.docs[0].data());
+            const docs = snapshot.docs.map(doc => doc.data());
+            docs.sort((a: any, b: any) => (b.obtainedMarks || 0) - (a.obtainedMarks || 0));
+
+            const enriched = await EvaluationController.enrichResult(docs[0]);
 
             return res.status(200).json({
                 success: true,
@@ -593,10 +609,10 @@ export class EvaluationController {
             const snapshot = await db.collection("results")
                 .where("testId", "==", testId)
                 .where("isDeleted", "==", false)
-                .orderBy("obtainedMarks", "desc")
                 .get();
 
             const results = snapshot.docs.map(doc => doc.data());
+            results.sort((a: any, b: any) => (b.obtainedMarks || 0) - (a.obtainedMarks || 0));
             const enrichedResults = await Promise.all(results.map(r => EvaluationController.enrichResult(r)));
 
             return res.status(200).json({

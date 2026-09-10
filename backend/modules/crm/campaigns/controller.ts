@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import admin from "firebase-admin";
 import { randomUUID } from "crypto";
-import { uploadFileToGoogleDrive } from "../../../services/google_drive";
+import { uploadFileToGoogleDrive, toDriveCdnUrl } from "../../../services/google_drive";
 
 const db = admin.firestore();
 const CAMPAIGNS_COLLECTION = "campaigns";
@@ -131,8 +131,11 @@ export class CampaignsController {
 
             let campaigns = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const rawPoster = data.posterUrl || "";
                 return {
                     ...data,
+                    posterUrl: toDriveCdnUrl(rawPoster) || rawPoster,
+                    rawPosterUrl: rawPoster,
                     createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                     updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
                 };
@@ -183,8 +186,11 @@ export class CampaignsController {
 
             const campaigns = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const rawPoster = data.posterUrl || "";
                 return {
                     ...data,
+                    posterUrl: toDriveCdnUrl(rawPoster) || rawPoster,
+                    rawPosterUrl: rawPoster,
                     createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null,
                     updatedAt: data.updatedAt ? (data.updatedAt as admin.firestore.Timestamp).toDate().toISOString() : null
                 };
@@ -218,8 +224,11 @@ export class CampaignsController {
 
             const posters = snapshot.docs.map(doc => {
                 const data = doc.data();
+                const rawPoster = data.posterUrl || "";
                 return {
                     ...data,
+                    posterUrl: toDriveCdnUrl(rawPoster) || rawPoster,
+                    rawPosterUrl: rawPoster,
                     createdAt: data.createdAt ? (data.createdAt as admin.firestore.Timestamp).toDate().toISOString() : null
                 };
             }).filter((c: any) => {

@@ -8,7 +8,7 @@
     "start": "node --max-old-space-size=4096 ./node_modules/expo/bin/cli start --web",
     "web": "node --max-old-space-size=4096 ./node_modules/expo/bin/cli start --web",
     "clear": "npx expo start --web --clear",
-    "build": "npx expo export -p web",
+    "build": "npx expo export -p web && node scripts/copy-unhashed-fonts.js",
     "android": "npx expo start --android",
     "ios": "npx expo start --ios"
   },

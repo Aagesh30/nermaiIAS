@@ -52,11 +52,11 @@ import { RNSkeleton, RNDashboardSkeleton, RNTableSkeleton, RNCardGridSkeleton, R
 
 const getDirectImageUrl = (url: string): string => {
   if (!url) return "";
-  if (url.includes("drive.google.com/file/d/")) {
-    const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (match && match[1]) {
-      return `https://lh3.googleusercontent.com/d/${match[1]}`;
-    }
+  if (typeof url !== "string") return "";
+  if (url.startsWith("data:image")) return url;
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/) || url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://lh3.googleusercontent.com/d/${match[1]}`;
   }
   return url;
 };
@@ -65,31 +65,15 @@ const getDirectImageUrl = (url: string): string => {
 const Alert = {
   alert: (title: string, message?: string, buttons?: any[], options?: any) => {
     if (Platform.OS === "web") {
-      if (typeof (globalThis as any).globalShowAlert === "function") {
-        (globalThis as any).globalShowAlert(title, message, buttons);
+      const showFn = (globalThis as any).globalShowAlert || (typeof window !== "undefined" ? (window as any).globalShowAlert : null);
+      if (typeof showFn === "function") {
+        showFn(title, message, buttons);
         return;
       }
       if (buttons && buttons.length > 0) {
-        if (buttons.length === 1) {
-          if (typeof window !== "undefined") {
-            window.alert(`${title}${message ? "\n\n" + message : ""}`);
-          }
-          if (typeof buttons[0]?.onPress === "function") {
-            buttons[0].onPress();
-          }
-        } else {
-          const okBtn = buttons.find((b: any) => b.style !== "cancel") || buttons[buttons.length - 1];
-          const cancelBtn = buttons.find((b: any) => b.style === "cancel");
-          const confirmed = typeof window !== "undefined" ? window.confirm(`${title}${message ? "\n\n" + message : ""}`) : true;
-          if (confirmed && typeof okBtn?.onPress === "function") {
-            okBtn.onPress();
-          } else if (!confirmed && typeof cancelBtn?.onPress === "function") {
-            cancelBtn.onPress();
-          }
-        }
-      } else {
-        if (typeof window !== "undefined") {
-          window.alert(`${title}${message ? "\n\n" + message : ""}`);
+        const okBtn = buttons.find((b: any) => b.style !== "cancel") || buttons[buttons.length - 1];
+        if (typeof okBtn?.onPress === "function") {
+          okBtn.onPress();
         }
       }
     } else {
@@ -116,23 +100,23 @@ if (Platform.OS === "web" && typeof document !== "undefined") {
     const iconFontStyles = `
       @font-face {
         font-family: 'Ionicons';
-        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.6148e7019854f3bde85b633cb88f3c25.ttf') format('truetype');
+        src: url('/assets/fonts/Ionicons.ttf') format('truetype');
       }
       @font-face {
         font-family: 'MaterialIcons';
-        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.4e85bc9ebe07e0340c9c4fc2f6c38908.ttf') format('truetype');
+        src: url('/assets/fonts/MaterialIcons.ttf') format('truetype');
       }
       @font-face {
         font-family: 'MaterialCommunityIcons';
-        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.b62641afc9ab487008e996a5c5865e56.ttf') format('truetype');
+        src: url('/assets/fonts/MaterialCommunityIcons.ttf') format('truetype');
       }
       @font-face {
         font-family: 'FontAwesome';
-        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.b06871f281fee6b241d60582ae9369b9.ttf') format('truetype');
+        src: url('/assets/fonts/FontAwesome.ttf') format('truetype');
       }
       @font-face {
         font-family: 'Feather';
-        src: url('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Feather.a76d309774d33d9856f650bed4292a23.ttf') format('truetype');
+        src: url('/assets/fonts/Feather.ttf') format('truetype');
       }
     `;
     const style = document.createElement("style");
@@ -3598,6 +3582,7 @@ function MainApp() {
   const [scriptCopied, setScriptCopied] = useState(false);
 
   const loadDriveConfig = async () => {
+    if (!user || (user.role !== "super_admin" && user.role !== "developer")) return;
     try {
       const res = await api.get("/developer/drive-config");
       // Backend returns { success: true, data: { appsScriptUrl, rootFolderId } }
@@ -4862,9 +4847,6 @@ function MainApp() {
             <div id="preview-iframe-fallback" style={{ display: 'none', width: '100%', height: '65vh', borderRadius: 8, overflow: 'hidden' }}>
               <iframe src={iframeUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={previewImageTitle || "Preview"} />
             </div>
-            <a href={previewImageUri} target="_blank" rel="noopener noreferrer" style={{ marginTop: 12, color: '#1976d2', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>
-              Open in Google Drive ↗
-            </a>
           </div>
         );
       } else {
@@ -5941,7 +5923,7 @@ function MainApp() {
         api.post(
           `/test-portal/examination/focus-event/${activeAttempt.attemptId}`,
           { event: "blur", tabLeaveCount: currentStrikes, durationSeconds, reason },
-          { "user-id": user?.userId || "" }
+          { headers: { "user-id": user?.userId || "" } }
         ).catch(() => {});
       } catch (_) {}
 
@@ -6100,7 +6082,12 @@ function MainApp() {
         }));
 
         if (formattedBatch.length > 0) {
-          await api.post(`/test-portal/examination/autosave/${attemptId}`, { answers: formattedBatch }, { "user-id": user?.userId || "" });
+          // Include x-attempt-id header as bypass so this still works if JWT session expired.
+          await api.post(
+            `/test-portal/examination/autosave/${attemptId}`,
+            { answers: formattedBatch },
+            { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+          );
           // Only update the hash after a successful API call.
           // If the request fails (network drop), lastSyncedHash stays stale so the
           // next interval will retry — ensuring no answers are silently lost.
@@ -6133,50 +6120,152 @@ function MainApp() {
       );
     };
 
-    const syncOfflineDrafts = async () => {
+    // ── Token auto-refresh every 10 minutes during active exam ────────────────
+    // This is the primary fix for "answers show as Unattempted" —
+    // without refresh, the JWT session expires and all API calls return 401,
+    // silently dropping every answer save.
+    const refreshExamToken = async () => {
       try {
-        if (typeof localStorage !== "undefined") {
-          const keys = Object.keys(localStorage).filter(k => k.startsWith("nermai_exam_draft_"));
-          for (const key of keys) {
-            const attemptId = key.replace("nermai_exam_draft_", "");
-            const draft = JSON.parse(localStorage.getItem(key) || "{}");
-            if (draft && draft.answers) {
-              const formattedBatch = Object.entries(draft.answers).map(([qId, val]) => ({
-                questionId: qId,
-                answer: val
-              }));
-              if (formattedBatch.length > 0) {
-                await api.post(`/test-portal/examination/autosave/${attemptId}`, { answers: formattedBatch }, { "user-id": user?.userId || "" }).catch(() => {});
-              }
-              await api.post(`/test-portal/examination/submit/${attemptId}`, {}, { "user-id": user?.userId || "" }).catch(() => {});
-              await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { "user-id": user?.userId || "" }).catch(() => {});
-              examLocalStorage.clearDraft(attemptId);
-            }
-          }
+        if (typeof localStorage === "undefined") return;
+        const stored = JSON.parse(localStorage.getItem("nermai_auth_user") || "{}");
+        if (!stored.refreshToken || !stored.sessionId) return;
+        const baseUrl = getBaseUrl();
+        const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: stored.refreshToken, sessionId: stored.sessionId })
+        });
+        const data = await res.json();
+        if (data?.data?.token) {
+          stored.token = data.data.token;
+          if (data.data.refreshToken) stored.refreshToken = data.data.refreshToken;
+          if (data.data.sessionId) stored.sessionId = data.data.sessionId;
+          localStorage.setItem("nermai_auth_user", JSON.stringify(stored));
+          console.log("[ExamTokenRefresh] Token refreshed successfully during exam.");
         }
       } catch (e) {
-        console.log("Offline draft sync note:", e);
+        console.log("[ExamTokenRefresh] Refresh failed (non-critical, bypass will handle):", e);
       }
     };
 
-    // Run proactive sync check on component mount in case student refreshed while online
-    syncOfflineDrafts().then(() => loadTests());
+    // Refresh immediately on exam start, then every 10 minutes
+    refreshExamToken();
+    const tokenRefreshInterval = setInterval(refreshExamToken, 10 * 60 * 1000);
 
     const handleOnline = async () => {
       showToast(
-        "✅ Network reconnected! Your answers and pending exam submissions are syncing to the server.",
+        "✅ Network reconnected! Syncing offline answers to server...",
         "success"
       );
-      await syncOfflineDrafts();
-      loadTests();
+      syncAnswers().catch(() => {});
     };
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
 
     return () => {
+      clearInterval(tokenRefreshInterval);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
+    };
+  }, [activeAttempt, user]);
+
+  // Safe offline draft sync — runs when student is NOT in an active exam (on mount + online reconnect).
+  // Syncs any pending exam drafts (from previous sessions where network dropped before submit).
+  // CRITICAL SAFETY RULES:
+  //   1. Skip the currently-active exam draft (student is still answering it).
+  //   2. Only clear the draft AFTER autosave confirmed — never on API failure.
+  //   3. Submit + evaluate only AFTER autosave confirmed.
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+
+    const syncOfflineDrafts = async () => {
+      try {
+        if (typeof localStorage === "undefined") return;
+        const activeAttemptId = activeAttempt?.attemptId || null;
+        const keys = Object.keys(localStorage).filter(k => k.startsWith("nermai_exam_draft_"));
+        for (const key of keys) {
+          const attemptId = key.replace("nermai_exam_draft_", "");
+
+          // SAFETY: Never touch the draft of the exam currently in progress.
+          if (activeAttemptId && attemptId === activeAttemptId) continue;
+
+          let draft: any = null;
+          try { draft = JSON.parse(localStorage.getItem(key) || "{}"); } catch (_) { continue; }
+          if (!draft || !draft.answers) continue;
+
+          const formattedBatch = Object.entries(draft.answers)
+            .filter(([_, val]) => val !== null && val !== undefined && val !== "")
+            .map(([qId, val]) => ({ questionId: qId, answer: val }));
+
+          if (formattedBatch.length === 0) {
+            // Draft has no answers — just clear the stale key
+            examLocalStorage.clearDraft(attemptId);
+            continue;
+          }
+
+          // Step 1: Autosave with x-attempt-id bypass so it succeeds even if session expired.
+          let autosaveOk = false;
+          try {
+            await api.post(
+              `/test-portal/examination/autosave/${attemptId}`,
+              { answers: formattedBatch },
+              { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+            );
+            autosaveOk = true;
+          } catch (e) {
+            console.log(`[OfflineSync] Autosave failed for ${attemptId} — draft kept for retry:`, e);
+            continue; // Leave draft intact, retry next time
+          }
+
+          if (!autosaveOk) continue;
+
+          // Step 2: Submit (best-effort — already submitted attempts return 200 gracefully)
+          try {
+            await api.post(
+              `/test-portal/examination/submit/${attemptId}`,
+              {},
+              { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+            );
+          } catch (e) {
+            console.log(`[OfflineSync] Submit note for ${attemptId}:`, e);
+          }
+
+          // Step 3: Evaluate (best-effort)
+          try {
+            await api.post(
+              `/test-portal/evaluation/evaluate/${attemptId}`,
+              {},
+              { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+            );
+          } catch (e) {
+            console.log(`[OfflineSync] Evaluate note for ${attemptId}:`, e);
+          }
+
+          // Step 4: Only clear the draft now that autosave was confirmed successful
+          examLocalStorage.clearDraft(attemptId);
+          console.log(`[OfflineSync] Draft for ${attemptId} synced and cleared (${formattedBatch.length} answers).`);
+        }
+      } catch (e) {
+        console.log("[OfflineSync] Unexpected error during offline draft sync:", e);
+      }
+    };
+
+    // Run on mount (catches the case where student refreshed after network came back)
+    syncOfflineDrafts().then(() => { if (!activeAttempt) loadTests(); });
+
+    const handleOnlineGlobal = async () => {
+      // Only run the heavy sync+load when student is NOT mid-exam.
+      // During an active exam the 60s background sync handles it.
+      if (!activeAttempt) {
+        await syncOfflineDrafts();
+        loadTests();
+      }
+    };
+
+    window.addEventListener("online", handleOnlineGlobal);
+    return () => {
+      window.removeEventListener("online", handleOnlineGlobal);
     };
   }, [activeAttempt, user]);
 
@@ -6724,6 +6813,11 @@ function MainApp() {
   const [studentAttempts, setStudentAttempts] = useState<any[]>([]);
 
   const loadTests = async (isSilent = false) => {
+    if (!user) {
+      setTests([]);
+      setTestsLoading(false);
+      return;
+    }
     if (loadTestsInProgressRef.current) return;
     loadTestsInProgressRef.current = true;
     if (!isSilent) {
@@ -7788,20 +7882,14 @@ function MainApp() {
       }
     };
 
-    if (typeof window !== "undefined" && window.confirm) {
-      if (window.confirm("Are you sure you want to delete this class?")) {
+    confirmAction(
+      "Confirm Delete Class",
+      `Are you sure you want to delete "${cls?.title || cls?.className || 'this class'}"?`,
+      async () => {
         await doDelete();
-      }
-    } else {
-      Alert.alert(
-        "Delete Class",
-        "Are you sure you want to delete this class?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete", style: "destructive", onPress: doDelete }
-        ]
-      );
-    }
+      },
+      { isDanger: true, confirmText: "Delete Class" }
+    );
   };
 
 
@@ -9793,7 +9881,7 @@ function MainApp() {
       } catch (firstErr: any) {
         // If not evaluated yet, trigger evaluation automatically on the fly and retry
         try {
-          await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { "user-id": user?.userId || "" });
+          await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { headers: { "user-id": user?.userId || "" } });
           res = await api.get(`/test-portal/review/attempt/${attemptId}`);
         } catch (_) {
           throw firstErr;
@@ -9852,7 +9940,7 @@ function MainApp() {
   const loadStudyMode = async (testId: string) => {
     setStudyModeLoading(testId);
     try {
-      const res = await api.get(`/test-portal/examination/study/${testId}`, { "user-id": user?.userId || "" });
+      const res = await api.get(`/test-portal/examination/study/${testId}`, { headers: { "user-id": user?.userId || "" } });
       const data = res?.data || res;
       setStudyModeData(data);
       setStudyModalVisible(true);
@@ -9892,7 +9980,7 @@ function MainApp() {
     if (statusInfo.status === "ongoing") {
       try {
         const localDraft = examLocalStorage.getDraft(statusInfo.attemptId!);
-        const res = await api.get(`/test-portal/examination/resume/${statusInfo.attemptId}`, { "user-id": user.userId });
+        const res = await api.get(`/test-portal/examination/resume/${statusInfo.attemptId}`, { headers: { "user-id": user.userId } });
 
         // remainingTime is already included in the resume response — no need for a separate /timer call
         const remSec = res?.remainingTime ?? (res?.durationMinutes ? res.durationMinutes * 60 : 3600);
@@ -9909,7 +9997,7 @@ function MainApp() {
         // Load questions: prefer local draft if available, otherwise fetch from server
         let qList = localDraft?.questions || [];
         if (!qList || qList.length === 0) {
-          const qRes = await api.get(`/test-portal/examination/questions/${statusInfo.attemptId}`, { "user-id": user.userId });
+          const qRes = await api.get(`/test-portal/examination/questions/${statusInfo.attemptId}`, { headers: { "user-id": user.userId } });
           qList = qRes || [];
         }
         setAttemptQuestions(qList);
@@ -9919,7 +10007,7 @@ function MainApp() {
         tabLeaveCountRef.current = 0;
 
         // Load progress & merge with local answers draft
-        const progressRes = await api.get(`/test-portal/examination/progress/${statusInfo.attemptId}`, { "user-id": user.userId });
+        const progressRes = await api.get(`/test-portal/examination/progress/${statusInfo.attemptId}`, { headers: { "user-id": user.userId } });
         const savedAns: Record<string, string> = { ...(localDraft?.answers || {}) };
         if (progressRes && progressRes.answers) {
           progressRes.answers.forEach((ansObj: any) => {
@@ -9945,7 +10033,7 @@ function MainApp() {
     }
 
     try {
-      const res = await api.post(`/test-portal/examination/start/${test.id}`, {}, { "user-id": user.userId });
+      const res = await api.post(`/test-portal/examination/start/${test.id}`, {}, { headers: { "user-id": user.userId } });
       const attemptData = res?.data || res;
       if (!attemptData || !attemptData.attemptId) {
         throw new Error("Invalid response from server. Could not start test.");
@@ -9961,7 +10049,7 @@ function MainApp() {
       setTimeLeft(remSec);
       setExamEndTime(Date.now() + remSec * 1000);
 
-      const qRes = await api.get(`/test-portal/examination/questions/${attemptData.attemptId}`, { "user-id": user.userId });
+      const qRes = await api.get(`/test-portal/examination/questions/${attemptData.attemptId}`, { headers: { "user-id": user.userId } });
       setAttemptQuestions(qRes || []);
       setCurrentQIdx(0);
       setSelectedAnswers({});
@@ -10015,6 +10103,7 @@ function MainApp() {
     const isTimeout = isTimeoutArg === true;
     const attemptId = activeAttempt.attemptId;
     const testId = activeAttempt.testId;
+    const myStudent = getLoggedInStudent(user, students);
     
     // Read local draft from LocalStorage to guarantee all offline selected answers are merged
     const localDraft = examLocalStorage.getDraft(attemptId);
@@ -10031,30 +10120,83 @@ function MainApp() {
     setPreviewImageTitle("");
 
     try {
-      // 1. Flush local answers to server (best-effort)
-      const formattedBatch = Object.entries(answersToFlush).map(([qId, val]) => ({
-        questionId: qId,
-        answer: val
-      }));
+      // ── Step 0: Refresh the JWT token before submitting to prevent 401 errors ──
+      // This is critical — if the session expired mid-exam, we get a fresh token
+      // so the subsequent API calls work normally (x-attempt-id is the backup).
+      try {
+        if (typeof localStorage !== "undefined") {
+          const stored = JSON.parse(localStorage.getItem("nermai_auth_user") || "{}");
+          if (stored.refreshToken && stored.sessionId) {
+            const baseUrl = getBaseUrl();
+            const refreshRes = await fetch(`${baseUrl}/api/auth/refresh`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refreshToken: stored.refreshToken, sessionId: stored.sessionId })
+            });
+            const refreshData = await refreshRes.json();
+            if (refreshData?.data?.token) {
+              stored.token = refreshData.data.token;
+              if (refreshData.data.refreshToken) stored.refreshToken = refreshData.data.refreshToken;
+              if (refreshData.data.sessionId) stored.sessionId = refreshData.data.sessionId;
+              localStorage.setItem("nermai_auth_user", JSON.stringify(stored));
+              console.log("[Submit] Token refreshed before submit.");
+            }
+          }
+        }
+      } catch (refreshErr) {
+        // Non-fatal — the x-attempt-id bypass will handle it if token is still expired
+        console.log("[Submit] Pre-submit token refresh failed (bypass will handle):", refreshErr);
+      }
+
+      // ── Step 1: Flush local answers to server with retry (CRITICAL — never silently drop) ──
+      // Retries up to 3 times with 2s delays. x-attempt-id header bypasses JWT auth
+      // so this works even if the token refresh above failed.
+      const formattedBatch = Object.entries(answersToFlush)
+        .filter(([_, val]) => val !== null && val !== undefined && val !== "")
+        .map(([qId, val]) => ({ questionId: qId, answer: val }));
+
+      let autosaveOk = false;
       if (formattedBatch.length > 0) {
-        try {
-          await api.post(`/test-portal/examination/autosave/${attemptId}`, { answers: formattedBatch }, { "user-id": user?.userId || "" });
-        } catch (e: any) {
-          console.log("Autosave note during submit:", e?.message);
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await api.post(
+              `/test-portal/examination/autosave/${attemptId}`,
+              { answers: formattedBatch },
+              { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+            );
+            autosaveOk = true;
+            console.log(`[Submit] Autosave succeeded on attempt ${attempt} (${formattedBatch.length} answers).`);
+            break;
+          } catch (e: any) {
+            console.log(`[Submit] Autosave attempt ${attempt}/3 failed:`, e?.message);
+            if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+        if (!autosaveOk) {
+          console.warn(`[Submit] All 3 autosave retries failed. Answers remain in localStorage draft for retry.`);
         }
       }
 
-      // 2. Mark submitted on server (best-effort)
+      // ── Step 2: Mark submitted on server ──────────────────────────────────────
+      // x-attempt-id bypass ensures this works even if JWT is still expired.
       try {
-        await api.post(`/test-portal/examination/submit/${attemptId}`, {}, { "user-id": user?.userId || "" });
+        await api.post(
+          `/test-portal/examination/submit/${attemptId}`,
+          {},
+          { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+        );
       } catch (submitErr: any) {
         console.log("Submit endpoint note:", submitErr?.message);
       }
 
-      // 3. Evaluate attempt to calculate score and rank
+      // ── Step 3: Evaluate attempt to calculate score and rank ──────────────────
       let evalData: any = null;
       try {
-        const evalRes = await api.post(`/test-portal/evaluation/evaluate/${attemptId}`, {}, { "user-id": user?.userId || "" });
+        const evalRes = await api.post(
+          `/test-portal/evaluation/evaluate/${attemptId}`,
+          {},
+          { headers: { "user-id": user?.userId || "", "x-attempt-id": attemptId } }
+        );
         evalData = evalRes?.data || evalRes;
       } catch (evalErr: any) {
         try {
@@ -10065,8 +10207,12 @@ function MainApp() {
         }
       }
 
-      // 4. Clear local storage draft
-      examLocalStorage.clearDraft(attemptId);
+      // 4. Only clear local storage draft if server confirmed autosave
+      if (autosaveOk) {
+        examLocalStorage.clearDraft(attemptId);
+      } else {
+        console.log(`[Submit] Preserving draft for attempt ${attemptId} in localStorage for automatic sync upon reconnection.`);
+      }
       loadTests();
 
       // AUTO-DELETE OFFLINE STUDENT TEST REQUEST ON COMPLETION
@@ -16093,22 +16239,26 @@ function MainApp() {
               })()}
 
               {/* Question Image Attachment if Present */}
-              {(attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage) && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setPreviewImageUri(attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage);
-                    setPreviewImageTitle(`Question #${currentQIdx + 1} Image`);
-                  }}
-                  style={{ marginBottom: 16 }}
-                >
-                  <Image
-                    source={{ uri: attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage }}
-                    style={{ width: "100%", height: 220, borderRadius: 10, resizeMode: "contain", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e0e0e0" }}
-                    pointerEvents="none"
-                  />
-                  <Text style={{ fontSize: 11, color: "#1976d2", textAlign: "right", marginTop: 4, fontWeight: "600" }}>Tap image to view full screen</Text>
-                </TouchableOpacity>
-              )}
+              {(attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage || attemptQuestions[currentQIdx].driveUrl) && (() => {
+                const rawQUri = attemptQuestions[currentQIdx].imageUrl || attemptQuestions[currentQIdx].questionImage || attemptQuestions[currentQIdx].driveUrl || "";
+                const cdnQUri = getDirectImageUrl(rawQUri);
+                return (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setPreviewImageUri(cdnQUri);
+                      setPreviewImageTitle(`Question #${currentQIdx + 1} Image`);
+                    }}
+                    style={{ marginBottom: 16 }}
+                  >
+                    <Image
+                      source={{ uri: cdnQUri }}
+                      style={{ width: "100%", height: 220, borderRadius: 10, resizeMode: "contain", backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e0e0e0" }}
+                      pointerEvents="none"
+                    />
+                    <Text style={{ fontSize: 11, color: "#1976d2", textAlign: "right", marginTop: 4, fontWeight: "600" }}>Tap image to view full screen</Text>
+                  </TouchableOpacity>
+                );
+              })()}
 
               <View style={{ gap: 10 }}>
                 {attemptQuestions[currentQIdx].options?.map((opt: string, oIdx: number) => {
@@ -20211,10 +20361,11 @@ function MainApp() {
                                         <TouchableOpacity
                                           onPress={() => {
                                             // Build printable HTML table
-                                            const rows = (testLog.entries || []).map((e: any) =>
-                                              `<tr style="border-bottom:1px solid #eee">
+                                            const rows = (testLog.entries || []).map((e: any) => {
+                                              const displayRoll = (e.rollNumber && e.rollNumber !== "N/A" && e.rollNumber !== "Guest" && !String(e.rollNumber).startsWith("STU-")) ? e.rollNumber : (e.studentName || "Guest Student");
+                                              return `<tr style="border-bottom:1px solid #eee">
                                 <td style="padding:6px 8px;text-align:center">${e.serialNo}</td>
-                                <td style="padding:6px 8px">${e.rollNumber}</td>
+                                <td style="padding:6px 8px">${displayRoll}</td>
                                 <td style="padding:6px 8px">${e.studentName}</td>
                                 <td style="padding:6px 8px;text-align:center;color:#2e7d32;font-weight:bold">${e.correct}</td>
                                 <td style="padding:6px 8px;text-align:center;color:#c62828;font-weight:bold">${e.wrong}</td>
@@ -20222,8 +20373,8 @@ function MainApp() {
                                 <td style="padding:6px 8px;text-align:center;font-weight:bold">${e.obtainedMarks} / ${e.totalMarks}</td>
                                 <td style="padding:6px 8px;text-align:center">${Math.round(e.percentage)}%</td>
                                 <td style="padding:6px 8px;text-align:center;color:${e.status === 'pass' ? '#2e7d32' : '#c62828'};font-weight:bold">${String(e.status).toUpperCase()}</td>
-                              </tr>`
-                                            ).join("");
+                              </tr>`;
+                                            }).join("");
                                             const html = `<!DOCTYPE html><html><head><title>${testLog.testTitle} - Results</title>
                               <style>body{font-family:Arial,sans-serif;padding:20px}h2{color:#c62828}table{width:100%;border-collapse:collapse}th{background:#c62828;color:white;padding:8px;text-align:left}td{border-bottom:1px solid #eee;padding:6px 8px}</style></head>
                               <body><h2>${testLog.testTitle}</h2>
@@ -20260,6 +20411,17 @@ function MainApp() {
                                           </View>
                                           {/* Table Rows */}
                                           {(testLog.entries || []).map((entry: any, idx: number) => {
+                                            const isGenericName = (name: string) => {
+                                              if (!name) return true;
+                                              const s = String(name).trim().toLowerCase();
+                                              return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+                                            };
+                                            let sName = (entry.studentName && !isGenericName(entry.studentName)) ? entry.studentName : "";
+                                            if (!sName && user && (user.id === entry.studentId || user.userId === entry.studentId || user.leadId === entry.studentId || user.email === entry.studentId)) {
+                                              sName = user.name || user.email?.split("@")[0];
+                                            }
+                                            if (!sName) sName = entry.username || entry.name || "Guest User";
+                                            const displayRoll = (entry.rollNumber && !isGenericName(entry.rollNumber)) ? entry.rollNumber : sName;
                                             if (!isAdmin) {
                                               const correct = entry.correct ?? 0;
                                               const wrong = entry.wrong ?? 0;
@@ -20268,7 +20430,7 @@ function MainApp() {
                                               return (
                                                 <View key={entry.attemptId || idx} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
                                                   <Text style={{ width: 45, fontSize: 12, color: idx === 0 ? "#fbc02d" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>#{entry.serialNo || idx + 1}</Text>
-                                                  <Text style={{ width: 120, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>{entry.rollNumber}</Text>
+                                                  <Text style={{ width: 120, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>{displayRoll}</Text>
                                                   <Text style={{ width: 85, fontSize: 12, color: "#1565c0", fontWeight: "bold", textAlign: "center" }}>{attended}</Text>
                                                   <Text style={{ width: 95, fontSize: 12, color: darkMode ? "#aaa" : "#757575", textAlign: "center" }}>{skipped}</Text>
                                                   <Text style={{ width: 85, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>{correct}</Text>
@@ -20280,7 +20442,7 @@ function MainApp() {
                                             return (
                                               <View key={entry.attemptId || idx} style={{ flexDirection: "row", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
                                                 <Text style={{ width: 36, fontSize: 12, color: idx === 0 ? "#fbc02d" : "#757575", fontWeight: "bold" }}>#{entry.serialNo}</Text>
-                                                <Text style={{ width: 90, fontSize: 12, color: darkMode ? "#fff" : "#212121" }}>{entry.rollNumber}</Text>
+                                                <Text style={{ width: 90, fontSize: 12, color: darkMode ? "#fff" : "#212121" }}>{displayRoll}</Text>
                                                 <Text style={{ width: 130, fontSize: 12, color: darkMode ? "#fff" : "#212121" }} numberOfLines={1}>{entry.studentName}</Text>
                                                 <Text style={{ width: 64, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>{entry.correct}</Text>
                                                 <Text style={{ width: 64, fontSize: 12, color: "#c62828", fontWeight: "bold", textAlign: "center" }}>{entry.wrong}</Text>
@@ -30210,8 +30372,6 @@ function MainApp() {
                         {/* Filter by Audience if Admin */}
                         {(() => {
                           const myStudent = getLoggedInStudent(user, students) || user;
-                          const aud = content.targetAudience || "all";
-                          const audLabel = aud === "paid" ? "Paid Only" : aud === "batch" ? `Batch: ${content.targetBatch || 'All'}` : "All (Guests & Students)";
                           const isPaid = (Number(myStudent?.feesPaid) > 0) || myStudent?.type === "paid" || user?.type === "paid" || (Number(myStudent?.totalFees) > 0 && Number(myStudent?.feesPaid) >= Number(myStudent?.totalFees));
 
                           const studentBatchesList: string[] = [];
@@ -31596,11 +31756,42 @@ function MainApp() {
               ) : (
                 <View style={{ borderTopWidth: 1, borderColor: "#eee" }}>
                   {leaderboard.map((entry: any, index: number) => {
+                    const isGenericName = (name: string) => {
+                      if (!name) return true;
+                      const s = String(name).trim().toLowerCase();
+                      return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+                    };
+
                     const resolvedStudent = students.find((s: any) => s.id === entry.studentId || s.userId === entry.studentId);
-                    const formattedName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName) : "";
-                    const rawName = entry.studentName && !entry.studentName.startsWith("Student (") ? entry.studentName : "";
-                    const studentName = formattedName || rawName || entry.studentName || `Student (${entry.studentId})`;
-                    const rollNo = resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername || (entry.rollNumber !== "N/A" ? entry.rollNumber : "") || "-";
+                    const resolvedLead = leads.find((ld: any) => ld.id === entry.studentId || ld.userId === entry.studentId);
+                    const resolvedUser = user && (user.id === entry.studentId || user.userId === entry.studentId || user.leadId === entry.studentId || user.email === entry.studentId) ? user : null;
+
+                    let studentName = "";
+                    if (resolvedStudent) {
+                      studentName = getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName;
+                    } else if (resolvedLead) {
+                      studentName = resolvedLead.name || resolvedLead.username;
+                    } else if (resolvedUser) {
+                      studentName = resolvedUser.name || resolvedUser.username || resolvedUser.email?.split("@")[0];
+                    }
+
+                    if (isGenericName(studentName) && entry.studentName && !isGenericName(entry.studentName)) {
+                      studentName = entry.studentName;
+                    }
+
+                    if (isGenericName(studentName) && user) {
+                      if (user.id === entry.studentId || user.userId === entry.studentId || user.leadId === entry.studentId || user.email === entry.studentId) {
+                        studentName = user.name || user.email?.split("@")[0];
+                      }
+                    }
+
+                    if (isGenericName(studentName)) {
+                      studentName = entry.username || entry.name || (user?.name ? user.name : "Guest User");
+                    }
+
+                    let rollNo = (entry.rollNumber && !isGenericName(entry.rollNumber)) ? entry.rollNumber : "";
+                    if (!rollNo && resolvedStudent) rollNo = resolvedStudent.rollNumber || resolvedStudent.rollNo || resolvedStudent.loginUsername;
+                    if (!rollNo || isGenericName(rollNo)) rollNo = studentName;
 
                     return (
                       <View key={entry.id || index} style={{
@@ -31684,11 +31875,29 @@ function MainApp() {
                             <Text style={{ fontSize: 14, fontWeight: "800", color: "#212121" }}>{qnLabel}</Text>
                             <Text style={{ fontSize: 11, color: "#757575", marginTop: 1 }}>Wrong answer / question issue reported</Text>
                             {(() => {
+                              const isGenericName = (name: string) => {
+                                if (!name) return true;
+                                const s = String(name).trim().toLowerCase();
+                                return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+                              };
+
                               const logsForQ = detailedReports.filter((log: any) => `Q.N ${log.qIndex + 1}` === qnLabel);
                               if (logsForQ.length === 0) return null;
                               return (
                                 <Text style={{ fontSize: 11, fontWeight: "700", color: "#c62828", marginTop: 4 }}>
-                                  By: {logsForQ.map((log: any) => `${log.studentName} (${log.rollNumber || "N/A"})`).join(", ")}
+                                  By: {logsForQ.map((log: any) => {
+                                    const resolvedStudent = students.find((s: any) => s.id === log.studentId || s.userId === log.studentId);
+                                    const resolvedLead = leads.find((ld: any) => ld.id === log.studentId || ld.userId === log.studentId);
+                                    let name = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.firstName)
+                                             : resolvedLead ? (resolvedLead.name || resolvedLead.username)
+                                             : (log.studentName && !isGenericName(log.studentName)) ? log.studentName : "";
+                                    if (!name && user && (user.id === log.studentId || user.userId === log.studentId || user.leadId === log.studentId || user.email === log.studentId)) {
+                                      name = user.name || user.email?.split("@")[0];
+                                    }
+                                    if (!name) name = "Guest Student";
+                                    let roll = (log.rollNumber && !isGenericName(log.rollNumber)) ? log.rollNumber : "";
+                                    return (roll && roll !== name) ? `${name} (${roll})` : name;
+                                  }).join(", ")}
                                 </Text>
                               );
                             })()}
@@ -32789,11 +32998,21 @@ function MainApp() {
                         
                         const resolvedStudent = students.find((s: any) => s.id === entry.studentId || s.userId === entry.studentId || s.loginUsername === entry.rollNumber || s.rollNumber === entry.rollNumber);
                         const resolvedLead = leads.find((ld: any) => ld.id === entry.studentId || ld.userId === entry.studentId);
-                        const sName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName) : (resolvedLead ? resolvedLead.name : (entry.studentName && !entry.studentName.startsWith("Student (") ? entry.studentName : ""));
-                        const rollVal = resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername || (entry.rollNumber && entry.rollNumber !== "N/A" ? entry.rollNumber : "") || entry.rollNo || "";
+                        const resolvedUser = user && (user.id === entry.studentId || user.userId === entry.studentId || user.username === entry.studentId) ? user : null;
+
+                        const sName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName)
+                                    : resolvedLead ? (resolvedLead.name || resolvedLead.username)
+                                    : resolvedUser ? (resolvedUser.name || resolvedUser.username || resolvedUser.email?.split("@")[0])
+                                    : (entry.studentName && entry.studentName !== "Student" && !entry.studentName.startsWith("Student (") ? entry.studentName : (entry.username || entry.name || "Guest User"));
+
+                        const validRoll = (entry.rollNumber && entry.rollNumber !== "N/A" && entry.rollNumber !== "Guest" && entry.rollNumber !== "Student" && !String(entry.rollNumber).startsWith("STU-"))
+                                        ? entry.rollNumber
+                                        : (resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername);
+
+                        const rollVal = validRoll || sName;
                         const studentLabel = sName 
-                          ? (rollVal && rollVal !== sName && rollVal !== "N/A" ? `${sName} (${rollVal})` : sName) 
-                          : (rollVal && rollVal !== "N/A" ? rollVal : (entry.studentId ? `Student (${String(entry.studentId).substring(0, 6)})` : "Student"));
+                          ? (rollVal && rollVal !== sName && rollVal !== "N/A" && rollVal !== "Guest" && rollVal !== "Student" ? `${sName} (${rollVal})` : sName) 
+                          : rollVal;
 
                         const obtainedMarks = entry.obtainedMarks ?? entry.score ?? 0;
                         const totalMarks = entry.totalMarks ?? entry.totalScore ?? 0;
@@ -33097,47 +33316,8 @@ function MainApp() {
 }
 
 export default function App() {
-  const [splashDone, setSplashDone] = useState(() => {
-    // On web, skip the splash screen if the user is already logged in
-    // or if we are returning from a Google redirect (pending guest data in localStorage)
-    if (Platform.OS === "web" && typeof localStorage !== "undefined") {
-      try {
-        const hasSession = !!localStorage.getItem("nermai_guest_email") ||
-          !!localStorage.getItem("nermai_auth_user");
-        const isRedirectReturn = localStorage.getItem("nermai_pending_guest_name") !== null ||
-          localStorage.getItem("nermai_pending_guest_phone") !== null;
-        return hasSession || isRedirectReturn;
-      } catch (e) { }
-    }
-    return false;
-  });
-  const [onboardDone, setOnboardDone] = useState(() => {
-    try {
-      if (Platform.OS === "web") {
-        // Skip onboarding if returning from Google redirect so getRedirectResult can run
-        const isRedirectReturn = localStorage.getItem("nermai_pending_guest_name") !== null ||
-          localStorage.getItem("nermai_pending_guest_phone") !== null;
-        if (isRedirectReturn) return true;
-
-        const isRegisteredGuest = !!localStorage.getItem("nermai_guest_email");
-        const isLoggedInStudent = !!localStorage.getItem("nermai_auth_user");
-
-        if (!isRegisteredGuest && !isLoggedInStudent) {
-          return false;
-        }
-
-        if (window.location && window.location.hash && window.location.hash.includes("onboarding")) {
-          return false;
-        }
-
-        return localStorage.getItem(ONBOARDING_KEY) === "true";
-      }
-      return false;
-    } catch (e) {
-      return false;
-    }
-
-  });
+  const [splashDone, setSplashDone] = useState(true);
+  const [onboardDone, setOnboardDone] = useState(true);
 
   useEffect(() => {
     if (Platform.OS === "web" && typeof window !== "undefined") {
