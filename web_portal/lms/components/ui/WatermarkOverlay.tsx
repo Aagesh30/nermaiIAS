@@ -1,19 +1,33 @@
-import React, { useMemo, useEffect, useState, useRef } from 'react';
+import React, { useMemo, useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '../../core/auth/AuthProvider';
 
 export const WatermarkOverlay: React.FC = () => {
   const { currentUser } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  
+
+  // Detect mobile screen for smaller card sizing
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined'
+      ? window.matchMedia('(max-width: 640px)').matches
+      : false
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   const [pos, setPos] = useState({ x: 50, y: 50 });
   
   // Animation state ref to avoid triggering re-renders for every frame
   const animState = useRef({
     x: 50,
     y: 50,
-    dx: 1.5,
-    dy: 1.5,
+    dx: 0.2,
+    dy: 0.2,
     width: 250,
     height: 80,
     containerWidth: 800,
@@ -45,11 +59,11 @@ export const WatermarkOverlay: React.FC = () => {
     
     const animate = () => {
       const state = animState.current;
-      
+
       // Update position
       state.x += state.dx;
       state.y += state.dy;
-      
+
       // Bounce off walls
       if (state.x <= 0) {
         state.x = 0;
@@ -58,7 +72,7 @@ export const WatermarkOverlay: React.FC = () => {
         state.x = state.containerWidth - state.width;
         state.dx *= -1;
       }
-      
+
       if (state.y <= 0) {
         state.y = 0;
         state.dy *= -1;
@@ -66,12 +80,12 @@ export const WatermarkOverlay: React.FC = () => {
         state.y = state.containerHeight - state.height;
         state.dy *= -1;
       }
-      
+
       // Apply position directly to DOM for better performance
       if (cardRef.current) {
         cardRef.current.style.transform = `translate(${state.x}px, ${state.y}px)`;
       }
-      
+
       animationId = requestAnimationFrame(animate);
     };
     
@@ -104,9 +118,9 @@ export const WatermarkOverlay: React.FC = () => {
     state.x = newX;
     state.y = newY;
     
-    // Randomize direction slightly
-    state.dx = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random());
-    state.dy = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random());
+    // Randomize direction slightly — stay slow after hover-jump
+    state.dx = (Math.random() > 0.5 ? 1 : -1) * (0.15 + Math.random() * 0.15);
+    state.dy = (Math.random() > 0.5 ? 1 : -1) * (0.15 + Math.random() * 0.15);
   };
 
   return (
@@ -126,32 +140,34 @@ export const WatermarkOverlay: React.FC = () => {
       <div
         ref={cardRef}
         onMouseEnter={handleMouseEnter}
+        onTouchStart={handleMouseEnter}
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
-          pointerEvents: 'auto', // Capture mouse events just for the card
-          backgroundColor: 'rgba(255, 255, 255, 0.85)',
-          padding: '12px 20px',
-          borderRadius: '12px',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-          border: '1px solid rgba(0,0,0,0.05)',
+          pointerEvents: 'auto', // Capture mouse/touch events just for the card
+          backgroundColor: 'rgba(255, 255, 255, 0.18)',
+          padding: isMobile ? '5px 9px' : '10px 16px',
+          borderRadius: isMobile ? '7px' : '10px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.10)',
+          border: '1px solid rgba(255,255,255,0.30)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          backdropFilter: 'blur(4px)',
-          transition: 'transform 0.1s linear',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
           userSelect: 'none',
+          cursor: 'default',
         }}
       >
-        <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#000', marginBottom: '4px' }}>
+        <span style={{ fontSize: isMobile ? '8px' : '13px', fontWeight: '700', color: '#0f172a', marginBottom: isMobile ? '1px' : '3px', opacity: 0.75 }}>
           NERMAI ACADEMY
         </span>
-        <span style={{ fontSize: '11px', color: '#333', textAlign: 'center', whiteSpace: 'pre-wrap' }}>
+        <span style={{ fontSize: isMobile ? '8px' : '13px', color: '#0f172a', textAlign: 'center', whiteSpace: 'pre-wrap', opacity: 1, fontWeight: '500' }}>
           {currentUser?.email || 'student@nermai.com'}
         </span>
-        <span style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
+        <span style={{ fontSize: isMobile ? '8px' : '13px', color: '#1e293b', marginTop: isMobile ? '1px' : '2px', opacity: 1, fontWeight: '500' }}>
           {new Date().toLocaleDateString()}
         </span>
       </div>
