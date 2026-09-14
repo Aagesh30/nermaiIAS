@@ -801,6 +801,18 @@ export class LiveSessionService {
     return false;
   }
 
+  static async notifyLiveClassIndexChanged(classId?: string, action?: string) {
+    try {
+      await db.collection('live_class_index').doc('current').set({
+        updatedAt: new Date().toISOString(),
+        lastChangedClassId: classId || 'all',
+        action: action || 'UPDATED'
+      }, { merge: true });
+    } catch (err) {
+      console.warn('[LiveSessionService] Failed to update live_class_index signal doc:', err);
+    }
+  }
+
   static async createSession(data: { 
     classId: string, 
     provider: string, 
@@ -860,6 +872,7 @@ export class LiveSessionService {
     } as ILiveSession;
 
     const docRef = await db.collection(this.collection).add(newSession);
+    await this.notifyLiveClassIndexChanged(data.classId, 'CREATED');
     return { id: docRef.id, ...newSession };
   }
 
@@ -952,6 +965,7 @@ Launch Payload Exists: ${!!session.launchPayload}
         actualStartTime: session.actualStartTime || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
+      await this.notifyLiveClassIndexChanged(sessionId, 'STARTED');
 
       // 5. Fallback Timeout: If the host never connects (SDK crash, network drop), revert to SCHEDULED after 5 mins
       setTimeout(async () => {
@@ -962,6 +976,7 @@ Launch Payload Exists: ${!!session.launchPayload}
               status: 'SCHEDULED',
               updatedAt: new Date().toISOString()
             });
+            await this.notifyLiveClassIndexChanged(sessionId, 'REVERTED');
             const { logger } = require('../../core/logger');
             logger.info(`[LiveSession] Session ${sessionId} reverted from JOINING to SCHEDULED due to timeout.`);
           }
@@ -1007,6 +1022,7 @@ Launch Payload Exists: ${!!session.launchPayload}
       updatedAt: new Date().toISOString()
     });
     await this.recordHistory(sessionId, 'EDITED', adminId, { updates });
+    await this.notifyLiveClassIndexChanged(sessionId, 'EDITED');
     return { success: true };
   }
 
@@ -1021,6 +1037,7 @@ Launch Payload Exists: ${!!session.launchPayload}
       updatedAt: new Date().toISOString()
     });
     await this.recordHistory(sessionId, 'RESCHEDULED', adminId, { newStartTime });
+    await this.notifyLiveClassIndexChanged(sessionId, 'RESCHEDULED');
     
     // Notify
     try {
@@ -1051,6 +1068,7 @@ Launch Payload Exists: ${!!session.launchPayload}
       updatedAt: new Date().toISOString()
     });
     await this.recordHistory(sessionId, 'CANCELLED', adminId);
+    await this.notifyLiveClassIndexChanged(sessionId, 'CANCELLED');
     
     try {
       const classRepo = new ClassRepository();
@@ -1103,6 +1121,7 @@ Launch Payload Exists: ${!!session.launchPayload}
       }
     }
 
+    await this.notifyLiveClassIndexChanged(targetClassId, 'DELETED');
     return { success: true };
   }
 

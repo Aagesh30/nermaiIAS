@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   Switch,
-  Modal
+  Modal,
+  useWindowDimensions
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import api from '../core/api';
@@ -50,6 +51,9 @@ const DEFAULT_CONFIG: FormConfig = {
 };
 
 export default function CustomizeApplicationPage() {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   const [config, setConfig] = useState<FormConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -220,20 +224,20 @@ export default function CustomizeApplicationPage() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isMobile && { padding: 12 }]}>
       {/* Top Action Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 14 }]}>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <MaterialCommunityIcons name="form-select" size={26} color="#b91c1c" />
-            <Text style={styles.headerTitle}>Customize Application Form</Text>
+            <Text style={[styles.headerTitle, isMobile && { fontSize: 18 }]}>Customize Application Form</Text>
           </View>
           <Text style={styles.headerSubtitle}>
             Fully customize the fields, questions, and options shown to applicants.
           </Text>
         </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, justifyContent: isMobile ? 'space-between' : 'flex-end' }}>
           {saveSuccessMessage && (
             <View style={styles.successBadge}>
               <MaterialCommunityIcons name="check-circle" size={16} color="#15803d" />
@@ -242,7 +246,7 @@ export default function CustomizeApplicationPage() {
           )}
 
           <TouchableOpacity
-            style={[styles.saveButton, saving && { opacity: 0.7 }]}
+            style={[styles.saveButton, saving && { opacity: 0.7 }, isMobile && { flex: 1, justifyContent: 'center' }]}
             onPress={handleSave}
             disabled={saving}
           >
@@ -259,9 +263,9 @@ export default function CustomizeApplicationPage() {
       </View>
 
       {/* Main Two-Column Layout (Editor Left, Live Preview Right) */}
-      <View style={styles.workspace}>
+      <View style={[styles.workspace, isMobile && { flexDirection: 'column', gap: 16 }]}>
         {/* LEFT COLUMN: BUILDER / EDITOR */}
-        <ScrollView style={styles.editorPane} showsVerticalScrollIndicator={false}>
+        <ScrollView style={[styles.editorPane, isMobile && { flex: undefined }]} showsVerticalScrollIndicator={false}>
           {/* Form General Settings */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
@@ -397,7 +401,7 @@ export default function CustomizeApplicationPage() {
         </ScrollView>
 
         {/* RIGHT COLUMN: LIVE INTERACTIVE PREVIEW */}
-        <View style={styles.previewPane}>
+        <View style={[styles.previewPane, isMobile && { flex: undefined, maxHeight: undefined, marginTop: 12 }]}>
           <View style={styles.previewHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <MaterialCommunityIcons name="eye-outline" size={18} color="#0f172a" />

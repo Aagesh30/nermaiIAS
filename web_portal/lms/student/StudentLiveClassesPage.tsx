@@ -765,7 +765,8 @@ export const StudentLiveClassesPage = () => {
       return { liveClasses: res.data?.data || res.data || [] };
     },
     refetchOnWindowFocus: true,
-    staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always',
+    staleTime: 0,
   });
 
   // Listen to live_class_index signal doc via Firestore onSnapshot (Zero Polling)

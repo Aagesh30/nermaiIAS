@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../core/api';
 import './KnowledgeStudio.css';
 
@@ -54,8 +54,8 @@ export const KnowledgeStudio = () => {
   const fetchArticles = async () => {
     try {
       const [articlesRes, colsRes] = await Promise.all([
-        api.get('/api/kb/articles'),
-        api.get('/api/kb/collections'),
+        api.get('/kb/articles'),
+        api.get('/kb/collections'),
       ]);
       setArticles(articlesRes.data.data || []);
       setCollections(colsRes.data.data || []);
@@ -66,7 +66,7 @@ export const KnowledgeStudio = () => {
 
   const fetchSettings = async () => {
     try {
-      const res = await api.get('/api/kb/settings');
+      const res = await api.get('/kb/settings');
       const s = res.data.data;
       setSettings({
         enableLLMFallback: s.enableLLMFallback ?? false,
@@ -85,7 +85,7 @@ export const KnowledgeStudio = () => {
 
   const fetchHealth = async () => {
     try {
-      const res = await api.get('/api/assistant/health');
+      const res = await api.get('/assistant/health');
       setHealth(res.data.data);
     } catch {
       setHealth({ status: 'error', kb: 'error', llm: 'disabled', provider: null });
@@ -98,7 +98,7 @@ export const KnowledgeStudio = () => {
     setPreviewLoading(true);
     setPreviewResult(null);
     try {
-      const res = await api.post('/api/assistant/preview', { query });
+      const res = await api.post('/assistant/preview', { query });
       setPreviewResult(res.data.data);
     } catch (e) {
       console.error(e);
@@ -109,7 +109,7 @@ export const KnowledgeStudio = () => {
 
   const publishArticle = async (id: string) => {
     try {
-      await api.put(`/api/kb/articles/${id}`, { status: 'published' });
+      await api.put(`/kb/articles/${id}`, { status: 'published' });
       fetchArticles();
     } catch (e) {
       console.error(e);
@@ -125,7 +125,7 @@ export const KnowledgeStudio = () => {
       if (apiKeyInput.trim()) {
         payload[`${settings.llmProvider}ApiKey`] = apiKeyInput.trim();
       }
-      await api.put('/api/kb/settings', payload);
+      await api.put('/kb/settings', payload);
       setSettingsSaved(true);
       setApiKeyInput('');
       setTimeout(() => setSettingsSaved(false), 3000);

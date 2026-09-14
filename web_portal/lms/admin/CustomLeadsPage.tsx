@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   Modal,
-  Alert
+  Alert,
+  useWindowDimensions
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as XLSX from 'xlsx';
@@ -31,6 +32,9 @@ export interface CustomLead {
 }
 
 export default function CustomLeadsPage() {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   const [leads, setLeads] = useState<CustomLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -200,22 +204,22 @@ export default function CustomLeadsPage() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isMobile && { padding: 12 }]}>
       {/* Top Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 14 }]}>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <MaterialCommunityIcons name="clipboard-account-outline" size={26} color="#b91c1c" />
-            <Text style={styles.headerTitle}>Custom Application Leads</Text>
+            <Text style={[styles.headerTitle, isMobile && { fontSize: 18 }]}>Custom Application Leads</Text>
           </View>
           <Text style={styles.headerSubtitle}>
             Dedicated submissions from the Mock Test & Application Form.
           </Text>
         </View>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: isMobile ? 'space-between' : 'flex-end' }}>
           <TouchableOpacity
-            style={styles.refreshBtn}
+            style={[styles.refreshBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
             onPress={fetchLeads}
             disabled={loading}
           >
@@ -224,7 +228,7 @@ export default function CustomLeadsPage() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.exportBtn}
+            style={[styles.exportBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
             onPress={handleExportExcel}
           >
             <MaterialCommunityIcons name="file-excel-outline" size={18} color="#15803d" />
@@ -234,28 +238,28 @@ export default function CustomLeadsPage() {
       </View>
 
       {/* Metrics Banner */}
-      <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>TOTAL SUBMISSIONS</Text>
-          <Text style={[styles.metricValue, { color: '#0f172a' }]}>{metrics.total}</Text>
+      <View style={[styles.metricsRow, isMobile && { flexWrap: 'wrap', gap: 8 }]}>
+        <View style={[styles.metricCard, isMobile && { minWidth: '47%', flex: undefined, padding: 12 }]}>
+          <Text style={[styles.metricLabel, isMobile && { fontSize: 9 }]} numberOfLines={1}>TOTAL SUBMISSIONS</Text>
+          <Text style={[styles.metricValue, { color: '#0f172a' }, isMobile && { fontSize: 20, marginTop: 2 }]}>{metrics.total}</Text>
         </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>NEW LEADS</Text>
-          <Text style={[styles.metricValue, { color: '#2563eb' }]}>{metrics.newCount}</Text>
+        <View style={[styles.metricCard, isMobile && { minWidth: '47%', flex: undefined, padding: 12 }]}>
+          <Text style={[styles.metricLabel, isMobile && { fontSize: 9 }]} numberOfLines={1}>NEW LEADS</Text>
+          <Text style={[styles.metricValue, { color: '#2563eb' }, isMobile && { fontSize: 20, marginTop: 2 }]}>{metrics.newCount}</Text>
         </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>CONTACTED</Text>
-          <Text style={[styles.metricValue, { color: '#d97706' }]}>{metrics.contactedCount}</Text>
+        <View style={[styles.metricCard, isMobile && { minWidth: '47%', flex: undefined, padding: 12 }]}>
+          <Text style={[styles.metricLabel, isMobile && { fontSize: 9 }]} numberOfLines={1}>CONTACTED</Text>
+          <Text style={[styles.metricValue, { color: '#d97706' }, isMobile && { fontSize: 20, marginTop: 2 }]}>{metrics.contactedCount}</Text>
         </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>CONVERTED</Text>
-          <Text style={[styles.metricValue, { color: '#16a34a' }]}>{metrics.convertedCount}</Text>
+        <View style={[styles.metricCard, isMobile && { minWidth: '47%', flex: undefined, padding: 12 }]}>
+          <Text style={[styles.metricLabel, isMobile && { fontSize: 9 }]} numberOfLines={1}>CONVERTED</Text>
+          <Text style={[styles.metricValue, { color: '#16a34a' }, isMobile && { fontSize: 20, marginTop: 2 }]}>{metrics.convertedCount}</Text>
         </View>
       </View>
 
       {/* Clean Toolbar with Search & 3 Status Filter Pills */}
-      <View style={styles.toolbar}>
-        <View style={styles.searchBox}>
+      <View style={[styles.toolbar, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 10, padding: 10 }]}>
+        <View style={[styles.searchBox, isMobile && { width: '100%' }]}>
           <MaterialCommunityIcons name="magnify" size={18} color="#94a3b8" />
           <TextInput
             style={styles.searchInput}
@@ -271,7 +275,7 @@ export default function CustomLeadsPage() {
         </View>
 
         {/* 3 Status Filter Pills (All, New, Contacted, Converted) */}
-        <View style={styles.filterPillsRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterPillsRow}>
           {[
             { key: 'all', label: 'ALL' },
             { key: 'new', label: 'NEW' },
@@ -296,10 +300,10 @@ export default function CustomLeadsPage() {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       </View>
 
-      {/* Main Leads Table */}
+      {/* Main Leads Table / Cards */}
       {loading ? (
         <View style={styles.tableLoading}>
           <ActivityIndicator size="large" color="#b91c1c" />
@@ -313,6 +317,66 @@ export default function CustomLeadsPage() {
             When applicants submit the application form, their details will appear right here.
           </Text>
         </View>
+      ) : isMobile ? (
+        <ScrollView style={{ gap: 10 }} showsVerticalScrollIndicator={false}>
+          {filteredLeads.map((lead, idx) => {
+            const badge = getStatusBadge(lead.status);
+            return (
+              <View key={lead.id} style={{ backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', padding: 14, marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#0f172a' }}>{lead.name}</Text>
+                    <Text style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>📞 {lead.phone}</Text>
+                    {lead.email ? <Text style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>✉️ {lead.email}</Text> : null}
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.statusBadge, { backgroundColor: badge.bg }]}
+                    onPress={() => {
+                      setSelectedLead(lead);
+                      const currentNorm = (lead.status as any) === 'admitted' ? 'converted' : lead.status;
+                      setEditStatus(currentNorm || 'new');
+                      setEditNotes(lead.notes || '');
+                    }}
+                  >
+                    <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                    <MaterialCommunityIcons name="chevron-down" size={14} color={badge.color} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9' }}>
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <View style={styles.modeBadge}>
+                      <Text style={styles.modeBadgeText}>{lead.mode || 'Offline'}</Text>
+                    </View>
+                    {lead.city ? <Text style={{ fontSize: 11, color: '#64748b' }}>📍 {lead.city}</Text> : null}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={styles.actionBtn}
+                      onPress={() => {
+                        setSelectedLead(lead);
+                        const currentNorm = (lead.status as any) === 'admitted' ? 'converted' : lead.status;
+                        setEditStatus(currentNorm || 'new');
+                        setEditNotes(lead.notes || '');
+                      }}
+                      title="Edit Details"
+                    >
+                      <MaterialCommunityIcons name="note-edit-outline" size={16} color="#0f172a" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.actionBtn, { backgroundColor: '#fef2f2' }]}
+                      onPress={() => handleDeleteLead(lead.id)}
+                      title="Delete Lead"
+                    >
+                      <MaterialCommunityIcons name="trash-can-outline" size={16} color="#dc2626" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
       ) : (
         <ScrollView style={styles.tableCard} horizontal showsHorizontalScrollIndicator={true}>
           <View>

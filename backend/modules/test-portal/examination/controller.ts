@@ -766,15 +766,19 @@ export class ExaminationController {
                 });
             }
 
-            const testDoc = await db.collection("tests").doc(attempt.testId).get();
-            if (!testDoc.exists) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Associated test not found"
-                });
+            // High Concurrency Cache for Test Details in Progress
+            let test = testDetailsCache.get<any>(`test_${attempt.testId}`);
+            if (!test) {
+                const testDoc = await db.collection("tests").doc(attempt.testId).get();
+                if (!testDoc.exists) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Associated test not found"
+                    });
+                }
+                test = testDoc.data()!;
+                testDetailsCache.set(`test_${attempt.testId}`, test, 600);
             }
-
-            const test = testDoc.data()!;
             const totalQuestions = test.questionIds ? test.questionIds.length : 0;
 
             const answers = attempt.answers || {};
@@ -961,16 +965,43 @@ export class ExaminationController {
                 .get();
 
             const now = Date.now();
-            const activeAttempts = snapshot.docs.filter(doc => {
+
+            // Auto-submit any unsubmitted attempts whose endTime has passed
+            const expiredUnsubmitted = snapshot.docs.filter(doc => {
+                const d = doc.data();
+                if (d.isSubmitted || d.status === "submitted" || d.status === "evaluated") return false;
+                const endMs = ExaminationController.getMs(d.endTime);
+                return endMs > 0 && now > endMs;
+            });
+
+            if (expiredUnsubmitted.length > 0) {
+                for (const doc of expiredUnsubmitted) {
+                    try {
+                        await ExaminationController.handleAutoSubmit(doc.id);
+                    } catch (e) {
+                        console.error("[getLiveViewerCount] Auto-submit expired attempt error:", e);
+                    }
+                }
+            }
+
+            // Fetch updated snapshot to include newly auto-submitted attempts
+            const freshSnapshot = expiredUnsubmitted.length > 0
+                ? await db.collection("student_attempts")
+                    .where("testId", "==", testId)
+                    .where("isDeleted", "==", false)
+                    .get()
+                : snapshot;
+
+            const activeAttempts = freshSnapshot.docs.filter(doc => {
                 const d = doc.data();
                 if (d.isSubmitted || d.status === "submitted" || d.status === "evaluated") return false;
                 if (d.status !== "started") return false;
                 // Must have time remaining
-                const endMs = d.endTime?._seconds ? d.endTime._seconds * 1000 : new Date(d.endTime).getTime();
+                const endMs = ExaminationController.getMs(d.endTime);
                 return endMs > now;
             });
 
-            const submittedCount = snapshot.docs.filter(doc => {
+            const submittedCount = freshSnapshot.docs.filter(doc => {
                 const d = doc.data();
                 return d.isSubmitted || d.status === "submitted" || d.status === "evaluated";
             }).length;
@@ -992,7 +1023,7 @@ export class ExaminationController {
                     testId,
                     liveCount: activeAttempts.length,
                     submittedCount,
-                    totalAttempts: snapshot.docs.length,
+                    totalAttempts: freshSnapshot.docs.length,
                     activeStudentIds: activeAttempts.map(d => d.data().studentId),
                     activeStudents,
                     refreshedAt: new Date().toISOString()
@@ -1173,15 +1204,18 @@ export class ExaminationController {
             const { tabLeaveCount } = req.body;
             const studentId = ExaminationController.getStudentId(req);
 
-            const attemptDoc = await db.collection("student_attempts").doc(attemptId).get();
-            if (!attemptDoc.exists) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Attempt not found"
-                });
+            let attempt = attemptCache.get<any>(`attempt_${attemptId}`);
+            if (!attempt) {
+                const attemptDoc = await db.collection("student_attempts").doc(attemptId).get();
+                if (!attemptDoc.exists) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Attempt not found"
+                    });
+                }
+                attempt = attemptDoc.data()!;
+                attemptCache.set(`attempt_${attemptId}`, attempt, 15);
             }
-
-            const attempt = attemptDoc.data()!;
             if (attempt.studentId !== studentId) {
                 return res.status(403).json({
                     success: false,

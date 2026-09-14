@@ -2450,6 +2450,36 @@ function MainApp() {
     }
     return userObj;
   };
+
+  const getPerformanceStatus = (obtained: number, total: number, pct?: number) => {
+    let percentage = pct;
+    if (percentage === undefined || percentage === null || isNaN(percentage)) {
+      percentage = total > 0 ? (obtained / total) * 100 : 0;
+    }
+    if (percentage < 35) {
+      return {
+        label: "Need to improve",
+        color: "#c62828",
+        bgColor: "#ffebee",
+        borderColor: "#ef9a9a"
+      };
+    } else if (percentage < 75) {
+      return {
+        label: "Few steps ahead",
+        color: "#ed6c02",
+        bgColor: "#fff4e5",
+        borderColor: "#ffe0b2"
+      };
+    } else {
+      return {
+        label: "Good",
+        color: "#2e7d32",
+        bgColor: "#e8f5e9",
+        borderColor: "#a5d6a7"
+      };
+    }
+  };
+
   const [guestNotifications, setGuestNotifications] = useState<any[]>([]);
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
@@ -2475,6 +2505,26 @@ function MainApp() {
   const [guestPosterUploading, setGuestPosterUploading] = useState(false);
   const [guestPosterTitle, setGuestPosterTitle] = useState("");
   const [guestPosterBase64, setGuestPosterBase64] = useState<string | null>(null);
+  const calcTotalDaysFromJoiningDate = (joiningDateStr?: string, currentTotalDays?: any): number => {
+    const tot = (currentTotalDays !== undefined && currentTotalDays !== null && currentTotalDays !== "") ? Number(currentTotalDays) : 0;
+    if (!joiningDateStr) {
+      return tot > 0 ? tot : 28;
+    }
+    const jDate = new Date(joiningDateStr);
+    if (isNaN(jDate.getTime())) {
+      return tot > 0 ? tot : 28;
+    }
+    const today = new Date();
+    jDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - jDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    if (diffDays <= 0) return tot > 0 ? tot : 1;
+    if (!tot || tot === 28 || diffDays > tot) {
+      return diffDays;
+    }
+    return tot;
+  };
   const [guestPosterFileName, setGuestPosterFileName] = useState<string | null>(null);
   const [newAnnouncement, setNewAnnouncement] = useState({ title: "", content: "", priority: "normal", targetDashboard: "all", targetBatch: "" });
   const [newStudent, setNewStudent] = useState({ loginUsername: "", loginPassword: "", batch: "", course: "", type: "", totalFees: "", feesPaid: "", joiningDate: "", firstName: "", lastName: "", email: "", phone: "", rollNumber: "", admissionNumber: "", dob: "", attendedDays: "", totalDays: "", modeOfPayment: "", transactionId: "", courseDuration: "", batches: [] as string[], batchModes: {} as Record<string, string[]> });
@@ -5149,6 +5199,13 @@ function MainApp() {
     } catch (e) {
       console.log("Error during logout:", e);
     }
+    loadedCollectionsRef.current.clear();
+    setStudents([]);
+    setMyProfileRequest(null);
+    setProfileRequests([]);
+    setEditingStudent(null);
+    setFeeEditStudent(null);
+    setSelectedDirectoryStudent(null);
     setShowHamburger(false);
     clearExamState(); // Ensure exam screen is gone when logging out
     setShowFeedbackModal(false);
@@ -5433,9 +5490,10 @@ function MainApp() {
 
       // Only load initial data required for student vs admin role
       if (user.role === "student") {
-        loadStudents();
+        loadStudents(true);
         loadTests();
       } else {
+        loadStudents(true);
         loadRolePermissions();
         loadPendingApprovals();
         loadOneTimePermissions();
@@ -5461,10 +5519,13 @@ function MainApp() {
 
   // Auto-resolve student profile and load my profile request on login/data load
   useEffect(() => {
-    if (!user || user.role !== "student" || students.length === 0) return;
+    if (!user || user.role !== "student") return;
     const myStudent = getLoggedInStudent(user, students);
     if (myStudent) {
       loadMyProfileRequest(myStudent.id);
+    } else {
+      const studentId = user.studentId || user.userId || user.id;
+      if (studentId) loadMyProfileRequest(studentId);
     }
   }, [user, students]);
 
@@ -6315,34 +6376,24 @@ function MainApp() {
   useEffect(() => {
     if (!user || user.role !== "student") return;
 
-    // 1. Load immediately on tab/subtab switch
+    // Load profile immediately on tab/subtab switch
     loadStudents();
-    loadAnnouncements();
 
-    // 2. Poll every 12 seconds in background
-    const syncInterval = setInterval(() => {
-      loadStudents();
-      loadAnnouncements();
-    }, 12000);
-
-    // 3. Sync on window focus
+    // Sync profile on window focus
     const handleFocus = () => {
       loadStudents();
-      loadAnnouncements();
     };
+
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("focus", handleFocus);
+    }
+
     return () => {
-      clearInterval(syncInterval);
       if (typeof window !== "undefined" && window.removeEventListener) {
         window.removeEventListener("focus", handleFocus);
       }
     };
   }, [user, activeTab, erpSub, myCardSubTab]);
-
-  useEffect(() => {
-    if (user) {
-      loadLmsResources();
-    }
-  }, [user, activeTab, lmsSub]);
 
   const [playedNoticeIds, setPlayedNoticeIds] = useState<string[]>(() => {
     try {
@@ -6369,6 +6420,395 @@ function MainApp() {
       console.log("Audio error:", e);
     }
   };
+
+  // True Real-Time (0-second delay) Snapshot Listener for Announcements & Fee Alerts
+  useEffect(() => {
+    if (!user) {
+      setAnnouncements([]);
+      return;
+    }
+
+    const role = user.role || "guest";
+    const myStudent = getLoggedInStudent(user, students);
+    const studentBatch = (myStudent?.batch || user.batch || "").trim().toLowerCase();
+
+    // Real-time Firestore listener for non-deleted announcements
+    const announcementsQuery = query(
+      collection(db, "announcements"),
+      where("isDeleted", "==", false)
+    );
+
+    const unsubscribe = onSnapshot(
+      announcementsQuery,
+      (snapshot) => {
+        let rawNotices = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt
+          };
+        });
+
+        // Filter in-memory by target Audience & Batch
+        let notices = rawNotices.filter((ann: any) => {
+          const audience = ann.targetAudience || "all";
+          if (role === "admin" || role === "super_admin" || role === "staff") return true;
+          if (audience === "all") return true;
+          if (role === "student" && audience === "paid") return true;
+          if (role === "guest" && audience === "free") return true;
+          if (audience === "batch") {
+            const annBatch = (ann.targetBatch || "").trim().toLowerCase();
+            return annBatch !== "" && studentBatch !== "" && annBatch === studentBatch;
+          }
+          return false;
+        });
+
+        // Role-specific student fee/profile alert targeting
+        if (role === "student") {
+          const myStudentName = myStudent ? getStudentName(myStudent) : "";
+          const myUsername = user?.username || "";
+          const myName = user?.name || "";
+          notices = notices.filter((ann: any) => {
+            const isFeeAlert = (ann.title || "").includes("Fee Payment Alert") ||
+              (ann.content || "").toLowerCase().includes("pay your pending") ||
+              (ann.content || "").toLowerCase().includes("pending tuition fee");
+            const isProfileAlert = (ann.title || "").toLowerCase().includes("complete your profile") ||
+              (ann.content || "").toLowerCase().includes("complete your profile");
+            if (!isFeeAlert && !isProfileAlert) return true;
+
+            const targetStudentId = ann.targetStudentId;
+            const currentStudentId = myStudent?.id || user?.studentId || user?.userId;
+            if (targetStudentId && currentStudentId && String(targetStudentId) === String(currentStudentId)) {
+              return true;
+            }
+
+            const lowerTitle = (ann.title || "").toLowerCase();
+            const lowerContent = (ann.content || "").toLowerCase();
+            const stdNameLower = myStudentName.toLowerCase().trim();
+            const usrNameLower = myUsername.toLowerCase().trim();
+            const nameLower = myName.toLowerCase().trim();
+            return (stdNameLower && (lowerTitle.includes(stdNameLower) || lowerContent.includes(stdNameLower))) ||
+              (usrNameLower && (lowerTitle.includes(usrNameLower) || lowerContent.includes(usrNameLower))) ||
+              (nameLower && (lowerTitle.includes(nameLower) || lowerContent.includes(nameLower)));
+          });
+        }
+
+        // Sort by priority and createdAt desc
+        notices.sort((a: any, b: any) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+
+        setAnnouncements(notices);
+
+        // Play audio notification for newly added notices
+        if (notices.length > 0) {
+          let hasNewHigh = false;
+          let hasNewNormal = false;
+          const newlyPlayed: string[] = [];
+
+          notices.forEach((n: any) => {
+            if (!playedNoticeIds.includes(n.id)) {
+              newlyPlayed.push(n.id);
+              if (n.priority === "high") {
+                hasNewHigh = true;
+              } else {
+                hasNewNormal = true;
+              }
+            }
+          });
+
+          if (newlyPlayed.length > 0) {
+            setPlayedNoticeIds(prev => {
+              const next = [...prev, ...newlyPlayed];
+              try {
+                localStorage.setItem("played_notice_ids", JSON.stringify(next));
+              } catch { }
+              return next;
+            });
+
+            if (hasNewHigh) {
+              playNoticeSound("high");
+            } else if (hasNewNormal) {
+              playNoticeSound("normal");
+            }
+          }
+        }
+      },
+      (err) => {
+        console.log("Real-time announcements snapshot listener note:", err?.message);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user, students, playedNoticeIds]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Student Profile Updates (Student View)
+  useEffect(() => {
+    if (!user || user.role !== "student") return;
+
+    const myStudent = getLoggedInStudent(user, students);
+    const lookupId = myStudent?.id || user.studentId || user.userId;
+    if (!lookupId) return;
+
+    const studentDocRef = doc(db, "students", String(lookupId));
+    const unsubscribe = onSnapshot(
+      studentDocRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (!data.isDeleted) {
+            const updatedStudent = {
+              ...data,
+              id: data.id || docSnap.id
+            };
+            setStudents(prev => {
+              if (JSON.stringify(prev) === JSON.stringify([updatedStudent])) {
+                return prev;
+              }
+              return [updatedStudent];
+            });
+          }
+        }
+      },
+      (err) => {
+        console.log("Real-time student profile snapshot listener note:", err?.message);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Admin Profile Requests Queue
+  useEffect(() => {
+    if (!user || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
+
+    const requestsQuery = query(
+      collection(db, "profile_requests"),
+      where("isDeleted", "==", false)
+    );
+
+    const unsubscribe = onSnapshot(
+      requestsQuery,
+      (snapshot) => {
+        const requests = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        requests.sort((a: any, b: any) => {
+          const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+          const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+          return timeB - timeA;
+        });
+        setProfileRequests(requests);
+      },
+      (err) => {
+        console.log("Real-time profile requests snapshot listener note:", err?.message);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for LMS Resources (PDFs & Documents)
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const resourcesQuery = query(collection(db, "resources"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        resourcesQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setLmsResources(list);
+        },
+        (err) => console.log("Real-time resources listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Daily Content
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const dailyContentQuery = query(collection(db, "dailyContent"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        dailyContentQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const dateA = a.date || a.createdAt || "";
+            const dateB = b.date || b.createdAt || "";
+            return String(dateB).localeCompare(String(dateA));
+          });
+          setLmsDailyContent(list);
+        },
+        (err) => console.log("Real-time daily content listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Recorded Classes
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const recordedQuery = query(collection(db, "recorded_classes"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        recordedQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setLmsRecordedClasses(list);
+        },
+        (err) => console.log("Real-time recorded classes listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Daily Quizzes
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const quizzesQuery = query(collection(db, "dailyQuizzes"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        quizzesQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const dateA = a.date || a.createdAt || "";
+            const dateB = b.date || b.createdAt || "";
+            return String(dateB).localeCompare(String(dateA));
+          });
+          setAllQuizzes(list);
+        },
+        (err) => console.log("Real-time daily quizzes listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Admissions
+  useEffect(() => {
+    if (!user || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
+    try {
+      const admissionsQuery = query(collection(db, "admissions"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        admissionsQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setAdmissions(list);
+        },
+        (err) => console.log("Real-time admissions listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Leads & Custom Leads
+  useEffect(() => {
+    if (!user || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
+    try {
+      const leadsQuery = query(collection(db, "leads"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        leadsQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setLeads(list);
+        },
+        (err) => console.log("Real-time leads listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Campaigns & Banners
+  useEffect(() => {
+    try {
+      const campaignsQuery = query(collection(db, "campaigns"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        campaignsQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          const filtered = list.filter((c: any) => {
+            const title = (c?.title || "").toLowerCase();
+            return !title.includes("state level test") && !title.includes("free entry");
+          });
+          setCampaigns(filtered);
+        },
+        (err) => console.log("Real-time campaigns listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, []);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Website Inquiries
+  useEffect(() => {
+    if (!user || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
+    try {
+      const inquiriesQuery = query(collection(db, "inquiries"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        inquiriesQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setEnquiries(list);
+        },
+        (err) => console.log("Real-time inquiries listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, [user]);
+
+  // True Real-Time (0-second delay) Snapshot Listener for Tests & Exams in Test Portal (Guests & Students)
+  useEffect(() => {
+    try {
+      const testsQuery = query(collection(db, "tests"), where("isDeleted", "==", false));
+      const unsubscribe = onSnapshot(
+        testsQuery,
+        (snapshot) => {
+          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => {
+            const timeA = a.createdAt ? (a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+            const timeB = b.createdAt ? (b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+            return timeB - timeA;
+          });
+          setTests(list);
+        },
+        (err) => console.log("Real-time tests listener note:", err?.message)
+      );
+      return () => unsubscribe();
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      loadLmsResources();
+    }
+  }, [user, activeTab, lmsSub]);
 
   // API Call Loaders
   const loadAnnouncements = async () => {
@@ -7848,24 +8288,19 @@ function MainApp() {
   };
 
   const handleDeleteClass = async (classId: string, isLive: boolean, sessionId?: string) => {
+    const targetId = sessionId || classId;
+    if (!targetId) return;
+
     const doDelete = async () => {
       try {
-        let deleted = false;
-        const targetId = sessionId || classId;
+        await api.delete(`/live-sessions/${targetId}`).catch((err) => console.warn("Live session delete notice:", err));
+        await api.delete(`/courses/classes/${targetId}`).catch((err) => console.warn("Course class delete notice:", err));
+        await api.delete(`/classes/${targetId}`).catch(() => { });
 
-        if (targetId) {
-          await api.delete(`/live-sessions/${targetId}`).catch((err) => console.warn("Live session delete notice:", err));
-          await api.delete(`/courses/classes/${targetId}`).catch((err) => console.warn("Course class delete notice:", err));
-          await api.delete(`/classes/${targetId}`).catch(() => { });
-          deleted = true;
-        }
-
-        if (deleted) {
-          if (typeof window !== "undefined") {
-            alert("Class deleted successfully.");
-          } else {
-            Alert.alert("Success", "Class deleted successfully.");
-          }
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          alert("Class deleted successfully.");
+        } else {
+          Alert.alert("Success", "Class deleted successfully.");
         }
 
         if (isLive) {
@@ -7874,7 +8309,7 @@ function MainApp() {
           loadRecordedClasses();
         }
       } catch (e: any) {
-        if (typeof window !== "undefined") {
+        if (Platform.OS === "web" && typeof window !== "undefined") {
           alert(e.message || "Failed to delete class.");
         } else {
           Alert.alert("Error", e.message || "Failed to delete class.");
@@ -7882,14 +8317,20 @@ function MainApp() {
       }
     };
 
-    confirmAction(
-      "Confirm Delete Class",
-      `Are you sure you want to delete "${cls?.title || cls?.className || 'this class'}"?`,
-      async () => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (window.confirm("Are you sure you want to delete this class?")) {
         await doDelete();
-      },
-      { isDanger: true, confirmText: "Delete Class" }
-    );
+      }
+    } else {
+      Alert.alert(
+        "Confirm Delete Class",
+        "Are you sure you want to delete this class?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete Class", style: "destructive", onPress: () => doDelete() }
+        ]
+      );
+    }
   };
 
 
@@ -8601,6 +9042,9 @@ function MainApp() {
         throw new Error("Invalid user profile returned from server.");
       }
       clearExamState(); // Clear any in-progress exam from a previous session
+      loadedCollectionsRef.current.clear();
+      setStudents([]);
+      setMyProfileRequest(null);
       setUser(userData);
       await userStorage.save(userData);
       setLoginError(null);
@@ -9083,9 +9527,11 @@ function MainApp() {
     const formatted = `${yyyy}-${mm}-${dd}`;
 
     if (calendarTarget === "newStudent") {
-      setNewStudent(prev => ({ ...prev, joiningDate: formatted }));
+      const autoDays = calcTotalDaysFromJoiningDate(formatted);
+      setNewStudent(prev => ({ ...prev, joiningDate: formatted, totalDays: String(autoDays) }));
     } else if (calendarTarget === "editingStudent") {
-      setEditingStudent((prev: any) => prev ? { ...prev, joiningDate: formatted } : null);
+      const autoDays = calcTotalDaysFromJoiningDate(formatted);
+      setEditingStudent((prev: any) => prev ? { ...prev, joiningDate: formatted, totalDays: String(autoDays) } : null);
     } else if (calendarTarget === "profileForm") {
       setProfileForm(prev => ({ ...prev, dob: formatted }));
     }
@@ -9160,45 +9606,45 @@ function MainApp() {
 
   const executeProfileSubmission = async () => {
     const myStudent = getLoggedInStudent(user, students);
-    if (!myStudent) return;
+    const studentTargetId = myStudent?.id || user?.studentId || user?.userId;
+    if (!studentTargetId) {
+      Alert.alert("Error", "Student profile record not found. Please log in again.");
+      return;
+    }
     setIsSubmittingProfile(true);
 
-    const existingPassword = myStudent?.loginPassword || "";
-    const isUnchanged = (!studentOldPassword && !studentNewPassword && !studentConfirmPassword) ||
-      (studentOldPassword === existingPassword && studentNewPassword === existingPassword && studentConfirmPassword === existingPassword);
-
-    if (!isUnchanged) {
-      try {
-        await api.post("/auth/login", { username: user.username, password: studentOldPassword });
-      } catch (err: any) {
+    // 1. If student provided a new password, update it directly via self-service endpoint
+    if (studentNewPassword && studentNewPassword.trim() !== "") {
+      if (studentNewPassword !== studentConfirmPassword) {
         setIsSubmittingProfile(false);
-        Alert.alert("Error", "Incorrect old password. Please enter the correct password created by the administrator.");
+        Alert.alert("Validation Error", "New password and Confirm password do not match.");
         return;
       }
       try {
-        await api.put("/erp/student/profile/me", { loginPassword: studentNewPassword });
+        await api.put("/erp/student/profile/me", { loginPassword: studentNewPassword.trim() });
       } catch (err: any) {
         setIsSubmittingProfile(false);
-        Alert.alert("Error", "Failed to update password: " + err.message);
+        Alert.alert("Error", "Failed to update password: " + (err.message || "Unknown error"));
         return;
       }
     }
 
+    // 2. Submit the profile application request with compressed photos
     try {
       const compressedPassport = await compressImageBase64(profileForm.passportPhotoBase64);
       const compressedPhotoId = await compressImageBase64(profileForm.photoIdBase64);
       await api.post("/erp/profile-request", {
-        studentId: myStudent?.id || user.studentId || user.userId,
-        username: user.username,
+        studentId: studentTargetId,
+        username: user?.username || user?.rollNumber || user?.loginUsername || "",
         ...profileForm,
         constituency: profileForm.constituency === "Others" ? profileForm.constituencyOthers : profileForm.constituency,
         passportPhotoBase64: compressedPassport || profileForm.passportPhotoBase64 || "test",
         photoIdBase64: compressedPhotoId || profileForm.photoIdBase64 || "test"
       }, undefined, 60000);
-      // Disable edit permission and mark as submitted after student submission
-      if (myStudent?.id) {
-        await api.put("/erp/student/profile/me", { profileEditPermission: false, isProfileSubmitted: true });
-      }
+
+      // 3. Mark profile as submitted and lock editing permission
+      await api.put("/erp/student/profile/me", { profileEditPermission: false, isProfileSubmitted: true });
+
       setIsSubmittingProfile(false);
       setShowProfileReviewModal(false);
       setProfileForm({ name: "", initial: "", dob: "", bloodGroup: "", address: "", gender: "", community: "", fatherName: "", occupation: "", studentOccupation: "", altPhone: "", email: "", qualification: "", college: "", referralSource: "", passportPhotoBase64: "", photoIdBase64: "", photoIdType: "", photoIdConfirmed: false, horizontalReservation: "", constituency: "", constituencyOthers: "" });
@@ -9209,8 +9655,8 @@ function MainApp() {
       setShowValidationErrors(false);
       setShowProfileModal(false);
       setShowProfileSuccessModal(true);
-      loadMyProfileRequest(myStudent?.id || user.studentId || user.userId);
-      loadStudents();
+      loadMyProfileRequest(studentTargetId);
+      loadStudents(true);
     } catch (e: any) {
       setIsSubmittingProfile(false);
       Alert.alert("Error", e.message || "Failed to submit profile.");
@@ -10253,10 +10699,10 @@ function MainApp() {
         const obtained = evalData?.obtainedMarks ?? 0;
         const total = evalData?.totalMarks ?? 0;
         const pct = evalData?.percentage ?? 0;
-        const passStatus = evalData?.status === "pass" ? "PASSED" : "FAILED";
+        const perf = getPerformanceStatus(obtained, total, pct);
         Alert.alert(
           isTimeout ? "Time Out — Exam Auto-Submitted" : "Exam Submitted & Evaluated",
-          `Score: ${obtained} / ${total}\nPercentage: ${Math.round(pct)}%\nStatus: ${passStatus.toUpperCase()}`
+          `Score: ${obtained} / ${total}\nPercentage: ${Math.round(pct)}%\nStatus: ${perf.label}`
         );
       }
     } catch (e: any) {
@@ -16535,11 +16981,16 @@ function MainApp() {
             <Text style={{ fontSize: 16, fontWeight: "bold", color: "#1b5e20" }}>
               Score: {obtainedMarks} / {totalMarks}
             </Text>
-            <View style={{ backgroundColor: status === "pass" ? "#2e7d32" : "#c62828", paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 }}>
-              <Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 11 }}>
-                {String(status).toUpperCase()} ({Math.round(percentage)}%)
-              </Text>
-            </View>
+            {(() => {
+              const perf = getPerformanceStatus(obtainedMarks, totalMarks, percentage);
+              return (
+                <View style={{ backgroundColor: perf.bgColor, borderWidth: 1, borderColor: perf.borderColor, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 }}>
+                  <Text style={{ color: perf.color, fontWeight: "bold", fontSize: 11 }}>
+                    {perf.label} ({Math.round(percentage)}%)
+                  </Text>
+                </View>
+              );
+            })()}
           </View>
 
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
@@ -18836,42 +19287,45 @@ function MainApp() {
                               </Text>
 
                               {/* Segmented Control for Selection Mode */}
-                              <View style={{ flexDirection: "row", marginBottom: 15, borderRadius: 8, backgroundColor: darkMode ? "#222" : "#eee", padding: 4 }}>
+                              <View style={{ flexDirection: isMobile ? "column" : "row", gap: isMobile ? 6 : 0, marginBottom: 15, borderRadius: 8, backgroundColor: darkMode ? "#222" : "#eee", padding: isMobile ? 6 : 4 }}>
                                 <TouchableOpacity
                                   onPress={() => setGenMode("file")}
                                   style={{
-                                    flex: 1,
-                                    paddingVertical: 8,
+                                    flex: isMobile ? undefined : 1,
+                                    paddingVertical: isMobile ? 10 : 8,
+                                    paddingHorizontal: isMobile ? 12 : 4,
                                     borderRadius: 6,
                                     backgroundColor: genMode === "file" ? (darkMode ? "#333" : "#fff") : "transparent",
                                     alignItems: "center"
                                   }}
                                 >
-                                  <Text style={{ fontWeight: "bold", color: genMode === "file" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 13 }}>Word File Upload</Text>
+                                  <Text style={{ fontWeight: "bold", color: genMode === "file" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: isMobile ? 12 : 13 }}>Word File Upload</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                   onPress={() => setGenMode("text")}
                                   style={{
-                                    flex: 1,
-                                    paddingVertical: 8,
+                                    flex: isMobile ? undefined : 1,
+                                    paddingVertical: isMobile ? 10 : 8,
+                                    paddingHorizontal: isMobile ? 12 : 4,
                                     borderRadius: 6,
                                     backgroundColor: genMode === "text" ? (darkMode ? "#333" : "#fff") : "transparent",
                                     alignItems: "center"
                                   }}
                                 >
-                                  <Text style={{ fontWeight: "bold", color: genMode === "text" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 13 }}>Copy-Paste Text</Text>
+                                  <Text style={{ fontWeight: "bold", color: genMode === "text" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: isMobile ? 12 : 13 }}>Copy-Paste Text</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                   onPress={() => setGenMode("json")}
                                   style={{
-                                    flex: 1,
-                                    paddingVertical: 8,
+                                    flex: isMobile ? undefined : 1,
+                                    paddingVertical: isMobile ? 10 : 8,
+                                    paddingHorizontal: isMobile ? 12 : 4,
                                     borderRadius: 6,
                                     backgroundColor: genMode === "json" ? (darkMode ? "#333" : "#fff") : "transparent",
                                     alignItems: "center"
                                   }}
                                 >
-                                  <Text style={{ fontWeight: "bold", color: genMode === "json" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: 13 }}>Paste JSON Array</Text>
+                                  <Text style={{ fontWeight: "bold", color: genMode === "json" ? "#c62828" : (darkMode ? "#aaa" : "#555"), fontSize: isMobile ? 12 : 13 }}>Paste JSON Array</Text>
                                 </TouchableOpacity>
                               </View>
 
@@ -20025,15 +20479,36 @@ function MainApp() {
                             const fVal = resultsCategoryFilter.toLowerCase();
                             if (!tVal.includes(fVal) && !fVal.includes(tVal)) return false;
                           }
+
+                          if (resultsCategoryFilter === "daily" && resultsSubjectFilter) {
+                            const filterSubj = resultsSubjectFilter.toLowerCase();
+                            const testSubj = String(t.subject || t.subjectName || t.subject_name || t.courseName || "").toLowerCase();
+                            const testTitle = String(t.title || "").toLowerCase();
+                            if (!testSubj.includes(filterSubj) && !testTitle.includes(filterSubj)) return false;
+                          }
                           return true;
                         });
-                        const uniqueSubjects = [...new Set(allTestResults.filter((t: any) => t.subject).map((t: any) => String(t.subject)))] as string[];
-                        const topicsForSubject = resultsSubjectFilter
-                          ? ([...new Set(allTestResults.filter((t: any) => t.subject === resultsSubjectFilter && t.topic).map((t: any) => String(t.topic)))] as string[])
+
+                        const standardSubjects = ["Maths", "Polity", "History", "Geography", "Science", "Economy", "Tamil", "English", "CSAT", "General Studies", "Current Affairs"];
+                        const explicitSubjects = [...tests, ...allTestResults]
+                          .map((t: any) => t.subject || t.subjectName || t.subject_name || t.courseName || "")
+                          .map((s: string) => String(s).trim())
+                          .filter(s => s && s.length > 1 && !s.toLowerCase().includes("test") && !s.toLowerCase().includes("_"));
+
+                        const uniqueSubjects = Array.from(new Set([...standardSubjects, ...explicitSubjects]));
+
+                        const topicsForSubject = (resultsCategoryFilter === "daily" && resultsSubjectFilter)
+                          ? ([...new Set(allTestResults.filter((t: any) => (t.subject === resultsSubjectFilter || String(t.testTitle || "").toLowerCase().includes(resultsSubjectFilter.toLowerCase())) && t.topic).map((t: any) => String(t.topic)))] as string[])
                           : [];
+
                         const filteredResults = allTestResults.filter((testLog: any) => {
-                          if (resultsSubjectFilter && testLog.subject !== resultsSubjectFilter) return false;
-                          if (resultsTopicFilter && testLog.topic !== resultsTopicFilter) return false;
+                          if (resultsCategoryFilter === "daily" && resultsSubjectFilter) {
+                            const filterSubj = resultsSubjectFilter.toLowerCase();
+                            const testSubj = String(testLog.subject || testLog.subjectName || testLog.subject_name || testLog.courseName || "").toLowerCase();
+                            const testTitle = String(testLog.testTitle || testLog.title || "").toLowerCase();
+                            if (!testSubj.includes(filterSubj) && !testTitle.includes(filterSubj)) return false;
+                          }
+                          if (resultsCategoryFilter === "daily" && resultsTopicFilter && testLog.topic !== resultsTopicFilter) return false;
 
                           // Robust category resolution
                           const resolvedTest = tests.find((t: any) => t.id === testLog.testId);
@@ -20084,19 +20559,7 @@ function MainApp() {
                                       onChangeText={setResultsDateFilter}
                                     />
                                   </View>
-                                  {uniqueSubjects.length > 0 && (
-                                    <View style={{ marginTop: 8, marginBottom: 4 }}>
-                                      <Text style={{ fontSize: 11, color: "#757575", marginBottom: 6, fontWeight: "bold" }}>FILTER BY SUBJECT:</Text>
-                                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                                        {uniqueSubjects.map(s => (
-                                          <TouchableOpacity key={s} onPress={() => { setResultsSubjectFilter(resultsSubjectFilter === s ? "" : s); setResultsTopicFilter(""); }} style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, borderWidth: 1.5, borderColor: resultsSubjectFilter === s ? "#c62828" : "#e0e0e0", backgroundColor: resultsSubjectFilter === s ? "#ffebee" : "#f9f9f9" }}>
-                                            <Text style={{ fontSize: 11, color: resultsSubjectFilter === s ? "#c62828" : "#757575", fontWeight: resultsSubjectFilter === s ? "bold" : "normal" }}>{s}</Text>
-                                          </TouchableOpacity>
-                                        ))}
-                                      </View>
-                                    </View>
-                                  )}
-                                  {resultsSubjectFilter && topicsForSubject.length > 0 && (
+                                  {resultsCategoryFilter === "daily" && resultsSubjectFilter && topicsForSubject.length > 0 && (
                                     <View style={{ marginTop: 4, marginBottom: 4 }}>
                                       <Text style={{ fontSize: 11, color: "#757575", marginBottom: 6, fontWeight: "bold" }}>FILTER BY TOPIC:</Text>
                                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -20142,7 +20605,14 @@ function MainApp() {
                                   {Platform.OS === 'web' ? (
                                     <select
                                       value={resultsCategoryFilter}
-                                      onChange={e => setResultsCategoryFilter((e.target as HTMLSelectElement).value)}
+                                      onChange={e => {
+                                        const val = (e.target as HTMLSelectElement).value;
+                                        setResultsCategoryFilter(val);
+                                        if (val !== "daily") {
+                                          setResultsSubjectFilter("");
+                                          setResultsTopicFilter("");
+                                        }
+                                      }}
                                       style={{
                                         width: "100%", height: 38, borderRadius: 8, padding: 8,
                                         backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
@@ -20167,7 +20637,13 @@ function MainApp() {
                                         return (
                                           <TouchableOpacity
                                             key={cat.value}
-                                            onPress={() => setResultsCategoryFilter(cat.value)}
+                                            onPress={() => {
+                                              setResultsCategoryFilter(cat.value);
+                                              if (cat.value !== "daily") {
+                                                setResultsSubjectFilter("");
+                                                setResultsTopicFilter("");
+                                              }
+                                            }}
                                             style={{
                                               paddingHorizontal: 12,
                                               paddingVertical: 6,
@@ -20181,6 +20657,61 @@ function MainApp() {
                                           </TouchableOpacity>
                                         );
                                       })}
+                                    </View>
+                                  )}
+
+                                  {/* Subject Filter (Shown ONLY when Daily Test category is selected) */}
+                                  {resultsCategoryFilter === "daily" && (
+                                    <View style={{ marginTop: 12 }}>
+                                      <Text style={{ color: "#757575", fontSize: 11, marginBottom: 6, fontWeight: "bold" }}>
+                                        FILTER BY SUBJECT (DAILY TEST)
+                                      </Text>
+                                      {Platform.OS === 'web' ? (
+                                        <select
+                                          value={resultsSubjectFilter}
+                                          onChange={e => { setResultsSubjectFilter((e.target as HTMLSelectElement).value); setResultsTopicFilter(""); }}
+                                          style={{
+                                            width: "100%", height: 38, borderRadius: 8, padding: 8,
+                                            backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", color: darkMode ? "#fff" : "#212121",
+                                            border: "1px solid " + (darkMode ? "#444" : "#e0e0e0"),
+                                            outline: "none", fontSize: 13
+                                          } as any}
+                                        >
+                                          <option value="">All Subjects</option>
+                                          {(uniqueSubjects.length > 0 ? uniqueSubjects : ["Maths", "Polity", "History", "Geography", "Science", "Economy", "Tamil", "English", "CSAT"]).map((s: string) => (
+                                            <option key={s} value={s}>{s}</option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                                          <TouchableOpacity
+                                            onPress={() => { setResultsSubjectFilter(""); setResultsTopicFilter(""); }}
+                                            style={{
+                                              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 2,
+                                              borderColor: !resultsSubjectFilter ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
+                                              backgroundColor: !resultsSubjectFilter ? (darkMode ? "#3e2723" : "#ffebee") : (darkMode ? "#2a2a2a" : "#f9f9f9")
+                                            }}
+                                          >
+                                            <Text style={{ fontSize: 11, color: !resultsSubjectFilter ? "#c62828" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>All Subjects</Text>
+                                          </TouchableOpacity>
+                                          {(uniqueSubjects.length > 0 ? uniqueSubjects : ["Maths", "Polity", "History", "Geography", "Science", "Economy", "Tamil", "English", "CSAT"]).map((s: string) => {
+                                            const isSelected = resultsSubjectFilter === s;
+                                            return (
+                                              <TouchableOpacity
+                                                key={s}
+                                                onPress={() => { setResultsSubjectFilter(isSelected ? "" : s); setResultsTopicFilter(""); }}
+                                                style={{
+                                                  paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 2,
+                                                  borderColor: isSelected ? "#c62828" : (darkMode ? "#444" : "#e0e0e0"),
+                                                  backgroundColor: isSelected ? (darkMode ? "#3e2723" : "#ffebee") : (darkMode ? "#2a2a2a" : "#f9f9f9")
+                                                }}
+                                              >
+                                                <Text style={{ fontSize: 11, color: isSelected ? "#c62828" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>{s}</Text>
+                                              </TouchableOpacity>
+                                            );
+                                          })}
+                                        </View>
+                                      )}
                                     </View>
                                   )}
                                 </View>
@@ -20363,6 +20894,7 @@ function MainApp() {
                                             // Build printable HTML table
                                             const rows = (testLog.entries || []).map((e: any) => {
                                               const displayRoll = (e.rollNumber && e.rollNumber !== "N/A" && e.rollNumber !== "Guest" && !String(e.rollNumber).startsWith("STU-")) ? e.rollNumber : (e.studentName || "Guest Student");
+                                              const perf = getPerformanceStatus(e.obtainedMarks ?? 0, e.totalMarks ?? 0, e.percentage);
                                               return `<tr style="border-bottom:1px solid #eee">
                                 <td style="padding:6px 8px;text-align:center">${e.serialNo}</td>
                                 <td style="padding:6px 8px">${displayRoll}</td>
@@ -20372,14 +20904,14 @@ function MainApp() {
                                 <td style="padding:6px 8px;text-align:center">${e.skipped}</td>
                                 <td style="padding:6px 8px;text-align:center;font-weight:bold">${e.obtainedMarks} / ${e.totalMarks}</td>
                                 <td style="padding:6px 8px;text-align:center">${Math.round(e.percentage)}%</td>
-                                <td style="padding:6px 8px;text-align:center;color:${e.status === 'pass' ? '#2e7d32' : '#c62828'};font-weight:bold">${String(e.status).toUpperCase()}</td>
+                                <td style="padding:6px 8px;text-align:center;color:${perf.color};font-weight:bold">${perf.label}</td>
                               </tr>`;
                                             }).join("");
                                             const html = `<!DOCTYPE html><html><head><title>${testLog.testTitle} - Results</title>
                               <style>body{font-family:Arial,sans-serif;padding:20px}h2{color:#c62828}table{width:100%;border-collapse:collapse}th{background:#c62828;color:white;padding:8px;text-align:left}td{border-bottom:1px solid #eee;padding:6px 8px}</style></head>
                               <body><h2>${testLog.testTitle}</h2>
                               <p>Date: ${testLog.createdAt ? new Date(testLog.createdAt).toLocaleDateString() : "N/A"} | Participants: ${testLog.totalParticipants} | Marks/Q: ${testLog.marksPerQuestion} | Negative: -${testLog.negativeMarks}</p>
-                              <table><thead><tr><th>#</th><th>Roll No</th><th>Name</th><th>Correct</th><th>Wrong</th><th>Skipped</th><th>Marks</th><th>%</th><th>Result</th></tr></thead>
+                              <table><thead><tr><th>#</th><th>Roll No</th><th>Name</th><th>Correct</th><th>Wrong</th><th>Skipped</th><th>Marks</th><th>%</th><th>Status</th></tr></thead>
                               <tbody>${rows}</tbody></table></body></html>`;
                                             downloadPdfDocument(html, `${testLog.testTitle}_Leaderboard.pdf`);
                                           }}
@@ -20393,23 +20925,8 @@ function MainApp() {
 
                                     {/* Expandable Leaderboard Table */}
                                     {expandedTestId === testLog.testId && (
-                                      <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                                        <View style={{ minWidth: isAdmin ? 720 : 640 }}>
-                                          {/* Table Header */}
-                                          <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0" }}>
-                                            {(isAdmin
-                                              ? ["#", "Roll No", "Name", "Correct", "Wrong", "Skipped", "Marks", "%", "Result"]
-                                              : ["#", "Roll No", "Attended", "Not Attended", "Correct Ans", "Wrong Ans", "Total Marks"]
-                                            ).map((h, i) => (
-                                              <Text key={i} style={{
-                                                fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: (!isAdmin && i >= 2) ? "center" : "left",
-                                                width: isAdmin
-                                                  ? (i === 0 ? 36 : i === 1 ? 90 : i === 2 ? 130 : i === 3 ? 64 : i === 4 ? 64 : i === 5 ? 64 : i === 6 ? 90 : i === 7 ? 50 : 70)
-                                                  : (i === 0 ? 45 : i === 1 ? 120 : i === 2 ? 85 : i === 3 ? 95 : i === 4 ? 85 : i === 5 ? 85 : 95)
-                                              }}>{h}</Text>
-                                            ))}
-                                          </View>
-                                          {/* Table Rows */}
+                                      isMobile ? (
+                                        <View style={{ padding: 8 }}>
                                           {(testLog.entries || []).map((entry: any, idx: number) => {
                                             const isGenericName = (name: string) => {
                                               if (!name) return true;
@@ -20422,25 +20939,102 @@ function MainApp() {
                                             }
                                             if (!sName) sName = entry.username || entry.name || "Guest User";
                                             const displayRoll = (entry.rollNumber && !isGenericName(entry.rollNumber)) ? entry.rollNumber : sName;
-                                            if (!isAdmin) {
-                                              const correct = entry.correct ?? 0;
-                                              const wrong = entry.wrong ?? 0;
-                                              const skipped = entry.skipped ?? 0;
-                                              const attended = correct + wrong;
-                                              return (
-                                                <View key={entry.attemptId || idx} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
-                                                  <Text style={{ width: 45, fontSize: 12, color: idx === 0 ? "#fbc02d" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>#{entry.serialNo || idx + 1}</Text>
-                                                  <Text style={{ width: 120, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>{displayRoll}</Text>
-                                                  <Text style={{ width: 85, fontSize: 12, color: "#1565c0", fontWeight: "bold", textAlign: "center" }}>{attended}</Text>
-                                                  <Text style={{ width: 95, fontSize: 12, color: darkMode ? "#aaa" : "#757575", textAlign: "center" }}>{skipped}</Text>
-                                                  <Text style={{ width: 85, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>{correct}</Text>
-                                                  <Text style={{ width: 85, fontSize: 12, color: "#c62828", fontWeight: "bold", textAlign: "center" }}>{wrong}</Text>
-                                                  <Text style={{ width: 95, fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e", textAlign: "center" }}>{entry.obtainedMarks} / {entry.totalMarks}</Text>
-                                                </View>
-                                              );
-                                            }
+                                            const perf = getPerformanceStatus(entry.obtainedMarks ?? 0, entry.totalMarks ?? 0, entry.percentage);
+                                            const correct = entry.correct ?? 0;
+                                            const wrong = entry.wrong ?? 0;
+                                            const attended = correct + wrong;
+
                                             return (
-                                              <View key={entry.attemptId || idx} style={{ flexDirection: "row", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
+                                              <View
+                                                key={entry.attemptId || idx}
+                                                style={{
+                                                  padding: 10,
+                                                  borderRadius: 8,
+                                                  borderWidth: 1,
+                                                  borderColor: darkMode ? "#333" : "#e0e0e0",
+                                                  backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa"),
+                                                  marginBottom: 6
+                                                }}
+                                              >
+                                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1, marginRight: 6 }}>
+                                                    <Text style={{ fontSize: 12, fontWeight: "bold", color: idx === 0 ? "#fbc02d" : (darkMode ? "#aaa" : "#757575") }}>
+                                                      #{entry.serialNo || idx + 1}
+                                                    </Text>
+                                                    <Text numberOfLines={1} style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#fff" : "#212121", flex: 1 }}>
+                                                      {displayRoll}
+                                                    </Text>
+                                                  </View>
+                                                  <View style={{ backgroundColor: perf.bgColor, borderColor: perf.borderColor, borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                                    <Text style={{ fontSize: 10, fontWeight: "bold", color: perf.color }}>{perf.label}</Text>
+                                                  </View>
+                                                </View>
+
+                                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
+                                                  <Text style={{ fontSize: 11, color: "#1565c0", fontWeight: "600" }}>Attended: <Text style={{ fontWeight: "bold" }}>{attended}</Text></Text>
+                                                  <Text style={{ fontSize: 11, color: "#2e7d32", fontWeight: "600" }}>Correct: <Text style={{ fontWeight: "bold" }}>{correct}</Text></Text>
+                                                  <Text style={{ fontSize: 11, color: "#c62828", fontWeight: "600" }}>Wrong: <Text style={{ fontWeight: "bold" }}>{wrong}</Text></Text>
+                                                  <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e" }}>{entry.obtainedMarks}/{entry.totalMarks}</Text>
+                                                </View>
+                                              </View>
+                                            );
+                                          })}
+                                        </View>
+                                      ) : (
+                                        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                                          <View style={{ minWidth: isAdmin ? 840 : 780 }}>
+                                            {/* Table Header */}
+                                            <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0" }}>
+                                              {(isAdmin
+                                                ? ["#", "Roll No", "Name", "Correct", "Wrong", "Skipped", "Marks", "%", "Status"]
+                                                : ["#", "Roll No", "Attended", "Not Attended", "Correct Ans", "Wrong Ans", "Total Marks", "Status"]
+                                              ).map((h, i) => (
+                                                <Text key={i} style={{
+                                                  fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: (!isAdmin && i >= 2 && i < 7) || (isAdmin && i >= 3 && i < 8) ? "center" : i === 8 || (!isAdmin && i === 7) ? "center" : "left",
+                                                  width: isAdmin
+                                                    ? (i === 0 ? 36 : i === 1 ? 90 : i === 2 ? 130 : i === 3 ? 64 : i === 4 ? 64 : i === 5 ? 64 : i === 6 ? 90 : i === 7 ? 50 : 130)
+                                                    : (i === 0 ? 45 : i === 1 ? 120 : i === 2 ? 85 : i === 3 ? 95 : i === 4 ? 85 : i === 5 ? 85 : i === 6 ? 95 : 130)
+                                                }}>{h}</Text>
+                                              ))}
+                                            </View>
+                                            {/* Table Rows */}
+                                            {(testLog.entries || []).map((entry: any, idx: number) => {
+                                              const isGenericName = (name: string) => {
+                                                if (!name) return true;
+                                                const s = String(name).trim().toLowerCase();
+                                                return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+                                              };
+                                              let sName = (entry.studentName && !isGenericName(entry.studentName)) ? entry.studentName : "";
+                                              if (!sName && user && (user.id === entry.studentId || user.userId === entry.studentId || user.leadId === entry.studentId || user.email === entry.studentId)) {
+                                                sName = user.name || user.email?.split("@")[0];
+                                              }
+                                              if (!sName) sName = entry.username || entry.name || "Guest User";
+                                              const displayRoll = (entry.rollNumber && !isGenericName(entry.rollNumber)) ? entry.rollNumber : sName;
+                                              const perf = getPerformanceStatus(entry.obtainedMarks ?? 0, entry.totalMarks ?? 0, entry.percentage);
+                                              if (!isAdmin) {
+                                                const correct = entry.correct ?? 0;
+                                                const wrong = entry.wrong ?? 0;
+                                                const skipped = entry.skipped ?? 0;
+                                                const attended = correct + wrong;
+                                                return (
+                                                  <View key={entry.attemptId || idx} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
+                                                    <Text style={{ width: 45, fontSize: 12, color: idx === 0 ? "#fbc02d" : (darkMode ? "#aaa" : "#757575"), fontWeight: "bold" }}>#{entry.serialNo || idx + 1}</Text>
+                                                    <Text style={{ width: 120, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>{displayRoll}</Text>
+                                                    <Text style={{ width: 85, fontSize: 12, color: "#1565c0", fontWeight: "bold", textAlign: "center" }}>{attended}</Text>
+                                                    <Text style={{ width: 95, fontSize: 12, color: darkMode ? "#aaa" : "#757575", textAlign: "center" }}>{skipped}</Text>
+                                                    <Text style={{ width: 85, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>{correct}</Text>
+                                                    <Text style={{ width: 85, fontSize: 12, color: "#c62828", fontWeight: "bold", textAlign: "center" }}>{wrong}</Text>
+                                                    <Text style={{ width: 95, fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e", textAlign: "center" }}>{entry.obtainedMarks} / {entry.totalMarks}</Text>
+                                                    <View style={{ width: 130, alignItems: "center", justifyContent: "center" }}>
+                                                      <View style={{ backgroundColor: perf.bgColor, borderColor: perf.borderColor, borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                                        <Text style={{ fontSize: 10, fontWeight: "bold", color: perf.color, textAlign: "center" }}>{perf.label}</Text>
+                                                      </View>
+                                                    </View>
+                                                  </View>
+                                                );
+                                              }
+                                            return (
+                                              <View key={entry.attemptId || idx} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderColor: darkMode ? "#333" : "#f0f0f0", backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa") }}>
                                                 <Text style={{ width: 36, fontSize: 12, color: idx === 0 ? "#fbc02d" : "#757575", fontWeight: "bold" }}>#{entry.serialNo}</Text>
                                                 <Text style={{ width: 90, fontSize: 12, color: darkMode ? "#fff" : "#212121" }}>{displayRoll}</Text>
                                                 <Text style={{ width: 130, fontSize: 12, color: darkMode ? "#fff" : "#212121" }} numberOfLines={1}>{entry.studentName}</Text>
@@ -20449,15 +21043,17 @@ function MainApp() {
                                                 <Text style={{ width: 64, fontSize: 12, color: "#757575", textAlign: "center" }}>{entry.skipped}</Text>
                                                 <Text style={{ width: 90, fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e" }}>{entry.obtainedMarks} / {entry.totalMarks}</Text>
                                                 <Text style={{ width: 50, fontSize: 12, color: darkMode ? "#aaa" : "#555" }}>{Math.round(entry.percentage)}%</Text>
-                                                <View style={{ width: 70, backgroundColor: entry.status === "pass" ? "#e8f5e9" : "#ffebee", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, alignSelf: "center" }}>
-                                                  <Text style={{ fontSize: 10, fontWeight: "bold", color: entry.status === "pass" ? "#2e7d32" : "#c62828", textAlign: "center" }}>{String(entry.status).toUpperCase()}</Text>
+                                                <View style={{ width: 130, alignItems: "center", justifyContent: "center" }}>
+                                                  <View style={{ backgroundColor: perf.bgColor, borderColor: perf.borderColor, borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                                    <Text style={{ fontSize: 10, fontWeight: "bold", color: perf.color, textAlign: "center" }}>{perf.label}</Text>
+                                                  </View>
                                                 </View>
                                               </View>
                                             );
                                           })}
                                         </View>
                                       </ScrollView>
-                                    )}
+                                    ))}
                                   </View>
                                 ))}
                               </>
@@ -20609,37 +21205,42 @@ function MainApp() {
                                                   backgroundColor: darkMode ? "#222" : "#fbfcfe"
                                                 }}
                                               >
-                                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1, minWidth: 160 }}>
                                                     <View style={{
-                                                      width: 22,
-                                                      height: 22,
-                                                      borderRadius: 11,
+                                                      width: 26,
+                                                      height: 26,
+                                                      borderRadius: 13,
                                                       backgroundColor: darkMode ? "#2b6cb0" : "#ebf8ff",
                                                       alignItems: "center",
                                                       justifyContent: "center"
                                                     }}>
-                                                      <Ionicons name="person" size={11} color="#3182ce" />
+                                                      <Ionicons name="person" size={12} color="#3182ce" />
                                                     </View>
-                                                    <Text style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#e2e8f0" : "#2d3748" }}>
-                                                      {f.studentName || "Student"}
-                                                    </Text>
-                                                    {f.studentEmail ? (
-                                                      <Text style={{ fontSize: 11, color: darkMode ? "#718096" : "#a0aec0" }}>
-                                                        ({f.studentEmail})
+                                                    <View style={{ flex: 1 }}>
+                                                      <Text style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#e2e8f0" : "#2d3748" }} numberOfLines={1}>
+                                                        {f.studentName || "Student"}
                                                       </Text>
-                                                    ) : null}
+                                                      {f.studentEmail ? (
+                                                        <Text style={{ fontSize: 11, color: darkMode ? "#a0aec0" : "#718096" }} numberOfLines={1}>
+                                                          {f.studentEmail}
+                                                        </Text>
+                                                      ) : null}
+                                                    </View>
                                                   </View>
 
-                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 1 }}>
+                                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: darkMode ? "#2a2a2a" : "#fff8e1", paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: darkMode ? "#444" : "#ffe082" }}>
                                                     {Array.from({ length: 5 }).map((_, i) => (
                                                       <Ionicons
                                                         key={i}
                                                         name={i < (Number(f.rating) || 5) ? "star" : "star-outline"}
-                                                        size={13}
+                                                        size={12}
                                                         color="#fbc02d"
                                                       />
                                                     ))}
+                                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#f57f17", marginLeft: 3 }}>
+                                                      {(Number(f.rating) || 5).toFixed(1)}
+                                                    </Text>
                                                   </View>
                                                 </View>
 
@@ -21105,38 +21706,98 @@ function MainApp() {
                                             </>
                                           )}
 
-                                          {/* Fee Details */}
-                                          <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, fontSize: 13 }}>Fee & Attendance Details</Text>
-                                          <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Total Fees (₹)" placeholderTextColor="#999" value={editingStudent.totalFees !== undefined ? String(editingStudent.totalFees) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, totalFees: v })} keyboardType="numeric" />
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Fees Paid (₹)" placeholderTextColor="#999" value={editingStudent.feesPaid !== undefined ? String(editingStudent.feesPaid) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, feesPaid: v })} keyboardType="numeric" />
-                                          </View>
-                                          <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Attended Days" placeholderTextColor="#999" value={editingStudent.attendedDays !== undefined ? String(editingStudent.attendedDays) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, attendedDays: v })} keyboardType="numeric" />
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Total Days" placeholderTextColor="#999" value={editingStudent.totalDays !== undefined ? String(editingStudent.totalDays) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, totalDays: v })} keyboardType="numeric" />
+                                          {/* Fee Structure Section */}
+                                          <View style={{ backgroundColor: "#f0f8ff", borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#b3e5fc" }}>
+                                            <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 8, fontSize: 13 }}>💰 Fee Details</Text>
+                                            <View style={{ flexDirection: "row", gap: 10 }}>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Total Course Fee (₹)</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Total Fee (₹)"
+                                                  placeholderTextColor="#999"
+                                                  value={editingStudent.totalFees !== undefined ? String(editingStudent.totalFees) : ""}
+                                                  onChangeText={v => setEditingStudent({ ...editingStudent, totalFees: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Fees Paid (₹)</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Fees Paid (₹)"
+                                                  placeholderTextColor="#999"
+                                                  value={editingStudent.feesPaid !== undefined ? String(editingStudent.feesPaid) : ""}
+                                                  onChangeText={v => setEditingStudent({ ...editingStudent, feesPaid: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                            </View>
+                                            <View style={{ marginTop: 6, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                                              <Text style={{ fontSize: 11, color: "#666" }}>
+                                                Pending Balance: <Text style={{ fontWeight: "bold", color: (Number(editingStudent.totalFees || 0) - Number(editingStudent.feesPaid || 0)) > 0 ? "#d32f2f" : "#2e7d32" }}>
+                                                  ₹{Math.max(0, (Number(editingStudent.totalFees || 0) - Number(editingStudent.feesPaid || 0)))}
+                                                </Text>
+                                              </Text>
+                                            </View>
                                           </View>
 
-                                          {/* Joining Date */}
-                                          <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Joining Date</Text>
-                                          <TouchableOpacity
-                                            onPress={() => openCalendar("editingStudent", editingStudent.joiningDate)}
-                                            style={{
-                                              padding: 12,
-                                              borderRadius: 8,
-                                              borderWidth: 1,
-                                              borderColor: "#e0e0e0",
-                                              marginBottom: 10,
-                                              backgroundColor: "#fafafa",
-                                              flexDirection: "row",
-                                              alignItems: "center",
-                                              justifyContent: "space-between"
-                                            }}
-                                          >
-                                            <Text style={{ color: editingStudent.joiningDate ? "#212121" : "#999", fontSize: 14 }}>
-                                              {editingStudent.joiningDate || "Select Joining Date (YYYY-MM-DD)"}
-                                            </Text>
-                                            <Ionicons name="calendar-outline" size={18} color="#757575" />
-                                          </TouchableOpacity>
+                                          {/* Attendance & Joining Section */}
+                                          <View style={{ backgroundColor: "#f9fbe7", borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#dce775" }}>
+                                            <Text style={{ fontWeight: "bold", color: "#33691e", marginBottom: 8, fontSize: 13 }}>📅 Joining Date & Attendance</Text>
+                                            
+                                            <View style={{ marginBottom: 10 }}>
+                                              <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Joining Date</Text>
+                                              <TouchableOpacity
+                                                onPress={() => openCalendar("editingStudent", editingStudent.joiningDate)}
+                                                style={{
+                                                  padding: 10,
+                                                  borderRadius: 8,
+                                                  borderWidth: 1,
+                                                  borderColor: "#cccccc",
+                                                  backgroundColor: "#ffffff",
+                                                  flexDirection: "row",
+                                                  alignItems: "center",
+                                                  justifyContent: "space-between"
+                                                }}
+                                              >
+                                                <Text style={{ color: editingStudent.joiningDate ? "#212121" : "#999999", fontSize: 13 }}>
+                                                  {editingStudent.joiningDate || "Select Joining Date (YYYY-MM-DD)"}
+                                                </Text>
+                                                <Ionicons name="calendar-outline" size={18} color="#757575" />
+                                              </TouchableOpacity>
+                                              {editingStudent.joiningDate ? (
+                                                <Text style={{ fontSize: 10, color: "#33691e", marginTop: 3, fontWeight: "500" }}>
+                                                  ℹ️ Joined {calcTotalDaysFromJoiningDate(editingStudent.joiningDate)} days ago (auto-syncs Total Days)
+                                                </Text>
+                                              ) : null}
+                                            </View>
+
+                                            <View style={{ flexDirection: "row", gap: 10 }}>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Present Days (Attended)</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Attended Days"
+                                                  placeholderTextColor="#999"
+                                                  value={editingStudent.attendedDays !== undefined ? String(editingStudent.attendedDays) : ""}
+                                                  onChangeText={v => setEditingStudent({ ...editingStudent, attendedDays: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Total Working Days</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Total Days"
+                                                  placeholderTextColor="#999"
+                                                  value={editingStudent.totalDays !== undefined ? String(editingStudent.totalDays) : ""}
+                                                  onChangeText={v => setEditingStudent({ ...editingStudent, totalDays: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                            </View>
+                                          </View>
                                           <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                                             <TouchableOpacity
                                               onPress={updateStudentRecord}
@@ -21277,10 +21938,33 @@ function MainApp() {
                                             </>
                                           )}
 
-                                          <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, fontSize: 13 }}>Fee Details</Text>
-                                          <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Total Fees (₹)" placeholderTextColor="#999" value={newStudent.totalFees} onChangeText={v => setNewStudent({ ...newStudent, totalFees: v })} keyboardType="numeric" />
-                                            <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Fees Paid (₹)" placeholderTextColor="#999" value={newStudent.feesPaid} onChangeText={v => setNewStudent({ ...newStudent, feesPaid: v })} keyboardType="numeric" />
+                                          {/* Fee Structure */}
+                                          <View style={{ backgroundColor: "#fffde7", borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#fff59d" }}>
+                                            <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 8, fontSize: 13 }}>💰 Fee Structure</Text>
+                                            <View style={{ flexDirection: "row", gap: 10 }}>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Total Course Fee (₹)</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Total Fee (₹)"
+                                                  placeholderTextColor="#999"
+                                                  value={newStudent.totalFees}
+                                                  onChangeText={v => setNewStudent({ ...newStudent, totalFees: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                              <View style={{ flex: 1 }}>
+                                                <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Fees Paid (₹)</Text>
+                                                <TextInput
+                                                  style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                                  placeholder="Fees Paid (₹)"
+                                                  placeholderTextColor="#999"
+                                                  value={newStudent.feesPaid}
+                                                  onChangeText={v => setNewStudent({ ...newStudent, feesPaid: v })}
+                                                  keyboardType="numeric"
+                                                />
+                                              </View>
+                                            </View>
                                           </View>
 
                                           {/* Course Duration */}
@@ -21298,7 +21982,7 @@ function MainApp() {
                                           </View>
 
                                           {/* Joining Date */}
-                                          <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, marginTop: 6, fontSize: 13 }}>Joining Date</Text>
+                                          <Text style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6, marginTop: 6, fontSize: 13 }}>📅 Joining Date</Text>
                                           <TouchableOpacity
                                             onPress={() => openCalendar("newStudent", newStudent.joiningDate)}
                                             style={{
@@ -21306,7 +21990,7 @@ function MainApp() {
                                               borderRadius: 8,
                                               borderWidth: 1,
                                               borderColor: "#e0e0e0",
-                                              marginBottom: 10,
+                                              marginBottom: 4,
                                               backgroundColor: "#fafafa",
                                               flexDirection: "row",
                                               alignItems: "center",
@@ -21318,6 +22002,11 @@ function MainApp() {
                                             </Text>
                                             <Ionicons name="calendar-outline" size={18} color="#757575" />
                                           </TouchableOpacity>
+                                          {newStudent.joiningDate ? (
+                                            <Text style={{ fontSize: 10, color: "#c62828", marginBottom: 10, fontWeight: "500" }}>
+                                              ℹ️ Joining {newStudent.joiningDate} ({calcTotalDaysFromJoiningDate(newStudent.joiningDate)} total days calculated)
+                                            </Text>
+                                          ) : null}
 
                                           {/* Contact Details */}
                                           <Text style={{ fontWeight: "bold", color: "#757575", marginBottom: 6, fontSize: 13 }}>Contact Details</Text>
@@ -21395,8 +22084,8 @@ function MainApp() {
 
                                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center", zIndex: 2000, position: "relative" }}>
                                   {/* Batch Filter Dropdown */}
-                                  <View style={{ flex: 1, minWidth: 150 }}>
-                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#555", marginBottom: 4 }}>Filter Batch:</Text>
+                                  <View style={{ flex: 1, minWidth: 150, zIndex: showBatchFilterDropdown ? 99999 : 10, position: "relative" }}>
+                                    <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#ccc" : "#555", marginBottom: 4 }}>Filter Batch:</Text>
                                     <View style={{ zIndex: 2100, position: "relative" }}>
                                       <TouchableOpacity
                                         onPress={() => {
@@ -21431,7 +22120,7 @@ function MainApp() {
                                           backgroundColor: "#ffffff",
                                           marginTop: 4,
                                           overflow: "hidden",
-                                          zIndex: 1101,
+                                          zIndex: 99999, elevation: 20,
                                           maxHeight: 130,
                                           shadowColor: "#000",
                                           shadowOffset: { width: 0, height: 2 },
@@ -21896,7 +22585,8 @@ function MainApp() {
                                                           initialBatchModes[b] = [s.type || "offline"];
                                                         }
                                                       });
-                                                      setEditingStudent({ ...s, batches: initialBatches, batchModes: initialBatchModes });
+                                                      const computedTotalDays = calcTotalDaysFromJoiningDate(s.joiningDate, s.totalDays);
+                                                      setEditingStudent({ ...s, totalDays: computedTotalDays, batches: initialBatches, batchModes: initialBatchModes });
                                                       setShowStudentForm(true);
                                                     }}
                                                     style={{ flex: 1, flexDirection: "row", gap: 5, padding: 8, backgroundColor: "#0288d1", borderRadius: 4, justifyContent: "center", alignItems: "center" }}
@@ -26733,8 +27423,15 @@ function MainApp() {
                                         <Text style={{ flex: 0.8, textAlign: "center", color: darkMode ? "#b0bec5" : "#616161", fontSize: 13, fontWeight: "bold" }}>
                                           #{r.rank || 1}
                                         </Text>
-                                        <Text style={{ flex: 1, textAlign: "right", color: isPass ? (darkMode ? "#81c784" : "#2e7d32") : (darkMode ? "#e57373" : "#c62828"), fontWeight: "bold", fontSize: 12 }}>
-                                          {isPass ? "PASS" : "FAIL"}
+                                        <Text style={{ flex: 1, textAlign: "right" }}>
+                                          {(() => {
+                                            const perf = getPerformanceStatus(r.obtainedMarks || 0, r.totalMarks || 0, r.percentage);
+                                            return (
+                                              <Text style={{ color: perf.color, fontWeight: "bold", fontSize: 11 }}>
+                                                {perf.label}
+                                              </Text>
+                                            );
+                                          })()}
                                         </Text>
                                       </View>
                                     );
@@ -31813,7 +32510,7 @@ function MainApp() {
                             {entry.obtainedMarks} / {entry.totalMarks}
                           </Text>
                           <Text style={{ fontSize: 11, color: "#757575" }}>
-                            {Math.round(entry.percentage)}% · {String(entry.status || "evaluated").toUpperCase()}
+                            {Math.round(entry.percentage)}% · {getPerformanceStatus(entry.obtainedMarks || 0, entry.totalMarks || 0, entry.percentage).label}
                           </Text>
                         </View>
                       </View>
@@ -32941,8 +33638,8 @@ function MainApp() {
         >
           <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)", justifyContent: "center", alignItems: "center", padding: 15 }}>
             <View style={{
-              width: "100%",
-              maxWidth: 720,
+              width: "92%",
+              maxWidth: 940,
               maxHeight: "85%",
               backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
               borderRadius: 16,
@@ -32974,18 +33671,84 @@ function MainApp() {
                   <Ionicons name="trophy-outline" size={40} color="#ccc" />
                   <Text style={{ marginTop: 10, color: darkMode ? "#aaa" : "#666", fontSize: 13 }}>No leaderboard entries found for this test yet.</Text>
                 </View>
+              ) : isMobile ? (
+                <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={true}>
+                  {studentLeaderboardData.map((entry: any, idx: number) => {
+                    const correct = entry.correct ?? entry.correctCount ?? 0;
+                    const wrong = entry.wrong ?? entry.wrongCount ?? 0;
+                    const skipped = entry.skipped ?? entry.unattended ?? entry.skippedCount ?? 0;
+                    const attended = correct + wrong;
+                    
+                    const resolvedStudent = students.find((s: any) => s.id === entry.studentId || s.userId === entry.studentId || s.loginUsername === entry.rollNumber || s.rollNumber === entry.rollNumber);
+                    const resolvedLead = leads.find((ld: any) => ld.id === entry.studentId || ld.userId === entry.studentId);
+                    const resolvedUser = user && (user.id === entry.studentId || user.userId === entry.studentId || user.username === entry.studentId) ? user : null;
+
+                    const sName = resolvedStudent ? (getStudentName(resolvedStudent) || resolvedStudent.loginUsername || resolvedStudent.firstName)
+                                : resolvedLead ? (resolvedLead.name || resolvedLead.username)
+                                : resolvedUser ? (resolvedUser.name || resolvedUser.username || resolvedUser.email?.split("@")[0])
+                                : (entry.studentName && entry.studentName !== "Student" && !entry.studentName.startsWith("Student (") ? entry.studentName : (entry.username || entry.name || "Guest User"));
+
+                    const validRoll = (entry.rollNumber && entry.rollNumber !== "N/A" && entry.rollNumber !== "Guest" && entry.rollNumber !== "Student" && !String(entry.rollNumber).startsWith("STU-"))
+                                    ? entry.rollNumber
+                                    : (resolvedStudent?.rollNumber || resolvedStudent?.rollNo || resolvedStudent?.loginUsername);
+
+                    const rollVal = validRoll || sName;
+                    const studentLabel = sName 
+                      ? (rollVal && rollVal !== sName && rollVal !== "N/A" && rollVal !== "Guest" && rollVal !== "Student" ? `${sName} (${rollVal})` : sName) 
+                      : rollVal;
+
+                    const obtainedMarks = entry.obtainedMarks ?? entry.score ?? 0;
+                    const totalMarks = entry.totalMarks ?? entry.totalScore ?? 0;
+                    const perf = getPerformanceStatus(obtainedMarks, totalMarks, entry.percentage);
+
+                    return (
+                      <View
+                        key={entry.attemptId || entry.id || idx}
+                        style={{
+                          padding: 10,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: darkMode ? "#333" : "#e0e0e0",
+                          backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa"),
+                          marginBottom: 8
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1, marginRight: 6 }}>
+                            <Text style={{ fontSize: 13, fontWeight: "bold", color: idx === 0 ? "#fbc02d" : idx === 1 ? "#9e9e9e" : idx === 2 ? "#cd7f32" : (darkMode ? "#aaa" : "#757575") }}>
+                              #{idx + 1}
+                            </Text>
+                            <Text numberOfLines={1} style={{ fontSize: 12, fontWeight: "700", color: darkMode ? "#fff" : "#212121", flex: 1 }}>
+                              {studentLabel}
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: perf.bgColor, borderColor: perf.borderColor, borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 }}>
+                            <Text style={{ fontSize: 10, fontWeight: "bold", color: perf.color }}>{perf.label}</Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#2a2a2a" : "#f0f0f0" }}>
+                          <Text style={{ fontSize: 11, color: "#1565c0", fontWeight: "600" }}>Attended: <Text style={{ fontWeight: "bold" }}>{attended}</Text></Text>
+                          <Text style={{ fontSize: 11, color: "#2e7d32", fontWeight: "600" }}>Correct: <Text style={{ fontWeight: "bold" }}>{correct}</Text></Text>
+                          <Text style={{ fontSize: 11, color: "#c62828", fontWeight: "600" }}>Wrong: <Text style={{ fontWeight: "bold" }}>{wrong}</Text></Text>
+                          <Text style={{ fontSize: 11, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e" }}>{obtainedMarks}/{totalMarks}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
               ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                  <View style={{ minWidth: 640 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+                  <View style={{ width: "100%", minWidth: 840 }}>
                     {/* Table Header */}
-                    <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 10, borderRadius: 8, marginBottom: 6 }}>
+                    <View style={{ flexDirection: "row", backgroundColor: darkMode ? "#2a2a2a" : "#f5f5f5", paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, marginBottom: 6, alignItems: "center" }}>
                       <Text style={{ width: 45, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>#</Text>
-                      <Text style={{ width: 150, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>Student / Roll No</Text>
+                      <Text style={{ flex: 1, minWidth: 180, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555" }}>Student / Roll No</Text>
                       <Text style={{ width: 85, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Attended</Text>
                       <Text style={{ width: 95, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Not Attended</Text>
-                      <Text style={{ width: 85, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Correct Ans</Text>
-                      <Text style={{ width: 85, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Wrong Ans</Text>
-                      <Text style={{ width: 95, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Total Marks</Text>
+                      <Text style={{ width: 90, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Correct Ans</Text>
+                      <Text style={{ width: 90, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Wrong Ans</Text>
+                      <Text style={{ width: 100, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Total Marks</Text>
+                      <Text style={{ width: 140, fontWeight: "bold", fontSize: 11, color: darkMode ? "#fff" : "#555", textAlign: "center" }}>Status</Text>
                     </View>
 
                     {/* Table Rows */}
@@ -33016,6 +33779,7 @@ function MainApp() {
 
                         const obtainedMarks = entry.obtainedMarks ?? entry.score ?? 0;
                         const totalMarks = entry.totalMarks ?? entry.totalScore ?? 0;
+                        const perf = getPerformanceStatus(obtainedMarks, totalMarks, entry.percentage);
 
                         return (
                           <View
@@ -33024,7 +33788,7 @@ function MainApp() {
                               flexDirection: "row",
                               alignItems: "center",
                               paddingVertical: 10,
-                              paddingHorizontal: 10,
+                              paddingHorizontal: 12,
                               borderBottomWidth: 1,
                               borderBottomColor: darkMode ? "#333" : "#f0f0f0",
                               backgroundColor: idx % 2 === 0 ? (darkMode ? "#1e1e1e" : "#ffffff") : (darkMode ? "#252525" : "#fafafa")
@@ -33033,7 +33797,7 @@ function MainApp() {
                             <Text style={{ width: 45, fontSize: 12, fontWeight: "bold", color: idx === 0 ? "#fbc02d" : idx === 1 ? "#9e9e9e" : idx === 2 ? "#cd7f32" : (darkMode ? "#aaa" : "#757575") }}>
                               #{idx + 1}
                             </Text>
-                            <Text style={{ width: 150, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>
+                            <Text style={{ flex: 1, minWidth: 180, fontSize: 12, fontWeight: "600", color: darkMode ? "#fff" : "#212121" }}>
                               {studentLabel}
                             </Text>
                             <Text style={{ width: 85, fontSize: 12, color: "#1565c0", fontWeight: "bold", textAlign: "center" }}>
@@ -33042,15 +33806,20 @@ function MainApp() {
                             <Text style={{ width: 95, fontSize: 12, color: darkMode ? "#aaa" : "#757575", textAlign: "center" }}>
                               {skipped}
                             </Text>
-                            <Text style={{ width: 85, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>
+                            <Text style={{ width: 90, fontSize: 12, color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>
                               {correct}
                             </Text>
-                            <Text style={{ width: 85, fontSize: 12, color: "#c62828", fontWeight: "bold", textAlign: "center" }}>
+                            <Text style={{ width: 90, fontSize: 12, color: "#c62828", fontWeight: "bold", textAlign: "center" }}>
                               {wrong}
                             </Text>
-                            <Text style={{ width: 95, fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e", textAlign: "center" }}>
+                            <Text style={{ width: 100, fontSize: 12, fontWeight: "bold", color: darkMode ? "#81c784" : "#1a237e", textAlign: "center" }}>
                               {obtainedMarks} / {totalMarks}
                             </Text>
+                            <View style={{ width: 140, alignItems: "center", justifyContent: "center" }}>
+                              <View style={{ backgroundColor: perf.bgColor, borderColor: perf.borderColor, borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                <Text style={{ fontSize: 10, fontWeight: "bold", color: perf.color, textAlign: "center" }}>{perf.label}</Text>
+                              </View>
+                            </View>
                           </View>
                         );
                       })}

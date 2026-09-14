@@ -39,6 +39,30 @@ function sanitizeStudent(student: any): any {
     return s;
 }
 
+function calculateTotalDaysFromJoiningDate(joiningDateStr?: string, storedTotalDays?: any): number {
+    const tot = (storedTotalDays !== undefined && storedTotalDays !== null && storedTotalDays !== "") ? Number(storedTotalDays) : 0;
+    if (!joiningDateStr) {
+        return tot > 0 ? tot : 28;
+    }
+    try {
+        const jDate = new Date(joiningDateStr);
+        if (isNaN(jDate.getTime())) {
+            return tot > 0 ? tot : 28;
+        }
+        const today = new Date();
+        jDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        const diffDays = Math.floor((today.getTime() - jDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        if (diffDays <= 0) return tot > 0 ? tot : 1;
+        if (!tot || tot === 28 || diffDays > tot) {
+            return diffDays;
+        }
+        return tot;
+    } catch (_) {
+        return tot > 0 ? tot : 28;
+    }
+}
+
 
 export class StudentController {
     /**
@@ -176,7 +200,7 @@ export class StudentController {
                 feesPaid: feesPaid !== undefined ? Number(feesPaid) : 0,
                 joiningDate: joiningDate || "",
                 attendedDays: attendedDays !== undefined ? Number(attendedDays) : 24,
-                totalDays: totalDays !== undefined ? Number(totalDays) : 28,
+                totalDays: calculateTotalDaysFromJoiningDate(joiningDate, totalDays),
                 status: status || "active",
                 profileComplete: false,
                 profileEditPermission: true,
@@ -368,7 +392,7 @@ export class StudentController {
                         feesPaid,
                         joiningDate: s.joiningDate || new Date().toISOString().split('T')[0],
                         attendedDays: s.attendedDays !== undefined ? Number(s.attendedDays) : 24,
-                        totalDays: s.totalDays !== undefined ? Number(s.totalDays) : 28,
+                        totalDays: calculateTotalDaysFromJoiningDate(s.joiningDate, s.totalDays),
                         status: s.status || "active",
                         profileComplete: false,
                         profileEditPermission: true,
@@ -505,6 +529,8 @@ export class StudentController {
                 const creatorName = usersMap[creatorId] || creatorId || "Super Admin";
                 return {
                     ...data,
+                    attendedDays: (data.attendedDays !== undefined && data.attendedDays !== null && Number(data.attendedDays) >= 0) ? Number(data.attendedDays) : 0,
+                    totalDays: calculateTotalDaysFromJoiningDate(data.joiningDate, data.totalDays),
                     createdBy: creatorName,
                     createdAt: parseTimestamp(data.createdAt),
                     updatedAt: parseTimestamp(data.updatedAt),
@@ -614,6 +640,8 @@ export class StudentController {
                 success: true,
                 data: sanitizeStudent({
                     ...data,
+                    attendedDays: (data.attendedDays !== undefined && data.attendedDays !== null && Number(data.attendedDays) >= 0) ? Number(data.attendedDays) : 0,
+                    totalDays: calculateTotalDaysFromJoiningDate(data.joiningDate, data.totalDays),
                     createdBy: creatorName || "Super Admin",
                     createdAt: parseTimestamp(data.createdAt),
                     updatedAt: parseTimestamp(data.updatedAt),
@@ -815,8 +843,14 @@ export class StudentController {
                 }
             }
             if (joiningDate !== undefined) updateData.joiningDate = joiningDate;
-            if (attendedDays !== undefined) updateData.attendedDays = Number(attendedDays);
-            if (totalDays !== undefined) updateData.totalDays = Number(totalDays);
+            if (attendedDays !== undefined || totalDays !== undefined || joiningDate !== undefined) {
+                const att = attendedDays !== undefined ? Number(attendedDays) : Number(doc.data()?.attendedDays || 0);
+                const jDate = joiningDate !== undefined ? joiningDate : doc.data()?.joiningDate;
+                const totInput = totalDays !== undefined ? Number(totalDays) : doc.data()?.totalDays;
+                const computedTot = calculateTotalDaysFromJoiningDate(jDate, totInput);
+                updateData.attendedDays = att;
+                updateData.totalDays = Math.max(computedTot, att);
+            }
             if (loginUsername !== undefined) updateData.loginUsername = loginUsername;
             if (loginPassword !== undefined && loginPassword) {
                 const newHash = await bcrypt.hash(loginPassword, 12);
@@ -1147,45 +1181,57 @@ export class StudentController {
             };
 
             const baseQuery = db.collection(COLLECTION).where("isDeleted", "==", false);
-            let snapshot: admin.firestore.QuerySnapshot | null = null;
+            let targetDoc: { id: string; data: () => any } | null = null;
 
-            // Try studentId first
+            // Direct document lookups first
             if (studentId) {
-                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
-                if (!s.empty) snapshot = s;
+                const d = await db.collection(COLLECTION).doc(studentId).get();
+                if (d.exists && !d.data()?.isDeleted) targetDoc = { id: d.id, data: () => d.data()! };
             }
-            // Try userId
-            if (!snapshot && userId) {
-                const s = await baseQuery.where("id", "==", userId).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            // Try username (loginUsername or rollNumber)
-            if (!snapshot && username) {
-                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            if (!snapshot && username) {
-                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            // Try email
-            if (!snapshot && email) {
-                const s = await baseQuery.where("email", "==", email).limit(1).get();
-                if (!s.empty) snapshot = s;
+            if (!targetDoc && userId) {
+                const d = await db.collection(COLLECTION).doc(userId).get();
+                if (d.exists && !d.data()?.isDeleted) targetDoc = { id: d.id, data: () => d.data()! };
             }
 
-            if (!snapshot || snapshot.empty) {
+            // Fallback query searches
+            if (!targetDoc && studentId) {
+                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
+                if (!s.empty) targetDoc = { id: s.docs[0].id, data: () => s.docs[0].data() };
+            }
+            if (!targetDoc && userId) {
+                const s = await baseQuery.where("id", "==", userId).limit(1).get();
+                if (!s.empty) targetDoc = { id: s.docs[0].id, data: () => s.docs[0].data() };
+            }
+            if (!targetDoc && username) {
+                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
+                if (!s.empty) targetDoc = { id: s.docs[0].id, data: () => s.docs[0].data() };
+            }
+            if (!targetDoc && username) {
+                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
+                if (!s.empty) targetDoc = { id: s.docs[0].id, data: () => s.docs[0].data() };
+            }
+            if (!targetDoc && email) {
+                const s = await baseQuery.where("email", "==", email).limit(1).get();
+                if (!s.empty) targetDoc = { id: s.docs[0].id, data: () => s.docs[0].data() };
+            }
+
+            if (!targetDoc) {
                 return res.status(404).json({ success: false, message: "Student profile not found" });
             }
 
-            const doc = snapshot.docs[0];
-            const data = doc.data();
+            const data = targetDoc.data();
 
             return res.status(200).json({
                 success: true,
                 data: [{
                     ...data,
-                    id: data.id || doc.id,
+                    id: data.id || targetDoc.id,
+                    attendedDays: (data.attendedDays !== undefined && data.attendedDays !== null && Number(data.attendedDays) >= 0) ? Number(data.attendedDays) : 0,
+                    totalDays: (() => {
+                        const att = Number(data.attendedDays || 0);
+                        const tot = Number(data.totalDays || 0);
+                        return tot > 0 ? Math.max(tot, att) : (att > 0 ? Math.max(att, 28) : 28);
+                    })(),
                     createdAt: parseTimestamp(data.createdAt),
                     updatedAt: parseTimestamp(data.updatedAt),
                     deletedAt: parseTimestamp(data.deletedAt),
@@ -1201,7 +1247,7 @@ export class StudentController {
     }
 
     /**
-     * UPDATE CURRENT LOGGED-IN STUDENT PROFILE (self-service, restricted fields only)
+     * UPDATE CURRENT LOGGED-IN STUDENT PROFILE (self-service)
      * PUT /api/erp/student/profile/me
      */
     static async updateMe(req: Request, res: Response) {
@@ -1212,8 +1258,16 @@ export class StudentController {
 
             const { username, email, studentId, userId } = req.user as any;
 
-            // Students may only update these fields via self-service
-            const ALLOWED_FIELDS = ["loginPassword", "profileEditPermission", "isProfileSubmitted"];
+            // Expanded ALLOWED_FIELDS for self-service student profile and application updates
+            const ALLOWED_FIELDS = [
+                "loginPassword", "profileEditPermission", "isProfileSubmitted", "applicationSubmitted",
+                "name", "fullName", "firstName", "lastName", "dob", "dateOfBirth", "gender", "bloodGroup",
+                "community", "fatherName", "motherName", "guardianName", "fatherPhone", "motherPhone",
+                "guardianPhone", "emergencyContact", "altPhone", "email", "phone", "address", "city",
+                "state", "pincode", "qualification", "college", "referralSource", "occupation",
+                "studentOccupation", "initial", "horizontalReservation", "constituency", "photoUrl",
+                "photoBase64", "signatureUrl", "photoIdBase64", "photoIdUrl", "photoIdType", "mustChangePassword"
+            ];
             const updateData: any = {};
             for (const field of ALLOWED_FIELDS) {
                 if (req.body[field] !== undefined) {
@@ -1225,55 +1279,76 @@ export class StudentController {
                 return res.status(400).json({ success: false, message: "No updatable fields provided" });
             }
 
-            // If updating password, also hash and sync to users collection
+            // If updating password, hash password and clear mustChangePassword flag
             if (updateData.loginPassword) {
-                const salt = await bcrypt.genSalt(10);
-                updateData.passwordHash = await bcrypt.hash(updateData.loginPassword, salt);
-                updateData.loginPasswordHash = updateData.passwordHash;
+                const newHash = await bcrypt.hash(updateData.loginPassword, 12);
+                updateData.passwordHash = newHash;
+                updateData.mustChangePassword = false;
             }
 
             updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
 
             const baseQuery = db.collection(COLLECTION).where("isDeleted", "==", false);
-            let snapshot: admin.firestore.QuerySnapshot | null = null;
+            let targetDocId: string | null = null;
 
+            // Direct document lookups first
             if (studentId) {
-                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
-                if (!s.empty) snapshot = s;
+                const d = await db.collection(COLLECTION).doc(studentId).get();
+                if (d.exists && !d.data()?.isDeleted) targetDocId = d.id;
             }
-            if (!snapshot && userId) {
-                const s = await baseQuery.where("id", "==", userId).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            if (!snapshot && username) {
-                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            if (!snapshot && username) {
-                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
-                if (!s.empty) snapshot = s;
-            }
-            if (!snapshot && email) {
-                const s = await baseQuery.where("email", "==", email).limit(1).get();
-                if (!s.empty) snapshot = s;
+            if (!targetDocId && userId) {
+                const d = await db.collection(COLLECTION).doc(userId).get();
+                if (d.exists && !d.data()?.isDeleted) targetDocId = d.id;
             }
 
-            if (!snapshot || snapshot.empty) {
+            // Fallback query searches
+            if (!targetDocId && studentId) {
+                const s = await baseQuery.where("id", "==", studentId).limit(1).get();
+                if (!s.empty) targetDocId = s.docs[0].id;
+            }
+            if (!targetDocId && userId) {
+                const s = await baseQuery.where("id", "==", userId).limit(1).get();
+                if (!s.empty) targetDocId = s.docs[0].id;
+            }
+            if (!targetDocId && username) {
+                const s = await baseQuery.where("loginUsername", "==", username).limit(1).get();
+                if (!s.empty) targetDocId = s.docs[0].id;
+            }
+            if (!targetDocId && username) {
+                const s = await baseQuery.where("rollNumber", "==", username).limit(1).get();
+                if (!s.empty) targetDocId = s.docs[0].id;
+            }
+            if (!targetDocId && email) {
+                const s = await baseQuery.where("email", "==", email).limit(1).get();
+                if (!s.empty) targetDocId = s.docs[0].id;
+            }
+
+            if (!targetDocId) {
                 return res.status(404).json({ success: false, message: "Student profile not found" });
             }
 
-            const doc = snapshot.docs[0];
-            await db.collection(COLLECTION).doc(doc.id).update(updateData);
+            await db.collection(COLLECTION).doc(targetDocId).update(updateData);
 
             // Sync password to users collection if changed
-            if (updateData.loginPassword) {
-                const usersSnapshot = await db.collection("users")
-                    .where("username", "==", username || "")
-                    .limit(1).get();
-                if (!usersSnapshot.empty) {
-                    await db.collection("users").doc(usersSnapshot.docs[0].id).update({
+            if (updateData.loginPassword && updateData.passwordHash) {
+                let userRef: admin.firestore.DocumentReference | null = null;
+                if (studentId) {
+                    const u = await db.collection("users").where("studentId", "==", studentId).limit(1).get();
+                    if (!u.empty) userRef = u.docs[0].ref;
+                }
+                if (!userRef && userId) {
+                    const u = await db.collection("users").doc(userId).get();
+                    if (u.exists) userRef = u.ref;
+                }
+                if (!userRef && username) {
+                    const u = await db.collection("users").where("username", "==", username).limit(1).get();
+                    if (!u.empty) userRef = u.docs[0].ref;
+                }
+                if (userRef) {
+                    await userRef.update({
                         password: updateData.loginPassword,
-                        passwordHash: updateData.loginPasswordHash,
+                        passwordHash: updateData.passwordHash,
+                        mustChangePassword: false,
                         updatedAt: admin.firestore.FieldValue.serverTimestamp()
                     });
                 }

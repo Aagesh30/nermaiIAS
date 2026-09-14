@@ -521,13 +521,25 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, darkMo
                                 <div className="font-bold text-gray-900 dark:text-white">
                                   {student.obtainedMarks} / {student.totalMarks}
                                 </div>
-                                <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mt-1 uppercase ${
-                                  student.status === 'pass'
-                                    ? 'bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400'
-                                    : 'bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400'
-                                }`}>
-                                  {student.status || 'fail'}
-                                </span>
+                                {(() => {
+                                  const obtained = student.obtainedMarks ?? 0;
+                                  const total = student.totalMarks ?? 0;
+                                  const pct = total > 0 ? (obtained / total) * 100 : (student.percentage ?? 0);
+                                  let perfLabel = 'Need to improve';
+                                  let perfStyle = 'bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400';
+                                  if (pct >= 75) {
+                                    perfLabel = 'Good';
+                                    perfStyle = 'bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400';
+                                  } else if (pct >= 35) {
+                                    perfLabel = 'Few steps ahead';
+                                    perfStyle = 'bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400';
+                                  }
+                                  return (
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mt-1 ${perfStyle}`}>
+                                      {perfLabel}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </div>
                           ))

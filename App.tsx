@@ -6320,38 +6320,93 @@ export default function App() {
                               ))}
                             </View>
 
-                            {/* Fee Details */}
-                            <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, fontSize: 13 }}>💰 Fee & Attendance Details</Text>
-                            <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
-                              <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Total Fees (₹)" placeholderTextColor="#999" value={editingStudent.totalFees !== undefined ? String(editingStudent.totalFees) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, totalFees: v })} keyboardType="numeric" />
-                              <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Fees Paid (₹)" placeholderTextColor="#999" value={editingStudent.feesPaid !== undefined ? String(editingStudent.feesPaid) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, feesPaid: v })} keyboardType="numeric" />
-                            </View>
-                            <View style={{ flexDirection: "row", gap: 10, marginBottom: 6 }}>
-                              <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Attended Days" placeholderTextColor="#999" value={editingStudent.attendedDays !== undefined ? String(editingStudent.attendedDays) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, attendedDays: v })} keyboardType="numeric" />
-                              <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Total Days" placeholderTextColor="#999" value={editingStudent.totalDays !== undefined ? String(editingStudent.totalDays) : ""} onChangeText={v => setEditingStudent({ ...editingStudent, totalDays: v })} keyboardType="numeric" />
-                            </View>
+                             {/* Fee Structure Section */}
+                             <View style={{ backgroundColor: "#f0f8ff", borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#b3e5fc" }}>
+                               <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 8, fontSize: 13 }}>💰 Fee Details</Text>
+                               <View style={{ flexDirection: "row", gap: 10 }}>
+                                 <View style={{ flex: 1 }}>
+                                   <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Total Course Fee (₹)</Text>
+                                   <TextInput
+                                     style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                     placeholder="Total Fee (₹)"
+                                     placeholderTextColor="#999"
+                                     value={editingStudent.totalFees !== undefined ? String(editingStudent.totalFees) : ""}
+                                     onChangeText={v => setEditingStudent({ ...editingStudent, totalFees: v })}
+                                     keyboardType="numeric"
+                                   />
+                                 </View>
+                                 <View style={{ flex: 1 }}>
+                                   <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Fees Paid (₹)</Text>
+                                   <TextInput
+                                     style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                     placeholder="Fees Paid (₹)"
+                                     placeholderTextColor="#999"
+                                     value={editingStudent.feesPaid !== undefined ? String(editingStudent.feesPaid) : ""}
+                                     onChangeText={v => setEditingStudent({ ...editingStudent, feesPaid: v })}
+                                     keyboardType="numeric"
+                                   />
+                                 </View>
+                               </View>
+                               <View style={{ marginTop: 6, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                                 <Text style={{ fontSize: 11, color: "#666" }}>
+                                   Pending Balance: <Text style={{ fontWeight: "bold", color: (Number(editingStudent.totalFees || 0) - Number(editingStudent.feesPaid || 0)) > 0 ? "#d32f2f" : "#2e7d32" }}>
+                                     ₹{Math.max(0, (Number(editingStudent.totalFees || 0) - Number(editingStudent.feesPaid || 0)))}
+                                   </Text>
+                                 </Text>
+                               </View>
+                             </View>
 
-                            {/* Joining Date */}
-                            <Text style={{ fontWeight: "bold", color: "#0288d1", marginBottom: 6, marginTop: 6, fontSize: 13 }}>📅 Joining Date</Text>
-                            <TouchableOpacity
-                              onPress={() => openCalendar("editingStudent", editingStudent.joiningDate)}
-                              style={{
-                                padding: 12,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: "#e0e0e0",
-                                marginBottom: 10,
-                                backgroundColor: "#fafafa",
-                                flexDirection: "row",
-                                alignItems: "center",
-                                justifyContent: "space-between"
-                              }}
-                            >
-                              <Text style={{ color: editingStudent.joiningDate ? "#212121" : "#999", fontSize: 14 }}>
-                                {editingStudent.joiningDate || "Select Joining Date (YYYY-MM-DD)"}
-                              </Text>
-                              <Ionicons name="calendar-outline" size={18} color="#757575" />
-                            </TouchableOpacity>
+                             {/* Attendance & Joining Section */}
+                             <View style={{ backgroundColor: "#f9fbe7", borderRadius: 8, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#dce775" }}>
+                               <Text style={{ fontWeight: "bold", color: "#33691e", marginBottom: 8, fontSize: 13 }}>📅 Joining Date & Attendance</Text>
+                               
+                               <View style={{ marginBottom: 10 }}>
+                                 <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Joining Date</Text>
+                                 <TouchableOpacity
+                                   onPress={() => openCalendar("editingStudent", editingStudent.joiningDate)}
+                                   style={{
+                                     padding: 10,
+                                     borderRadius: 8,
+                                     borderWidth: 1,
+                                     borderColor: "#cccccc",
+                                     backgroundColor: "#ffffff",
+                                     flexDirection: "row",
+                                     alignItems: "center",
+                                     justifyContent: "space-between"
+                                   }}
+                                 >
+                                   <Text style={{ color: editingStudent.joiningDate ? "#212121" : "#999999", fontSize: 13 }}>
+                                     {editingStudent.joiningDate || "Select Joining Date (YYYY-MM-DD)"}
+                                   </Text>
+                                   <Ionicons name="calendar-outline" size={18} color="#757575" />
+                                 </TouchableOpacity>
+                               </View>
+
+                               <View style={{ flexDirection: "row", gap: 10 }}>
+                                 <View style={{ flex: 1 }}>
+                                   <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Present Days (Attended)</Text>
+                                   <TextInput
+                                     style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                     placeholder="Attended Days"
+                                     placeholderTextColor="#999"
+                                     value={editingStudent.attendedDays !== undefined ? String(editingStudent.attendedDays) : ""}
+                                     onChangeText={v => setEditingStudent({ ...editingStudent, attendedDays: v })}
+                                     keyboardType="numeric"
+                                   />
+                                 </View>
+                                 <View style={{ flex: 1 }}>
+                                   <Text style={{ fontSize: 11, fontWeight: "600", color: "#444", marginBottom: 4 }}>Total Working Days</Text>
+                                   <TextInput
+                                     style={[styles.input, { marginBottom: 0, backgroundColor: "#ffffff" }]}
+                                     placeholder="Total Days"
+                                     placeholderTextColor="#999"
+                                     value={editingStudent.totalDays !== undefined ? String(editingStudent.totalDays) : ""}
+                                     onChangeText={v => setEditingStudent({ ...editingStudent, totalDays: v })}
+                                     keyboardType="numeric"
+                                   />
+                                 </View>
+                               </View>
+                             </View>
                             <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                               <TouchableOpacity 
                                 onPress={updateStudentRecord} 

@@ -514,8 +514,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
 
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-    // SECURITY: Removed user-id, user-role, x-is-admin from allowed headers — these must NEVER be used for auth
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, accept-encoding, user-role");
+    // SECURITY: user-id, user-role, x-is-admin are intentionally excluded — role is derived exclusively from
+    // the verified JWT payload (req.user.role) and must never be taken from client-supplied headers.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, accept-encoding");
     res.setHeader("Access-Control-Allow-Credentials", "true"); // Required for cookie-based auth
 
     if (req.method === "OPTIONS") {

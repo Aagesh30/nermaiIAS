@@ -50,18 +50,37 @@ export class ProfileRequestController {
                 return res.status(400).json({ success: false, message: "studentId and username are required" });
             }
 
-            // Check submission limit (max 3)
-            const studentSnap = await db.collection("students")
-                .where("id", "==", studentId)
-                .limit(1)
-                .get();
+            // Robust multi-fallback lookup for student record
+            let studentDoc: admin.firestore.DocumentSnapshot | null = null;
+            if (studentId) {
+                const directDoc = await db.collection("students").doc(studentId).get();
+                if (directDoc.exists && !directDoc.data()?.isDeleted) {
+                    studentDoc = directDoc;
+                }
+            }
+            if (!studentDoc && studentId) {
+                const snap = await db.collection("students").where("id", "==", studentId).where("isDeleted", "==", false).limit(1).get();
+                if (!snap.empty) studentDoc = snap.docs[0];
+            }
+            if (!studentDoc && username) {
+                const snap = await db.collection("students").where("loginUsername", "==", username).where("isDeleted", "==", false).limit(1).get();
+                if (!snap.empty) studentDoc = snap.docs[0];
+            }
+            if (!studentDoc && username) {
+                const snap = await db.collection("students").where("rollNumber", "==", username).where("isDeleted", "==", false).limit(1).get();
+                if (!snap.empty) studentDoc = snap.docs[0];
+            }
+            if (!studentDoc && email) {
+                const snap = await db.collection("students").where("email", "==", email).where("isDeleted", "==", false).limit(1).get();
+                if (!snap.empty) studentDoc = snap.docs[0];
+            }
 
-            if (studentSnap.empty) {
+            if (!studentDoc) {
                 return res.status(404).json({ success: false, message: "Student record not found" });
             }
 
-            const studentDoc = studentSnap.docs[0];
-            const studentData = studentDoc.data();
+            const studentData = studentDoc.data()!;
+            const targetStudentId = studentData.id || studentDoc.id || studentId;
             const submitCount = studentData.profileSubmitCount || 0;
             let currentCount = 0;
             if (typeof submitCount === "number") {
@@ -72,7 +91,7 @@ export class ProfileRequestController {
 
             // Upsert: if a pending request exists for this student, overwrite it
             const existing = await db.collection(COLLECTION)
-                .where("studentId", "==", studentId)
+                .where("studentId", "==", targetStudentId)
                 .where("status", "==", "pending")
                 .limit(1)
                 .get();
@@ -232,6 +251,52 @@ export class ProfileRequestController {
                 profileEditPermission: false
             });
 
+            // Automatically delete profile completion reminder announcements for this student
+            try {
+                const studentName = (studentData.name || studentData.fullName || studentData.firstName || "").trim().toLowerCase();
+                const studentUsername = (studentData.loginUsername || username || "").trim().toLowerCase();
+                const studentRoll = (studentData.rollNumber || "").trim().toLowerCase();
+
+                const alertsSnapshot = await db.collection("announcements")
+                    .where("isDeleted", "==", false)
+                    .get();
+
+                const batchWrite = db.batch();
+                let hasUpdates = false;
+
+                alertsSnapshot.docs.forEach(alertDoc => {
+                    const data = alertDoc.data();
+                    const title = (data.title || "").toLowerCase();
+                    const content = (data.content || "").toLowerCase();
+                    const targetStudentId = data.targetStudentId;
+
+                    const isProfileAlert = title.includes("complete your profile") || content.includes("complete your profile");
+
+                    const matchesStudent = (targetStudentId && String(targetStudentId) === String(targetStudentId)) ||
+                        (isProfileAlert && (
+                            (studentName && (title.includes(studentName) || content.includes(studentName))) ||
+                            (studentUsername && (title.includes(studentUsername) || content.includes(studentUsername))) ||
+                            (studentRoll && (title.includes(studentRoll) || content.includes(studentRoll)))
+                        ));
+
+                    if (isProfileAlert && matchesStudent) {
+                        batchWrite.update(db.collection("announcements").doc(alertDoc.id), {
+                            isDeleted: true,
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            deletedBy: "system-profile-submitted"
+                        });
+                        hasUpdates = true;
+                    }
+                });
+
+                if (hasUpdates) {
+                    await batchWrite.commit();
+                }
+            } catch (err) {
+                console.error("Failed to delete profile alerts for student:", err);
+            }
+
             return res.status(201).json({
                 success: true,
                 message: "Profile completion request submitted. Awaiting admin approval.",
@@ -284,10 +349,17 @@ export class ProfileRequestController {
     static async getByStudent(req: Request, res: Response) {
         try {
             const { studentId } = req.params;
+            const { username } = req.query;
 
-            const snapshot = await db.collection(COLLECTION)
+            let snapshot = await db.collection(COLLECTION)
                 .where("studentId", "==", studentId)
                 .get();
+
+            if (snapshot.empty && username) {
+                snapshot = await db.collection(COLLECTION)
+                    .where("username", "==", username as string)
+                    .get();
+            }
 
             if (snapshot.empty) {
                 return res.status(200).json({ success: true, data: null });
@@ -416,6 +488,50 @@ export class ProfileRequestController {
                 .get();
             if (!userSnap.empty && data.name) {
                 await db.collection("users").doc(userSnap.docs[0].id).update({ name: data.name });
+            }
+
+            // Also cleanup any active profile completion announcements for this student upon approval
+            try {
+                const sName = (data.name || "").trim().toLowerCase();
+                const sUsername = (data.username || "").trim().toLowerCase();
+
+                const alertsSnapshot = await db.collection("announcements")
+                    .where("isDeleted", "==", false)
+                    .get();
+
+                const batchWrite = db.batch();
+                let hasUpdates = false;
+
+                alertsSnapshot.docs.forEach(alertDoc => {
+                    const annData = alertDoc.data();
+                    const title = (annData.title || "").toLowerCase();
+                    const content = (annData.content || "").toLowerCase();
+                    const targetStudentId = annData.targetStudentId;
+
+                    const isProfileAlert = title.includes("complete your profile") || content.includes("complete your profile");
+
+                    const matchesStudent = (targetStudentId && String(targetStudentId) === String(data.studentId)) ||
+                        (isProfileAlert && (
+                            (sName && (title.includes(sName) || content.includes(sName))) ||
+                            (sUsername && (title.includes(sUsername) || content.includes(sUsername)))
+                        ));
+
+                    if (isProfileAlert && matchesStudent) {
+                        batchWrite.update(db.collection("announcements").doc(alertDoc.id), {
+                            isDeleted: true,
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            deletedBy: "system-profile-approved"
+                        });
+                        hasUpdates = true;
+                    }
+                });
+
+                if (hasUpdates) {
+                    await batchWrite.commit();
+                }
+            } catch (err) {
+                console.error("Failed to delete profile alerts on approval:", err);
             }
 
             return res.status(200).json({ success: true, message: "Profile request approved and student record updated." });

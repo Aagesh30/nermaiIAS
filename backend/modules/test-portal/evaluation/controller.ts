@@ -478,6 +478,22 @@ export class EvaluationController {
             };
         }
         
+        const isGenericName = (name: string) => {
+            if (!name) return true;
+            const s = String(name).trim().toLowerCase();
+            return s === "student" || s === "guest" || s === "guest user" || s === "n/a" || s.startsWith("guest:") || s.startsWith("guest ") || s.startsWith("student (") || s.startsWith("stu-");
+        };
+
+        // If result document already has explicit valid studentName and rollNumber stored, use them directly (0 reads)
+        if (studentName && !isGenericName(studentName) && rollNumber && rollNumber !== "N/A") {
+            return {
+                ...r,
+                studentName,
+                rollNumber,
+                tabLeaveCount: r.tabLeaveCount || 0
+            };
+        }
+
         const profileCacheKey = `student_profile_${r.studentId}`;
         const cachedProfile = generalCache.get<{ studentName: string; rollNumber: string }>(profileCacheKey);
         if (cachedProfile) {
@@ -524,31 +540,22 @@ export class EvaluationController {
                         }
                     }
                 }
-                if (studentName || rollNumber) {
-                    generalCache.set(profileCacheKey, { studentName, rollNumber }, 300); // 5 min TTL
-                }
+                generalCache.set(profileCacheKey, { studentName: studentName || "Guest User", rollNumber: rollNumber || studentName || "Guest User" }, 300); // 5 min TTL
             } catch (err) {
                 console.log("Error enriching result:", err);
             }
         }
         
-        if (!studentName || studentName === "Student") {
-            studentName = (r.studentName && r.studentName !== "Student") ? r.studentName : (r.username || r.name || (r.studentId ? `Guest: ${r.studentId.substring(0, 8)}` : "Guest User"));
+        if (!studentName || isGenericName(studentName)) {
+            studentName = (r.studentName && !isGenericName(r.studentName)) ? r.studentName : (r.username || r.name || (r.studentId ? `Guest: ${r.studentId.substring(0, 8)}` : "Guest User"));
         }
-        if (!rollNumber || rollNumber === "N/A" || rollNumber === "Guest" || rollNumber === "Student") {
+        if (!rollNumber || rollNumber === "N/A" || isGenericName(rollNumber)) {
             rollNumber = studentName;
         }
 
         let tabLeaveCount = r.tabLeaveCount;
         if (tabLeaveCount === undefined || tabLeaveCount === null) {
-            try {
-                const attemptDoc = await db.collection("student_attempts").doc(r.attemptId || r.id).get();
-                if (attemptDoc.exists) {
-                    tabLeaveCount = attemptDoc.data()?.tabLeaveCount || 0;
-                }
-            } catch (err) {
-                console.log("Error fetching tabLeaveCount in enrichResult:", err);
-            }
+            tabLeaveCount = 0;
         }
         
         return {
