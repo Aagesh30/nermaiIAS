@@ -7,8 +7,8 @@
     "dev": "concurrently \"npm run web\" \"cd backend && npm run start\"",
     "start": "cd web_portal && npx expo start --web",
     "web": "cd web_portal && npx expo start --web",
-    "build:web": "npm --prefix web_portal run build",
-    "deploy": "npm run build:web && firebase deploy",
+    "build:web": "npm --prefix web_portal run build && node -e \"require('fs').cpSync('web_portal/dist', 'dist', {recursive: true})\"",
+    "deploy": "npm run build:web && npx firebase deploy",
     "android": "cd web_portal && npx expo start --android",
     "ios": "cd web_portal && npx expo start --ios"
   },

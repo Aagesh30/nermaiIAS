@@ -5,7 +5,7 @@ import admin from 'firebase-admin';
 import { env } from '../config/env';
 import { logger } from '../core/logger';
 
-export const DEFAULT_ACADEMY_DRIVE_FOLDER_ID = '17PwvvyImIb2wwui8EXhhWlPZ4-gQNiJi';
+export const DEFAULT_ACADEMY_DRIVE_FOLDER_ID = ''; // Leave empty — folder resolved from Firestore settings/drive_config
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Drive Config helpers — read/write from Firestore settings/drive_config
@@ -114,7 +114,7 @@ export async function uploadFileToGoogleDrive(options: {
         fileName: options.fileName,
         mimeType: options.mimeType,
         base64: base64Data,
-        rootFolderId: options.folderId || driveConfig.rootFolderId || DEFAULT_ACADEMY_DRIVE_FOLDER_ID
+        rootFolderId: options.folderId || driveConfig.rootFolderId || ''
       };
 
       // If a subPath is provided (e.g. "LMS/Daily Content"), pass it to Apps Script
@@ -174,7 +174,7 @@ export async function uploadFileToGoogleDrive(options: {
 
     const drive = google.drive({ version: 'v3', auth });
     const driveConfig2 = await getDriveConfig();
-    const targetFolderId = options.folderId || driveConfig2.rootFolderId || DEFAULT_ACADEMY_DRIVE_FOLDER_ID;
+    const targetFolderId = options.folderId || driveConfig2.rootFolderId || '';
 
     const stream = new Readable();
     stream.push(options.buffer);

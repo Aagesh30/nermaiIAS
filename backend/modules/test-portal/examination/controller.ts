@@ -122,10 +122,10 @@ export class ExaminationController {
 
             const now = Date.now();
 
-            // Enforce scheduled start time
+            // Enforce scheduled start time (with 60s clock drift tolerance for client/server time sync)
             if (test.startTime) {
                 const startTimeMs = ExaminationController.getMs(test.startTime);
-                if (now < startTimeMs) {
+                if (now + 60000 < startTimeMs) {
                     const diffMs = startTimeMs - now;
                     const diffMin = Math.ceil(diffMs / 60000);
                     return res.status(400).json({
@@ -145,12 +145,38 @@ export class ExaminationController {
                 }
             }
 
-            // Check max attempts
+            // Check existing attempts
             const attemptsSnapshot = await db.collection("student_attempts")
                 .where("testId", "==", testId)
                 .where("studentId", "==", studentId)
                 .where("isDeleted", "==", false)
                 .get();
+
+            // Auto-resume existing active attempt if found
+            const ongoingAttemptDoc = attemptsSnapshot.docs.find(
+                doc => doc.data().status === "started" && !doc.data().isSubmitted
+            );
+            if (ongoingAttemptDoc) {
+                const ongoingData = ongoingAttemptDoc.data();
+                const endTimeMs = ExaminationController.getMs(ongoingData.endTime);
+                const remainingSeconds = Math.max(0, Math.floor((endTimeMs - now) / 1000));
+                if (remainingSeconds > 0) {
+                    return res.status(200).json({
+                        success: true,
+                        message: "Resuming existing active test attempt",
+                        data: {
+                            attemptId: ongoingAttemptDoc.id,
+                            testId,
+                            testTitle: test.title || "",
+                            creationMode: test.creationMode || "file",
+                            targetLanguages: test.targetLanguages || (test.creationMode === "file" ? ["English", "Tamil"] : ["English", "Tamil"]),
+                            durationMinutes: ongoingData.durationMinutes || 60,
+                            endTime: new Date(endTimeMs).toISOString(),
+                            remainingTime: remainingSeconds
+                        }
+                    });
+                }
+            }
 
             const completedAttemptsCount = attemptsSnapshot.docs.filter(
                 doc => doc.data().status === "submitted" || doc.data().status === "evaluated" || doc.data().isSubmitted === true
@@ -374,7 +400,8 @@ export class ExaminationController {
                     status: "started",
                     endTime: new Date(endTimeMs).toISOString(),
                     remainingTime,
-                    lastAnsweredQuestionId
+                    lastAnsweredQuestionId,
+                    tabLeaveCount: Number(attempt.tabLeaveCount || 0)
                 }
             });
 
@@ -805,7 +832,8 @@ export class ExaminationController {
                     answeredQuestions: answeredCount,
                     remainingQuestions: remainingCount,
                     answeredQuestionIds,
-                    answers: answersArray
+                    answers: answersArray,
+                    tabLeaveCount: Number(attempt.tabLeaveCount || 0)
                 }
             });
 

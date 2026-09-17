@@ -725,7 +725,12 @@ export class StudentController {
                 modeOfPayment,
                 transactionId,
                 batches,
-                batchModes
+                batchModes,
+                feeBlocked,
+                feeAlertActive,
+                feeAlertDueDate,
+                feeAlertSentAt,
+                feeAlertNote
             } = req.body;
 
             const docRef = db.collection(COLLECTION).doc(id);
@@ -885,6 +890,11 @@ export class StudentController {
             if (hallTicketVenue !== undefined) updateData.hallTicketVenue = hallTicketVenue;
             if (hallTicketTime !== undefined) updateData.hallTicketTime = hallTicketTime;
             if (hallTicketInstructions !== undefined) updateData.hallTicketInstructions = hallTicketInstructions;
+            if (feeBlocked !== undefined) updateData.feeBlocked = Boolean(feeBlocked);
+            if (feeAlertActive !== undefined) updateData.feeAlertActive = Boolean(feeAlertActive);
+            if (feeAlertDueDate !== undefined) updateData.feeAlertDueDate = feeAlertDueDate;
+            if (feeAlertSentAt !== undefined) updateData.feeAlertSentAt = feeAlertSentAt;
+            if (feeAlertNote !== undefined) updateData.feeAlertNote = feeAlertNote;
 
             await docRef.update(updateData);
 

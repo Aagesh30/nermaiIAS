@@ -109,6 +109,16 @@ export const StudentPayFeesPage = ({ darkMode = false }: { darkMode?: boolean })
     };
   }, [status?.qrCodeEnabled, timeLeft, status?.qrCodeEnabledAt]);
 
+  // Periodic polling for status when pending approval
+  useEffect(() => {
+    if (status?.qrCodeRequested && !status?.qrCodeEnabled) {
+      const pollInterval = setInterval(() => {
+        fetchQrStatus();
+      }, 10000);
+      return () => clearInterval(pollInterval);
+    }
+  }, [status?.qrCodeRequested, status?.qrCodeEnabled]);
+
   const handleRequestQr = async () => {
     setSubmitting(true);
     try {
@@ -120,7 +130,7 @@ export const StudentPayFeesPage = ({ darkMode = false }: { darkMode?: boolean })
         Alert.alert("Request Sent", msg);
       }
       setIsDialogOpen(false);
-      fetchQrStatus();
+      await fetchQrStatus();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || 'Failed to send request.';
       if (Platform.OS === 'web') {
@@ -368,20 +378,31 @@ export const StudentPayFeesPage = ({ darkMode = false }: { darkMode?: boolean })
                         To view the administration's fee payment QR code, please request access. The code will be valid for a limited time.
                       </Text>
                       <TouchableOpacity
-                        onPress={() => setIsDialogOpen(true)}
+                        onPress={handleRequestQr}
+                        disabled={submitting}
                         style={{
                           marginTop: 8,
                           flexDirection: 'row',
                           alignItems: 'center',
                           gap: 8,
-                          backgroundColor: '#c62828',
+                          backgroundColor: submitting ? '#e57373' : '#c62828',
                           paddingHorizontal: 20,
                           paddingVertical: 10,
                           borderRadius: 8,
+                          opacity: submitting ? 0.8 : 1,
                         }}
                       >
-                        <Ionicons name="qr-code" size={18} color="#ffffff" />
-                        <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>Request QR Code</Text>
+                        {submitting ? (
+                          <>
+                            <ActivityIndicator size="small" color="#ffffff" />
+                            <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>Sending Request...</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons name="qr-code" size={18} color="#ffffff" />
+                            <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>Request QR Code</Text>
+                          </>
+                        )}
                       </TouchableOpacity>
                     </View>
                   )}
@@ -610,9 +631,22 @@ export const StudentPayFeesPage = ({ darkMode = false }: { darkMode?: boolean })
                     <Text style={styles.bodyText}>
                       To view the administration's fee payment QR code, please request access. The code will be valid for a limited time.
                     </Text>
-                    <TouchableOpacity style={styles.requestBtn} onPress={() => setIsDialogOpen(true)}>
-                      <Ionicons name="qr-code" size={18} color="#fff" />
-                      <Text style={styles.requestBtnText}>Request QR Code</Text>
+                    <TouchableOpacity 
+                      style={[styles.requestBtn, submitting && { opacity: 0.7 }]} 
+                      onPress={handleRequestQr}
+                      disabled={submitting}
+                    >
+                      {submitting ? (
+                        <>
+                          <ActivityIndicator size="small" color="#fff" />
+                          <Text style={[styles.requestBtnText, { marginLeft: 6 }]}>Sending...</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="qr-code" size={18} color="#fff" />
+                          <Text style={styles.requestBtnText}>Request QR Code</Text>
+                        </>
+                      )}
                     </TouchableOpacity>
                   </View>
                 )}

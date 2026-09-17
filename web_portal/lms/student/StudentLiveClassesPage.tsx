@@ -769,18 +769,47 @@ export const StudentLiveClassesPage = () => {
     staleTime: 0,
   });
 
-  // Listen to live_class_index signal doc via Firestore onSnapshot (Zero Polling)
+  // Listen to live_class_index signal doc via Firestore onSnapshot (Zero Polling).
+  // If the signal doc doesn't exist yet or the network drops, we fall back to a
+  // 30-second polling interval so students still see real-time class status updates.
+  // The fallback stops automatically once Firestore reconnects and fires successfully.
   useEffect(() => {
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
+    const startFallbackPolling = () => {
+      if (fallbackTimer) return; // already polling
+      console.info('[LiveDashboard] Firestore signal unavailable — starting 30s fallback polling.');
+      fallbackTimer = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ['studentDashboard'] });
+      }, 30_000);
+    };
+
+    const stopFallbackPolling = () => {
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
+        console.info('[LiveDashboard] Firestore signal restored — stopped fallback polling.');
+      }
+    };
+
     const unsub = onSnapshot(
       doc(db, 'live_class_index', 'current'),
       (_snap) => {
+        // Signal doc exists and is reachable — stop fallback polling if running
+        stopFallbackPolling();
         queryClient.invalidateQueries({ queryKey: ['studentDashboard'] });
       },
       (error) => {
         console.warn('[LiveDashboard] Firestore signal listener error:', error.code);
+        // Start 30s fallback so students still get auto-refresh
+        startFallbackPolling();
       }
     );
-    return () => unsub();
+
+    return () => {
+      unsub();
+      stopFallbackPolling();
+    };
   }, [queryClient]);
 
   // Load my access requests once

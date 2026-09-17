@@ -787,8 +787,8 @@ ${chunkText}${cleanedAkText ? `\n\nAnswer Key:\n${cleanedAkText}` : ""}`;
                 unattendedMarks: unattendedMarks !== undefined ? Number(unattendedMarks) : 0,
                 totalMarks: totalMarks || finalQuestionIds.length,
                 passingMarks: passingMarks || 0,
-                startTime: startTime || null,
-                endTime: endTime || null,
+                startTime: startTime || new Date().toISOString(),
+                endTime: endTime || new Date(Date.now() + (durationMinutes || 60) * 60 * 1000).toISOString(),
                 // Store Drive URL if upload succeeded; fallback to base64 for legacy compatibility
                 questionPaperBase64: questionPaperDriveUrl || (questionPaperBase64 ? "[uploaded]" : null),
                 questionPaperUrl: questionPaperDriveUrl || null,

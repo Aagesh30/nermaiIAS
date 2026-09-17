@@ -1,6 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, StyleSheet, ActivityIndicator, Alert, Platform, SafeAreaView } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 
 interface MeetingRendererProps {

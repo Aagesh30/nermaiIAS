@@ -15,9 +15,17 @@ import {
   useWindowDimensions,
   Linking,
   Animated,
-  Easing
+  Easing,
+  SafeAreaView
 } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, initialWindowMetrics } from "react-native-safe-area-context";
+import * as ScreenCapture from 'expo-screen-capture';
+
+const safeInitialMetrics = initialWindowMetrics || {
+  frame: { x: 0, y: 0, width: 360, height: 800 },
+  insets: { top: 0, left: 0, right: 0, bottom: 0 },
+};
+const safeInitialInsets = safeInitialMetrics.insets;
 
 // Dynamically load HashRouter only on Web to prevent React Native mobile app crashes on startup
 let HashRouter: any = React.Fragment;
@@ -47,6 +55,7 @@ const TeacherDashboard = React.lazy(() => import('./lms/staff/TeacherDashboard')
 const BulkStudentUploadModal = React.lazy(() => import('./lms/components/BulkStudentUploadModal').then(m => ({ default: m.BulkStudentUploadModal })));
 const CustomizeApplicationPage = React.lazy(() => import('./lms/admin/CustomizeApplicationPage'));
 const CustomLeadsPage = React.lazy(() => import('./lms/admin/CustomLeadsPage'));
+const MergedLeadsAdmissionsPage = React.lazy(() => import('./lms/admin/MergedLeadsAdmissionsPage'));
 const DynamicApplicationModal = React.lazy(() => import('./lms/components/DynamicApplicationModal'));
 import { RNSkeleton, RNDashboardSkeleton, RNTableSkeleton, RNCardGridSkeleton, RNProfileSkeleton, RNFormSkeleton, RNContainerSkeleton, RNNoticeCardSkeleton, RNNoticeSectionSkeleton, RNSystemAlertCardSkeleton, RNClosedTestCardSkeleton, RNClosedTestsSectionSkeleton } from './lms/components/ui/RNSkeleton';
 
@@ -93,6 +102,297 @@ import { handleFirebaseGoogleSignIn, db } from "./firebaseConfig";
 import { doc, setDoc, onSnapshot, collection, deleteDoc, query, where } from "firebase/firestore";
 
 const USE_NATIVE_DRIVER = Platform.OS !== "web";
+
+const AppsScriptGuideCard = ({ darkMode }: { darkMode: boolean }) => {
+  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState<boolean>(true);
+  const [activeAppsScriptTab, setActiveAppsScriptTab] = useState<"script1" | "script2">("script1");
+  const [scriptCopied, setScriptCopied] = useState<boolean>(false);
+
+  const appsScriptTemplate1 = `/**
+ * @OnlyCurrentDoc false
+ */
+
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var rootFolderId = data.rootFolderId;
+    var rootFolder = rootFolderId ? DriveApp.getFolderById(rootFolderId) : DriveApp.getRootFolder();
+    
+    // Support Action: test connection
+    if (data.test) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        status: "success",
+        folderName: rootFolder.getName(),
+        message: 'Connected successfully! Folder: "' + rootFolder.getName() + '"'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Support Action: delete file
+    if (data.action === "delete") {
+      var file = DriveApp.getFileById(data.fileId);
+      file.setTrashed(true);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        status: "success",
+        message: "File deleted successfully"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Support Action: upload file (create folders recursively if subPath is provided)
+    var activeFolder = rootFolder;
+    if (data.subPath) {
+      var folderNames = data.subPath.split("/");
+      for (var i = 0; i < folderNames.length; i++) {
+        var subFolderName = folderNames[i].trim();
+        if (subFolderName === "") continue;
+        var subFolders = activeFolder.getFoldersByName(subFolderName);
+        if (subFolders.hasNext()) {
+          activeFolder = subFolders.next();
+        } else {
+          activeFolder = activeFolder.createFolder(subFolderName);
+        }
+      }
+    }
+    
+    // Decode base64 file buffer
+    var decoded = Utilities.base64Decode(data.base64);
+    var blob = Utilities.newBlob(decoded, data.mimeType, data.fileName);
+    var file = activeFolder.createFile(blob);
+    
+    // Grant public view permission (safely catch and ignore if blocked by school domain)
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (sharingError) {
+      // Inherits folder-level sharing if domain blocks individual file sharing
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      fileId: file.getId(),
+      name: file.getName(),
+      previewUrl: "https://drive.google.com/file/d/" + file.getId() + "/preview",
+      webViewLink: file.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      status: "error",
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+  const appsScriptTemplate2 = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var rootFolderId = data.rootFolderId;
+    var rootFolder = rootFolderId ? DriveApp.getFolderById(rootFolderId) : DriveApp.getRootFolder();
+    
+    // Support Action: test connection
+    if (data.test) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        status: "success",
+        folderName: rootFolder.getName(),
+        message: 'Connected successfully! Folder: "' + rootFolder.getName() + '"'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Support Action: delete file
+    if (data.action === "delete" && data.fileId) {
+      DriveApp.getFileById(data.fileId).setTrashed(true);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        status: "success",
+        message: "File deleted successfully"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Property validation
+    if (!data.fileName || !data.mimeType || !data.base64) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        status: "error",
+        error: "Missing required properties: fileName, mimeType, or base64"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Support recursive sub-folder paths cleanly
+    var activeFolder = rootFolder;
+    if (data.subPath) {
+      var parts = data.subPath.split("/").filter(Boolean);
+      for (var i = 0; i < parts.length; i++) {
+        var partName = parts[i].trim();
+        if (partName === "") continue;
+        var subFolders = activeFolder.getFoldersByName(partName);
+        if (subFolders.hasNext()) {
+          activeFolder = subFolders.next();
+        } else {
+          activeFolder = activeFolder.createFolder(partName);
+        }
+      }
+    }
+    
+    // Decode base64 file buffer
+    var decoded = Utilities.base64Decode(data.base64);
+    var blob = Utilities.newBlob(decoded, data.mimeType, data.fileName);
+    var file = activeFolder.createFile(blob);
+    
+    // Grant view permissions (safely catch if domain policy blocks individual sharing)
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (sharingError) {
+      // Inherits folder-level sharing if domain blocks individual file sharing
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      fileId: file.getId(),
+      name: file.getName(),
+      previewUrl: "https://drive.google.com/file/d/" + file.getId() + "/preview",
+      webViewLink: file.getUrl()
+    })).setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      status: "error",
+      error: error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+  const activeScript = activeAppsScriptTab === "script2" ? appsScriptTemplate2 : appsScriptTemplate1;
+
+  return (
+    <View style={[{ backgroundColor: darkMode ? "#1e1e1e" : "#fff", borderRadius: 12, borderWidth: 1, borderColor: darkMode ? "#333" : "#e0e0e0", padding: 18, gap: 10 }]}>
+      <TouchableOpacity
+        onPress={() => setShowAppsScriptGuide(!showAppsScriptGuide)}
+        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+      >
+        <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>
+          Apps Script Deployment Guide
+        </Text>
+        <Ionicons name={showAppsScriptGuide ? "chevron-up" : "chevron-down"} size={18} color="#757575" />
+      </TouchableOpacity>
+
+      {showAppsScriptGuide && (
+        <View style={{ gap: 12, marginTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee", paddingTop: 10 }}>
+          <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", lineHeight: 16 }}>
+            Follow these steps to deploy your Google Apps Script bypass:
+          </Text>
+
+          {/* Script Selection Tabs */}
+          <View style={{ flexDirection: "row", gap: 8, marginVertical: 4 }}>
+            <TouchableOpacity
+              onPress={() => setActiveAppsScriptTab("script1")}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 6,
+                backgroundColor: activeAppsScriptTab === "script1" ? (darkMode ? "#1e88e5" : "#1976d2") : (darkMode ? "#222" : "#e0e0e0")
+              }}
+            >
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: activeAppsScriptTab === "script1" ? "#fff" : (darkMode ? "#aaa" : "#555") }}>
+                📄 Script 1 (Standard)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveAppsScriptTab("script2")}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 6,
+                backgroundColor: activeAppsScriptTab === "script2" ? (darkMode ? "#2e7d32" : "#388e3c") : (darkMode ? "#222" : "#e0e0e0")
+              }}
+            >
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: activeAppsScriptTab === "script2" ? "#fff" : (darkMode ? "#aaa" : "#555") }}>
+                🛡️ Script 2 (Backup / Advanced)
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ gap: 8, paddingLeft: 6 }}>
+            <TouchableOpacity onPress={() => Linking.openURL("https://script.google.com")} style={{ paddingVertical: 4 }}>
+              <Text style={{ fontSize: 11, color: "#1976d2", textDecorationLine: "underline", fontWeight: "bold" }}>
+                1. Click here to open Google Apps Script dashboard (script.google.com)
+              </Text>
+            </TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginVertical: 4 }}>
+              <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", flex: 1, minWidth: 200 }}>
+                2. Click <Text style={{ fontWeight: "bold" }}>"New Project"</Text> and replace all code in <Text style={{ fontWeight: "bold" }}>Code.gs</Text> with {activeAppsScriptTab === "script2" ? "Script 2 (Backup)" : "Script 1 (Standard)"}:
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (typeof navigator !== "undefined" && navigator.clipboard) {
+                    navigator.clipboard.writeText(activeScript);
+                  }
+                  setScriptCopied(true);
+                  setTimeout(() => setScriptCopied(false), 3000);
+                }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  backgroundColor: scriptCopied ? "#2e7d32" : "#e64a19",
+                  paddingHorizontal: 14,
+                  paddingVertical: 8,
+                  borderRadius: 6,
+                  shadowColor: "#000",
+                  shadowOpacity: 0.15,
+                  shadowRadius: 4,
+                  elevation: 3
+                }}
+              >
+                <Ionicons name={scriptCopied ? "checkmark-circle" : "copy-outline"} size={16} color="#fff" />
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
+                  {scriptCopied ? "Copied!" : `📋 Copy ${activeAppsScriptTab === "script2" ? "Script 2" : "Script 1"}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Script Code Block */}
+          <ScrollView style={{
+            backgroundColor: darkMode ? "#121212" : "#f4f4f4",
+            borderRadius: 8,
+            padding: 10,
+            maxHeight: 180,
+            borderWidth: 1,
+            borderColor: darkMode ? "#333" : "#e0e0e0"
+          }}>
+            <Text style={{ fontFamily: "monospace", fontSize: 9, color: activeAppsScriptTab === "script2" ? (darkMode ? "#81c784" : "#2e7d32") : (darkMode ? "#64b5f6" : "#1565c0") }}>
+              {activeScript}
+            </Text>
+          </ScrollView>
+
+          <View style={{ gap: 4, marginTop: 4 }}>
+            <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+              3. Click <Text style={{ fontWeight: "bold" }}>"Deploy" &gt; "New deployment"</Text> at the top-right.
+            </Text>
+            <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+              4. Click the gear icon next to "Select type" and select <Text style={{ fontWeight: "bold" }}>"Web app"</Text>.
+            </Text>
+            <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+              5. Choose Configuration options:
+            </Text>
+            <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+              • Execute as: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Me (your-email)"</Text>
+            </Text>
+            <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
+              • Who has access: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Anyone"</Text> (Required for API routing)
+            </Text>
+            <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
+              6. Click <Text style={{ fontWeight: "bold" }}>"Deploy"</Text> and copy the <Text style={{ fontWeight: "bold" }}>Web app URL</Text> into the Settings panel above.
+            </Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+};
 
 // Inject Vector Icon FontFace styles dynamically for production Web builds using bundled assets
 if (Platform.OS === "web" && typeof document !== "undefined") {
@@ -1718,6 +2018,25 @@ function MainApp() {
     toastTimerRef.current = setTimeout(() => setAppToast(prev => ({ ...prev, visible: false })), 3500);
   };
 
+  const handleLogout = async () => {
+    try {
+      if (Platform.OS === "web" && typeof localStorage !== "undefined") {
+        localStorage.setItem("nermai_manual_logout", "true");
+        localStorage.removeItem("nermai_auth_user");
+      }
+      await authStorage.clear();
+      setUser(null);
+      setActiveTab("lms");
+      setLmsSub("home");
+      if (typeof window !== "undefined") {
+        window.location.hash = "#lms/home";
+      }
+    } catch (err) {
+      console.log("Error during logout:", err);
+      setUser(null);
+    }
+  };
+
   const renderContactUsCard = () => {
     return (
       <View style={styles.card}>
@@ -2061,10 +2380,12 @@ function MainApp() {
 
   const getStudentName = (s: any) => {
     if (!s) return "";
+    if (s.name && String(s.name).trim()) return String(s.name).trim();
+    if (s.fullName && String(s.fullName).trim()) return String(s.fullName).trim();
     const first = s.firstName || "";
     const last = s.lastName || "";
-    const full = (first + "" + last).trim();
-    return full || s.fullName || s.name || "";
+    const full = `${first} ${last}`.trim();
+    return full || s.loginUsername || s.rollNumber || "";
   };
   const formatDobForDisplay = (rawDob: any) => {
     if (!rawDob || typeof rawDob !== "string") return rawDob ? String(rawDob) : "—";
@@ -4200,6 +4521,7 @@ function MainApp() {
 
   const getCrmFeatureKey = (sub: string): string => {
     switch (sub) {
+      case "merged-leads": return "leads";
       case "leads": return "leads";
       case "campaigns": return "campaigns";
       case "admissions": return "admissions";
@@ -4337,10 +4659,18 @@ function MainApp() {
     visible: false,
     reason: "",
     strikes: 0,
-    maxStrikes: 2,
+    maxStrikes: 4,
     isSubmitting: false,
     durationAway: 0,
   });
+
+  const [fullscreenGateRequired, setFullscreenGateRequired] = useState(false);
+
+  const isWebFullscreen = () => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return true;
+    const doc = document as any;
+    return !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
+  };
 
   const enterFullscreen = () => {
     if (Platform.OS === "web" && typeof document !== "undefined") {
@@ -4950,6 +5280,146 @@ function MainApp() {
               source={{ uri: previewImageUri }}
               style={{ width: "100%", height: 350, resizeMode: "contain", borderRadius: 8 }}
             />
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderFullscreenGateModal = () => {
+    if (!activeAttempt || !fullscreenGateRequired || proctorWarning.visible) return null;
+
+    if (Platform.OS === "web") {
+      return (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: "100vw",
+          height: "100vh",
+          backgroundColor: "rgba(10, 15, 30, 0.96)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2147483646,
+          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        }}>
+          <div style={{
+            width: "92%",
+            maxWidth: 480,
+            backgroundColor: "#ffffff",
+            borderRadius: 20,
+            padding: "36px 28px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            boxShadow: "0 25px 60px rgba(0,0,0,0.6)",
+            borderTop: "6px solid #c62828",
+            boxSizing: "border-box",
+            textAlign: "center"
+          }}>
+            <div style={{
+              width: 68,
+              height: 68,
+              borderRadius: 34,
+              backgroundColor: "#ffebee",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 16,
+              fontSize: 32,
+              color: "#c62828"
+            }}>
+              ⛶
+            </div>
+            <h3 style={{
+              margin: "0 0 10px 0",
+              fontSize: 21,
+              fontWeight: 900,
+              color: "#c62828"
+            }}>
+              Fullscreen Mode Required
+            </h3>
+            <p style={{
+              margin: "0 0 24px 0",
+              fontSize: 14,
+              color: "#424242",
+              lineHeight: "1.6",
+              fontWeight: 500
+            }}>
+              To maintain academic integrity and prevent tab switching or screenshot captures, this test must be taken in Fullscreen Mode.
+            </p>
+            <button
+              onClick={() => {
+                enterFullscreen();
+                setFullscreenGateRequired(false);
+              }}
+              style={{
+                backgroundColor: "#c62828",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: 12,
+                padding: "15px 28px",
+                fontSize: 15,
+                fontWeight: 800,
+                cursor: "pointer",
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                boxShadow: "0 4px 15px rgba(198,40,40,0.35)",
+                transition: "all 0.2s ease"
+              }}
+            >
+              <span>⛶ Click to Enter Fullscreen Exam</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Modal
+        visible={fullscreenGateRequired}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: "rgba(0, 0, 0, 0.9)",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 20
+        }}>
+          <View style={{
+            backgroundColor: "#ffffff",
+            borderRadius: 16,
+            padding: 24,
+            maxWidth: 440,
+            width: "100%",
+            alignItems: "center"
+          }}>
+            <Text style={{ fontSize: 18, fontWeight: "bold", color: "#c62828", marginBottom: 8, textAlign: "center" }}>
+              Fullscreen Mode Required
+            </Text>
+            <Text style={{ fontSize: 13, color: "#616161", textAlign: "center", marginBottom: 16, lineHeight: 18 }}>
+              To maintain examination integrity, please tap below to continue in fullscreen mode.
+            </Text>
+            <TouchableOpacity
+              style={{ backgroundColor: "#c62828", padding: 12, borderRadius: 8, width: "100%", alignItems: "center" }}
+              onPress={() => {
+                enterFullscreen();
+                setFullscreenGateRequired(false);
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontWeight: "bold" }}>Enter Fullscreen</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -5926,15 +6396,69 @@ function MainApp() {
       const remaining = Math.max(0, Math.floor((startMs - Date.now()) / 1000));
       setWaitingRoomTimeLeft(remaining);
       if (remaining <= 0) {
-        // Test has started — close waiting room and show the test card live
+        // Test has started — close waiting room and auto-launch exam directly
+        const targetTest = waitingRoomTest;
         setWaitingRoomTest(null);
         setNowTick(Date.now()); // force live-test list refresh
+        if (targetTest) {
+          setTimeout(() => {
+            startExam(targetTest);
+          }, 300);
+        }
       }
     };
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, [waitingRoomTest]);
+
+  // ── SCREENSHOT & SCREEN CAPTURE BLOCKING (Mobile & Web) ───────────────────
+  useEffect(() => {
+    if (!activeAttempt) return;
+
+    // 1. Mobile OS Screen Capture Guard (Android FLAG_SECURE & iOS Shield)
+    try {
+      ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    } catch (_) {}
+
+    // 2. Web Browser Guard (PrintScreen, Copy, ContextMenu, Shortcut Blocking)
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const handleWebKeyDown = (e: KeyboardEvent) => {
+        const isPrintScreen = e.key === "PrintScreen" || e.keyCode === 44;
+        const isCtrlCopy = (e.ctrlKey || e.metaKey) && ["c", "C", "p", "P", "s", "S", "u", "U", "a", "A"].includes(e.key);
+        const isDevTools = (e.ctrlKey || e.metaKey) && e.shiftKey && ["i", "I", "c", "C", "j", "J"].includes(e.key);
+
+        if (isPrintScreen || isCtrlCopy || isDevTools) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (isPrintScreen) {
+            try { navigator.clipboard?.writeText(""); } catch (_) {}
+            Alert.alert("⚠️ Screenshot Blocked", "Taking screenshots or screen captures is strictly prohibited during the examination!");
+          }
+        }
+      };
+
+      const handleContextMenu = (e: MouseEvent) => e.preventDefault();
+      const handleCopyCut = (e: ClipboardEvent) => e.preventDefault();
+
+      window.addEventListener("keydown", handleWebKeyDown, true);
+      window.addEventListener("contextmenu", handleContextMenu, true);
+      window.addEventListener("copy", handleCopyCut, true);
+      window.addEventListener("cut", handleCopyCut, true);
+
+      return () => {
+        window.removeEventListener("keydown", handleWebKeyDown, true);
+        window.removeEventListener("contextmenu", handleContextMenu, true);
+        window.removeEventListener("copy", handleCopyCut, true);
+        window.removeEventListener("cut", handleCopyCut, true);
+        try { ScreenCapture.allowScreenCaptureAsync().catch(() => {}); } catch (_) {}
+      };
+    }
+
+    return () => {
+      try { ScreenCapture.allowScreenCaptureAsync().catch(() => {}); } catch (_) {}
+    };
+  }, [activeAttempt]);
 
 
   // Proctoring tracker: enforces fullscreen, tracks tab-switches / focus loss and 4-strike auto-submit
@@ -5943,10 +6467,10 @@ function MainApp() {
     
     // Restore accumulated strike count from LocalStorage draft to survive page refreshes
     const draft = examLocalStorage.getDraft(activeAttempt.attemptId);
-    const restoredStrikes = typeof draft?.tabLeaveCount === "number" ? draft.tabLeaveCount : 0;
+    const restoredStrikes = typeof draft?.tabLeaveCount === "number" ? draft.tabLeaveCount : (tabLeaveCountRef.current || 0);
     tabLeaveCountRef.current = restoredStrikes;
     tabLeaveStartTimeRef.current = null;
-    lastViolationTimeRef.current = 0;
+    lastViolationTimeRef.current = Date.now();
     setProctorWarning({
       visible: restoredStrikes > 0,
       reason: restoredStrikes > 0 ? `Restored ${restoredStrikes} previous violation strike(s)` : "",
@@ -5958,6 +6482,11 @@ function MainApp() {
 
     // Enter fullscreen when starting/resuming exam
     enterFullscreen();
+    if (!isWebFullscreen()) {
+      setFullscreenGateRequired(true);
+    } else {
+      setFullscreenGateRequired(false);
+    }
 
     const triggerViolationStrike = (reason: string, awaySecs: number = 1) => {
       if (submitInProgressRef.current) return;
@@ -6057,7 +6586,10 @@ function MainApp() {
     const handleFullscreenChange = () => {
       const doc = document as any;
       const isFullscreen = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement);
-      if (!isFullscreen && !submitInProgressRef.current) {
+      if (isFullscreen) {
+        setFullscreenGateRequired(false);
+      } else if (!submitInProgressRef.current) {
+        setFullscreenGateRequired(true);
         onUserReturned("Exited fullscreen mode");
       }
     };
@@ -6655,7 +7187,7 @@ function MainApp() {
 
   // True Real-Time (0-second delay) Snapshot Listener for Recorded Classes
   useEffect(() => {
-    if (!user) return;
+    if (!user || activeTab !== "lms") return;
     try {
       const recordedQuery = query(collection(db, "recorded_classes"), where("isDeleted", "==", false));
       const unsubscribe = onSnapshot(
@@ -6673,11 +7205,11 @@ function MainApp() {
       );
       return () => unsubscribe();
     } catch (_) {}
-  }, [user]);
+  }, [user, activeTab]);
 
   // True Real-Time (0-second delay) Snapshot Listener for Daily Quizzes
   useEffect(() => {
-    if (!user) return;
+    if (!user || activeTab !== "daily_quizzes") return;
     try {
       const quizzesQuery = query(collection(db, "dailyQuizzes"), where("isDeleted", "==", false));
       const unsubscribe = onSnapshot(
@@ -6695,11 +7227,11 @@ function MainApp() {
       );
       return () => unsubscribe();
     } catch (_) {}
-  }, [user]);
+  }, [user, activeTab]);
 
   // True Real-Time (0-second delay) Snapshot Listener for Admissions
   useEffect(() => {
-    if (!user || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
+    if (!user || activeTab !== "admissions" || (user.role !== "admin" && user.role !== "super_admin" && user.role !== "staff")) return;
     try {
       const admissionsQuery = query(collection(db, "admissions"), where("isDeleted", "==", false));
       const unsubscribe = onSnapshot(
@@ -6717,7 +7249,7 @@ function MainApp() {
       );
       return () => unsubscribe();
     } catch (_) {}
-  }, [user]);
+  }, [user, activeTab]);
 
   // True Real-Time (0-second delay) Snapshot Listener for Leads & Custom Leads
   useEffect(() => {
@@ -9000,7 +9532,8 @@ function MainApp() {
   // Clears all active exam state — must be called on every login/logout to prevent session leaks
   const clearExamState = () => {
     exitFullscreen();
-    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 3, isSubmitting: false });
+    setFullscreenGateRequired(false);
+    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 4, isSubmitting: false });
     setActiveAttempt(null);
     setExamEndTime(null);
     setTimeLeft(0);
@@ -9279,6 +9812,50 @@ function MainApp() {
     );
   };
 
+  // Evaluate whether student is restricted/blocked from academy portal services
+  const isStudentFeeBlocked = (s: any) => {
+    if (!s) return false;
+    const tot = Number(s.totalFees) || 0;
+    const paid = Number(s.feesPaid) || 0;
+    const isPending = (tot - paid) > 0;
+
+    // 1. Manual hold by Super Admin
+    if (s.feeBlocked === true) return true;
+
+    // 2. Automatic deadline overdue hold
+    if (s.feeAlertActive && s.feeAlertDueDate && isPending) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (today > s.feeAlertDueDate) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Toggle manual fee block for a student
+  const handleToggleStudentFeeBlock = async (student: any) => {
+    const isCurrentlyBlocked = isStudentFeeBlocked(student);
+    const newBlockState = !isCurrentlyBlocked;
+    const actionText = newBlockState ? "Block" : "Unblock";
+    try {
+      const payload: any = {
+        feeBlocked: newBlockState,
+        updatedBy: user?.name || "admin"
+      };
+      if (!newBlockState) {
+        payload.feeAlertActive = false;
+      }
+      await api.put(`/erp/student/${student.id}`, payload);
+      setStudents(prev => prev.map(s => (s.id === student.id ? { ...s, ...payload } : s)));
+      Alert.alert(
+        "Access Status Updated",
+        `Service access for ${getStudentName(student)} has been ${newBlockState ? "restricted/blocked" : "unblocked and restored"}.`
+      );
+    } catch (err: any) {
+      Alert.alert("Error", err.message || `Failed to ${actionText.toLowerCase()} student.`);
+    }
+  };
+
   // Publish Fee Alert Notification with Due Date to Student Dashboard
   const handleSendFeeAlert = async () => {
     if (!feeAlertModalStudent) return;
@@ -9305,11 +9882,25 @@ function MainApp() {
         sentBy: user?.name || "admin"
       });
 
+      // Persist fee alert settings on student record
+      const studentUpdatePayload = {
+        feeAlertActive: true,
+        feeAlertDueDate: feeAlertDueDate.trim(),
+        feeAlertSentAt: new Date().toISOString(),
+        feeAlertNote: feeAlertNote.trim()
+      };
+      try {
+        await api.put(`/erp/student/${s.id}`, studentUpdatePayload);
+        setStudents(prev => prev.map(item => item.id === s.id ? { ...item, ...studentUpdatePayload } : item));
+      } catch (updateErr) {
+        console.warn("Failed to update student feeAlert record:", updateErr);
+      }
+
       setFeeAlertModalStudent(null);
       setFeeAlertDueDate("");
       setFeeAlertNote("");
       loadNotifications();
-      Alert.alert("Fee Alert Sent!", `Fee alert notification sent to ${getStudentName(s)} for due date ${feeAlertDueDate.trim()}.`);
+      Alert.alert("Fee Alert Sent!", `Fee alert notification sent to ${getStudentName(s)} with due date ${feeAlertDueDate.trim()}. Access will be held automatically if unpaid past the deadline.`);
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to send fee alert notification.");
     } finally {
@@ -9366,9 +9957,17 @@ function MainApp() {
         notifications: notificationsToSend
       });
 
+      const dueUpdate = {
+        feeAlertActive: true,
+        feeAlertDueDate: bulkFeeAlertDueDate.trim(),
+        feeAlertSentAt: new Date().toISOString()
+      };
+      await Promise.allSettled(pendingList.map(s => api.put(`/erp/student/${s.id}`, dueUpdate)));
+      setStudents(prev => prev.map(s => pendingList.some(p => p.id === s.id) ? { ...s, ...dueUpdate } : s));
+
       setBulkFeeAlertModalOpen(false);
       loadNotifications();
-      Alert.alert("Bulk Fee Alerts Sent!", `Successfully sent fee alert notifications to ${pendingList.length} student(s).`);
+      Alert.alert("Bulk Fee Alerts Sent!", `Successfully sent fee alert notifications to ${pendingList.length} student(s) with due date ${bulkFeeAlertDueDate.trim()}.`);
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to send bulk fee alerts.");
     } finally {
@@ -10296,14 +10895,15 @@ function MainApp() {
     const now = Date.now();
     // Use IST-aware parsing to avoid timezone scheduling bugs
     const startTimeMs = test.startTime ? parseTestTimeMs(test.startTime) : 0;
-    const endTimeMs = test.endTime ? parseTestTimeMs(test.endTime) : 0;
+    const durationMs = (test.durationMinutes ? Number(test.durationMinutes) : 60) * 60 * 1000;
+    const endTimeMs = test.endTime ? parseTestTimeMs(test.endTime) : (startTimeMs ? startTimeMs + durationMs : (test.createdAt ? parseTestTimeMs(test.createdAt) + durationMs : 0));
 
     if (attempt && (attempt.status === "submitted" || attempt.status === "evaluated" || attempt.isSubmitted)) {
       return { status: "completed", label: "Review Answers", attemptId: attempt.id || attempt.attemptId, disabled: false };
     }
 
     if (startTimeMs && now < startTimeMs) {
-      return { status: "scheduled", label: "Scheduled", disabled: true };
+      return { status: "scheduled", label: "Enter Waiting Room", disabled: false };
     }
 
     if (endTimeMs && now > endTimeMs) {
@@ -10422,6 +11022,12 @@ function MainApp() {
       await launchReview(statusInfo.attemptId!);
       return;
     }
+    if (statusInfo.status === "scheduled") {
+      setWaitingRoomTest(test);
+      return;
+    }
+    // Attempt fullscreen immediately on direct click gesture
+    enterFullscreen();
     setStartingTestId(test.id);
     if (statusInfo.status === "ongoing") {
       try {
@@ -10433,12 +11039,6 @@ function MainApp() {
         setTimeLeft(remSec);
         setExamEndTime(Date.now() + remSec * 1000);
         const attemptRes = res?.data || res;
-        setActiveAttempt({
-          ...attemptRes,
-          targetLanguages: test?.targetLanguages || attemptRes?.targetLanguages,
-          creationMode: test?.creationMode || attemptRes?.creationMode
-        });
-        enterFullscreen();
 
         // Load questions: prefer local draft if available, otherwise fetch from server
         let qList = localDraft?.questions || [];
@@ -10450,9 +11050,7 @@ function MainApp() {
         setCurrentQIdx(0);
         // Reset explored questions — mark Q1 as explored since it's auto-opened
         setExploredQuestions(new Set([0]));
-        tabLeaveCountRef.current = 0;
-
-        // Load progress & merge with local answers draft
+        // Load progress & merge with local answers draft and violation count
         const progressRes = await api.get(`/test-portal/examination/progress/${statusInfo.attemptId}`, { headers: { "user-id": user.userId } });
         const savedAns: Record<string, string> = { ...(localDraft?.answers || {}) };
         if (progressRes && progressRes.answers) {
@@ -10463,7 +11061,28 @@ function MainApp() {
           });
         }
         setSelectedAnswers(savedAns);
-        examLocalStorage.saveDraft(statusInfo.attemptId!, { attempt: res, questions: qList, answers: savedAns });
+
+        const restoredStrikes = Math.max(
+          typeof localDraft?.tabLeaveCount === "number" ? localDraft.tabLeaveCount : 0,
+          typeof progressRes?.data?.tabLeaveCount === "number" ? progressRes.data.tabLeaveCount : (typeof progressRes?.tabLeaveCount === "number" ? progressRes.tabLeaveCount : 0),
+          typeof res?.data?.tabLeaveCount === "number" ? res.data.tabLeaveCount : (typeof res?.tabLeaveCount === "number" ? res.tabLeaveCount : 0),
+          typeof attemptRes?.tabLeaveCount === "number" ? attemptRes.tabLeaveCount : 0
+        );
+        tabLeaveCountRef.current = restoredStrikes;
+
+        examLocalStorage.saveDraft(statusInfo.attemptId!, {
+          attempt: res,
+          questions: qList,
+          answers: savedAns,
+          tabLeaveCount: restoredStrikes
+        });
+
+        setActiveAttempt({
+          ...attemptRes,
+          targetLanguages: test?.targetLanguages || attemptRes?.targetLanguages,
+          creationMode: test?.creationMode || attemptRes?.creationMode
+        });
+        enterFullscreen();
       } catch (e: any) {
         // Clear the local draft so the button resets — the attempt may be expired or deleted
         if (statusInfo.attemptId) {
@@ -10535,10 +11154,13 @@ function MainApp() {
     setSelectedAnswers(newAnswers);
 
     // Instant local storage save so no answer is lost even if browser reloads or network drops
+    const existingDraft = examLocalStorage.getDraft(activeAttempt.attemptId) || {};
     examLocalStorage.saveDraft(activeAttempt.attemptId, {
+      ...existingDraft,
       attempt: activeAttempt,
       questions: attemptQuestions,
-      answers: newAnswers
+      answers: newAnswers,
+      tabLeaveCount: tabLeaveCountRef.current
     });
   };
 
@@ -10558,7 +11180,8 @@ function MainApp() {
 
     // IMMEDIATELY CLOSE THE EXAM VIEW so the student is never stuck on 00:00 or questions page
     exitFullscreen();
-    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 3, isSubmitting: false });
+    setFullscreenGateRequired(false);
+    setProctorWarning({ visible: false, reason: "", strikes: 0, maxStrikes: 4, isSubmitting: false });
     setActiveAttempt(null);
     setExamEndTime(0);
     setReviewLoading(true);
@@ -13658,6 +14281,126 @@ function MainApp() {
     );
   };
 
+  // ── WAITING ROOM (before scheduled test starts) ─────────────────────────
+  if (waitingRoomTest) {
+    const wh = Math.floor(waitingRoomTimeLeft / 3600);
+    const wm = Math.floor((waitingRoomTimeLeft % 3600) / 60);
+    const ws = waitingRoomTimeLeft % 60;
+    const countdownStr = `${String(wh).padStart(2, "0")}:${String(wm).padStart(2, "0")}:${String(ws).padStart(2, "0")}`;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: "#1a1a2e" }}>
+        <StatusBar style="light" />
+        {/* Header */}
+        <View style={{ backgroundColor: "#c62828", padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }} numberOfLines={1}>{waitingRoomTest.title}</Text>
+            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11, marginTop: 2 }}>⏳ Waiting Room — Test hasn't started yet</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setWaitingRoomTest(null)}
+            style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, padding: 8, marginLeft: 12 }}
+          >
+            <Ionicons name="close" size={20} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          {/* Countdown */}
+          <View style={{ alignItems: "center", marginVertical: 32 }}>
+            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginBottom: 12 }}>TEST STARTS IN</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[{ val: wh, label: "HRS" }, { val: wm, label: "MIN" }, { val: ws, label: "SEC" }].map(({ val, label }) => (
+                <View key={label} style={{ alignItems: "center" }}>
+                  <View style={{ backgroundColor: "#c62828", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12, minWidth: 68, alignItems: "center" }}>
+                    <Text style={{ color: "#ffffff", fontSize: 40, fontWeight: "900", fontVariant: ["tabular-nums"] }}>{String(val).padStart(2, "0")}</Text>
+                  </View>
+                  <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginTop: 6, letterSpacing: 1 }}>{label}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, marginTop: 18 }}>
+              Starts: {new Date(parseTestTimeMs(waitingRoomTest.startTime)).toLocaleString()}
+            </Text>
+          </View>
+
+          {/* Color Legend Card */}
+          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18, marginBottom: 16 }}>
+            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📊 QUESTION NAVIGATOR — COLOR GUIDE</Text>
+            {[
+              { color: "#c62828", label: "Current Question", desc: "The question currently displayed" },
+              { color: "#2e7d32", label: "Answered", desc: "You selected an answer for this question" },
+              { color: "#f57c00", label: "Visited — No Answer", desc: "You viewed it but didn't select an answer" },
+              { color: "#e0e0e0", label: "Not Visited", desc: "You haven't opened this question yet" },
+            ].map(item => (
+              <View key={item.color} style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: item.color, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)" }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 13 }}>{item.label}</Text>
+                  <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>{item.desc}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Instructions Card */}
+          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18 }}>
+            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT EXAMINATION RULES & INSTRUCTIONS</Text>
+            {[
+              { icon: "📱", text: "Phone Call & DND Warning: Answering or receiving phone calls puts the browser in the background and logs a cheating violation strike. Please enable 'Do Not Disturb' (DND) mode before starting." },
+              { icon: "⚠️", text: "4-Strike Proctoring Policy: You get 3 warning chances for switching tabs or losing window focus. On the 4th violation, your test will AUTO-SUBMIT automatically." },
+              { icon: "📶", text: "Offline Answer Persistence: If your internet drops, keep answering! Your responses are saved safely in your browser storage and will sync & evaluate automatically when reconnected." },
+              { icon: "🚫", text: "No Tab Switch or Window Minimize: Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to academy admins." },
+              { icon: "🔒", text: "Copying & Shortcut Block: Right-click, Copy, Cut, and PrintScreen operations are disabled during the test." },
+              { icon: "✅", text: "Question Exploration: You MUST visit ALL questions before the Submit button becomes available." },
+              { icon: "⏰", text: "Auto-Submit on Time Expiry: The exam auto-submits when the timer reaches 00:00. Ensure you submit your final answers on time." },
+            ].map((item, i) => (
+              <View key={i} style={{ flexDirection: "row", marginBottom: 12, gap: 10 }}>
+                <Text style={{ fontSize: 16 }}>{item.icon}</Text>
+                <Text style={{ flex: 1, color: "rgba(255,255,255,0.85)", fontSize: 12, lineHeight: 18 }}>{item.text}</Text>
+              </View>
+            ))}
+          </View>
+
+          {waitingRoomTimeLeft <= 0 ? (
+            <TouchableOpacity
+              onPress={() => {
+                const target = waitingRoomTest;
+                setWaitingRoomTest(null);
+                if (target) {
+                  enterFullscreen();
+                  startExam(target);
+                }
+              }}
+              style={{
+                backgroundColor: "#2e7d32",
+                paddingVertical: 14,
+                paddingHorizontal: 24,
+                borderRadius: 12,
+                marginTop: 20,
+                alignItems: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 6,
+                elevation: 6
+              }}
+            >
+              <Text style={{ color: "#ffffff", fontWeight: "900", fontSize: 16 }}>
+                🚀 Test is Live — Click to Enter Exam (Fullscreen)
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ marginTop: 24, backgroundColor: "rgba(198,40,40,0.15)", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "rgba(198,40,40,0.4)" }}>
+              <Text style={{ color: "#ffcdd2", fontSize: 12, textAlign: "center", lineHeight: 18, fontWeight: "600" }}>
+                ✨ The exam will start automatically when the countdown reaches 00:00:00.{"\n"}Stay on this page!
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   // When activeAttempt, reviewMode, or studyModalVisible is set, skip this block so those screens can render
   if (!user && !activeAttempt && !reviewMode && !studyModalVisible) {
     return (
@@ -15899,41 +16642,57 @@ function MainApp() {
           )}
 
           {/* ── FREE TESTS TAB ────────────────────────────────────────────────── */}
-          {guestContentTab === "tests" && user && (
-            <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
-                <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#1565c0" }} />
-                <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Mock Tests</Text>
-              </View>
-              {tests.length === 0 ? (
-                <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
-                  <Ionicons name="document-text-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
-                  <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free mock tests available yet.</Text>
+          {guestContentTab === "tests" && user && (() => {
+            const freeMockTests = tests.filter((t: any) => {
+              if (t.isDeleted || t.published === false) return false;
+              const aud = t.targetAudience || "all";
+              if (aud !== "all" && aud !== "free") return false;
+              const statusInfo = getTestStatusForStudent(t);
+              if (statusInfo.status === "expired") return false;
+              return true;
+            });
+
+            return (
+              <View style={{ paddingHorizontal: 16, gap: 14, marginTop: 16 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                  <View style={{ width: 4, height: 20, borderRadius: 2, backgroundColor: "#1565c0" }} />
+                  <Text style={{ fontSize: 16, fontWeight: "800", color: darkMode ? "#fff" : "#212121" }}>Free Mock Tests</Text>
                 </View>
-              ) : (
-                tests.map((t: any) => {
-                  const statusInfo = getTestStatusForStudent(t);
-                  return (
-                    <View key={t.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#1565c0" }]}>
-                      <Text style={[styles.noticeTitle, darkMode && styles.noticeTitleDark]}>{t.title}</Text>
-                      {t.description ? <Text style={[styles.noticeContent, darkMode && styles.noticeContentDark, { marginBottom: 6 }]}>{t.description}</Text> : null}
-                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-                        {t.startTime && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="play-circle-outline" size={12} color="#1565c0" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{new Date(t.startTime).toLocaleString()}</Text></View>}
-                        {t.durationMinutes && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="time-outline" size={12} color="#c62828" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{t.durationMinutes} mins</Text></View>}
+                {freeMockTests.length === 0 ? (
+                  <View style={[styles.card, darkMode && { backgroundColor: "#1e1e1e" }, { alignItems: "center", padding: 28 }]}>
+                    <Ionicons name="document-text-outline" size={48} color={darkMode ? "#555" : "#bdbdbd"} />
+                    <Text style={[styles.emptyText, darkMode && { color: "#616161" }]}>No free mock tests available right now.</Text>
+                  </View>
+                ) : (
+                  freeMockTests.map((t: any) => {
+                    const statusInfo = getTestStatusForStudent(t);
+                    return (
+                      <View key={t.id} style={[styles.card, darkMode && { backgroundColor: "#1e1e1e", borderColor: "#2a2a2a" }, { borderLeftWidth: 4, borderLeftColor: "#1565c0" }]}>
+                        <Text style={[styles.noticeTitle, darkMode && styles.noticeTitleDark]}>{t.title}</Text>
+                        {t.description ? <Text style={[styles.noticeContent, darkMode && styles.noticeContentDark, { marginBottom: 6 }]}>{t.description}</Text> : null}
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                          {t.startTime && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="play-circle-outline" size={12} color="#1565c0" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{new Date(t.startTime).toLocaleString()}</Text></View>}
+                          {t.durationMinutes && <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: darkMode ? "#252525" : "#f5f5f5", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}><Ionicons name="time-outline" size={12} color="#c62828" /><Text style={{ fontSize: 11, color: darkMode ? "#9e9e9e" : "#616161" }}>{t.durationMinutes} mins</Text></View>}
+                        </View>
+                        <TouchableOpacity
+                          disabled={statusInfo.disabled || startingTestId === t.id}
+                          onPress={() => {
+                            if (statusInfo.status !== "scheduled" && statusInfo.status !== "completed") {
+                              enterFullscreen();
+                            }
+                            startExam(t);
+                          }}
+                          style={[styles.primaryBtn, { backgroundColor: statusInfo.status === "scheduled" ? "#f57c00" : statusInfo.disabled ? "#bdbdbd" : "#1565c0", marginVertical: 0 }]}
+                        >
+                          {startingTestId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnTxt}>{statusInfo.label}</Text>}
+                        </TouchableOpacity>
                       </View>
-                      <TouchableOpacity
-                        disabled={statusInfo.disabled || startingTestId === t.id}
-                        onPress={() => startExam(t)}
-                        style={[styles.primaryBtn, { backgroundColor: statusInfo.disabled ? "#bdbdbd" : "#1565c0", marginVertical: 0 }]}
-                      >
-                        {startingTestId === t.id ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnTxt}>{statusInfo.label}</Text>}
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })
-              )}
-            </View>
-          )}
+                    );
+                  })
+                )}
+              </View>
+            );
+          })()}
 
           {/* ── APPLY TAB — Per-Course Application Forms ─────────────────────── */}
           {guestContentTab === "apply" && (
@@ -16264,96 +17023,6 @@ function MainApp() {
   }
 
   // Render main screen
-
-  // ── WAITING ROOM (before scheduled test starts) ─────────────────────────
-  if (waitingRoomTest) {
-    const wh = Math.floor(waitingRoomTimeLeft / 3600);
-    const wm = Math.floor((waitingRoomTimeLeft % 3600) / 60);
-    const ws = waitingRoomTimeLeft % 60;
-    const countdownStr = `${String(wh).padStart(2, "0")}:${String(wm).padStart(2, "0")}:${String(ws).padStart(2, "0")}`;
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: "#1a1a2e" }}>
-        <StatusBar style="light" />
-        {/* Header */}
-        <View style={{ backgroundColor: "#c62828", padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 15 }} numberOfLines={1}>{waitingRoomTest.title}</Text>
-            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 11, marginTop: 2 }}>⏳ Waiting Room — Test hasn't started yet</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setWaitingRoomTest(null)}
-            style={{ backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, padding: 8, marginLeft: 12 }}
-          >
-            <Ionicons name="close" size={20} color="#ffffff" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-          {/* Countdown */}
-          <View style={{ alignItems: "center", marginVertical: 32 }}>
-            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginBottom: 12 }}>TEST STARTS IN</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {[{ val: wh, label: "HRS" }, { val: wm, label: "MIN" }, { val: ws, label: "SEC" }].map(({ val, label }) => (
-                <View key={label} style={{ alignItems: "center" }}>
-                  <View style={{ backgroundColor: "#c62828", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12, minWidth: 68, alignItems: "center" }}>
-                    <Text style={{ color: "#ffffff", fontSize: 40, fontWeight: "900", fontVariant: ["tabular-nums"] }}>{String(val).padStart(2, "0")}</Text>
-                  </View>
-                  <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginTop: 6, letterSpacing: 1 }}>{label}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, marginTop: 18 }}>
-              Starts: {new Date(parseTestTimeMs(waitingRoomTest.startTime)).toLocaleString()}
-            </Text>
-          </View>
-
-          {/* Color Legend Card */}
-          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18, marginBottom: 16 }}>
-            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📊 QUESTION NAVIGATOR — COLOR GUIDE</Text>
-            {[
-              { color: "#c62828", label: "Current Question", desc: "The question currently displayed" },
-              { color: "#2e7d32", label: "Answered", desc: "You selected an answer for this question" },
-              { color: "#f57c00", label: "Visited — No Answer", desc: "You viewed it but didn't select an answer" },
-              { color: "#e0e0e0", label: "Not Visited", desc: "You haven't opened this question yet" },
-            ].map(item => (
-              <View key={item.color} style={{ flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 }}>
-                <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: item.color, borderWidth: 2, borderColor: "rgba(255,255,255,0.2)" }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 13 }}>{item.label}</Text>
-                  <Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>{item.desc}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Instructions Card */}
-          <View style={{ backgroundColor: "rgba(255,255,255,0.07)", borderRadius: 16, padding: 18 }}>
-            <Text style={{ color: "#ffffff", fontWeight: "800", fontSize: 13, marginBottom: 14, letterSpacing: 0.5 }}>📋 IMPORTANT EXAMINATION RULES & INSTRUCTIONS</Text>
-            {[
-              { icon: "📱", text: "Phone Call & DND Warning: Answering or receiving phone calls puts the browser in the background and logs a cheating violation strike. Please enable 'Do Not Disturb' (DND) mode before starting." },
-              { icon: "⚠️", text: "4-Strike Proctoring Policy: You get 3 warning chances for switching tabs or losing window focus. On the 4th violation, your test will AUTO-SUBMIT automatically." },
-              { icon: "📶", text: "Offline Answer Persistence: If your internet drops, keep answering! Your responses are saved safely in your browser storage and will sync & evaluate automatically when reconnected." },
-              { icon: "🚫", text: "No Tab Switch or Window Minimize: Do NOT switch browser tabs or minimize the window — every tab-switch is logged and visible to academy admins." },
-              { icon: "🔒", text: "Copying & Shortcut Block: Right-click, Copy, Cut, and PrintScreen operations are disabled during the test." },
-              { icon: "✅", text: "Question Exploration: You MUST visit ALL questions before the Submit button becomes available." },
-              { icon: "⏰", text: "Auto-Submit on Time Expiry: The exam auto-submits when the timer reaches 00:00. Ensure you submit your final answers on time." },
-            ].map((item, i) => (
-              <View key={i} style={{ flexDirection: "row", marginBottom: 12, gap: 10 }}>
-                <Text style={{ fontSize: 16 }}>{item.icon}</Text>
-                <Text style={{ flex: 1, color: "rgba(255,255,255,0.85)", fontSize: 12, lineHeight: 18 }}>{item.text}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={{ marginTop: 24, backgroundColor: "rgba(198,40,40,0.15)", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "rgba(198,40,40,0.4)" }}>
-            <Text style={{ color: "#ffcdd2", fontSize: 12, textAlign: "center", lineHeight: 18, fontWeight: "600" }}>
-              ✨ The exam will start automatically when the countdown reaches 00:00:00.{"\n"}Stay on this page!
-            </Text>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
 
   if (activeAttempt) {
     const allExplored = exploredQuestions.size >= attemptQuestions.length;
@@ -16845,6 +17514,7 @@ function MainApp() {
         )}
         {renderUniversalImagePreviewModal()}
         {renderProctorWarningModal()}
+        {renderFullscreenGateModal()}
       </SafeAreaView>
     );
   }
@@ -18866,9 +19536,16 @@ function MainApp() {
 
                         const liveTests = filteredTests.filter((t: any) => {
                           const startMs = t.startTime ? parseTestTimeMs(t.startTime) : 0;
-                          const endMs = t.endTime ? parseTestTimeMs(t.endTime) : Infinity;
+                          const durationMs = (t.durationMinutes ? Number(t.durationMinutes) : 60) * 60 * 1000;
+                          const endMs = t.endTime ? parseTestTimeMs(t.endTime) : (startMs ? startMs + durationMs : (t.createdAt ? parseTestTimeMs(t.createdAt) + durationMs : 0));
                           if (startMs && now < startMs) return false; // not started yet
-                          if (endMs !== Infinity && now > endMs) return false; // already ended
+                          if (endMs && now > endMs) return false; // already ended
+                          if (!isAdmin) {
+                            const hasCompleted = studentAttempts.some((a: any) =>
+                              String(a.testId) === String(t.id || t._id) && (a.status === "submitted" || a.status === "evaluated" || a.isSubmitted)
+                            );
+                            if (hasCompleted) return false;
+                          }
                           return true;
                         });
                         const scheduledTests = filteredTests.filter((t: any) => {
@@ -19059,19 +19736,12 @@ function MainApp() {
                                       const targetBatchName = t.targetBatch;
                                       const targetModes = targetBatchName && myStudent?.batchModes ? (myStudent.batchModes[targetBatchName] || []) : [];
 
-                                      const isOfflineForThisTest = !isAdmin && (
-                                        targetModes.length > 0
-                                          ? (targetModes.includes("offline") && !targetModes.includes("online") && !targetModes.includes("recorded"))
-                                          : (
-                                            (myStudent?.type || "").toLowerCase() === "offline" ||
-                                            (myStudent?.mode || "").toLowerCase() === "offline" ||
-                                            (myStudent?.admissionType || "").toLowerCase() === "offline" ||
-                                            myStudent?.isOffline === true
-                                          )
-                                      );
-
-                                      const bypassOfflineRequest = !!t.allowOfflineDirectly;
-                                      const requiresPermissionRequest = isOfflineForThisTest && !bypassOfflineRequest;
+                                      const studentType = (myStudent?.type || myStudent?.mode || myStudent?.admissionType || user?.type || "").toLowerCase();
+                                       const isOfflineStudent = !isAdmin && (
+                                         studentType === "offline" ||
+                                         myStudent?.isOffline === true
+                                       );
+                                       const requiresPermissionRequest = isOfflineStudent && !t.allowOfflineDirectly;
 
                                       const matchingReqs = requiresPermissionRequest
                                         ? offlineTestRequests.filter((r: any) => {
@@ -19212,7 +19882,12 @@ function MainApp() {
                                           ) : (
                                             <TouchableOpacity
                                               disabled={statusInfo.disabled || startingTestId === t.id || reviewLoading}
-                                              onPress={() => startExam(t)}
+                                              onPress={() => {
+                                                if (statusInfo.status !== "scheduled" && statusInfo.status !== "completed") {
+                                                  enterFullscreen();
+                                                }
+                                                startExam(t);
+                                              }}
                                               style={[styles.primaryBtn, { marginTop: 10, flexDirection: "row", gap: 6 }, (statusInfo.disabled) && { backgroundColor: "#bdbdbd" }]}
                                             >
                                               {startingTestId === t.id || (statusInfo.status === "completed" && reviewLoading)
@@ -19233,9 +19908,59 @@ function MainApp() {
                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4, marginBottom: 2 }}>
                                       <Ionicons name="time-outline" size={14} color="#f57c00" />
                                       <Text style={{ fontSize: 13, fontWeight: "800", color: "#f57c00" }}>UPCOMING TESTS ({scheduledTests.length})</Text>
-                                    </View>
-                                    {scheduledTests.map((t: any) => (
-                                      <View key={t.id} style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#f57c00", opacity: 0.85 }]}>
+                                     </View>
+                                     {scheduledTests.map((t: any) => {
+                                       const myStudent = getLoggedInStudent(user, students);
+                                       const targetBatchName = t.targetBatch;
+                                       const targetModes = targetBatchName && myStudent?.batchModes ? (myStudent.batchModes[targetBatchName] || []) : [];
+
+                                       const studentType = (myStudent?.type || myStudent?.mode || myStudent?.admissionType || user?.type || "").toLowerCase();
+                                       const isOfflineStudent = !isAdmin && (
+                                         studentType === "offline" ||
+                                         myStudent?.isOffline === true
+                                       );
+                                       const requiresPermissionRequest = isOfflineStudent && !t.allowOfflineDirectly;
+
+                                       /* requiresPermissionRequest computed above */
+
+                                       const matchingReqs = requiresPermissionRequest
+                                         ? offlineTestRequests.filter((r: any) => {
+                                           const rTestId = String(r.testId || "").trim();
+                                           const tId = String(t.id || t._id || "").trim();
+                                           if (rTestId !== tId) return false;
+
+                                           const rSId = String(r.studentId || "").trim().toLowerCase();
+                                           const rRoll = String(r.rollNumber || "").trim().toLowerCase();
+                                           const rUname = String(r.username || "").trim().toLowerCase();
+
+                                           const mySId = String(myStudent?.id || "").trim().toLowerCase();
+                                           const myRoll = String(myStudent?.rollNumber || "").trim().toLowerCase();
+                                           const myUId = String(user?.userId || "").trim().toLowerCase();
+                                           const myUname = String(user?.username || "").trim().toLowerCase();
+
+                                           return (
+                                             (mySId && rSId === mySId) ||
+                                             (myUId && rSId === myUId) ||
+                                             (myRoll && (rRoll === myRoll || rSId === myRoll)) ||
+                                             (myUname && (rUname === myUname || rSId === myUname || rRoll === myUname))
+                                           );
+                                         })
+                                         : [];
+
+                                       const hasApprovedReq = matchingReqs.some((r: any) => r.status === "approved");
+                                       const hasPendingReq = !hasApprovedReq && matchingReqs.some((r: any) => r.status === "pending");
+                                       const hasRejectedReq = !hasApprovedReq && !hasPendingReq && matchingReqs.some((r: any) => r.status === "rejected");
+
+                                       const req = hasApprovedReq
+                                         ? { status: "approved" }
+                                         : hasPendingReq
+                                           ? { status: "pending" }
+                                           : hasRejectedReq
+                                             ? { status: "rejected" }
+                                             : null;
+
+                                       return (
+                                         <View key={t.id} style={[styles.card, { borderLeftWidth: 4, borderLeftColor: "#f57c00", opacity: 0.85 }]}>
                                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
                                           <Text style={[styles.noticeTitle, { flex: 1 }]}>{t.title}</Text>
                                           <View style={{ backgroundColor: "#fff8e1", borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 8 }}>
@@ -19256,16 +19981,62 @@ function MainApp() {
                                             <Text style={styles.primaryBtnTxt}>Not Started Yet</Text>
                                           </TouchableOpacity>
                                         ) : (
-                                          <TouchableOpacity
-                                            onPress={() => setWaitingRoomTest(t)}
-                                            style={[styles.primaryBtn, { marginTop: 10, backgroundColor: "#f57c00", flexDirection: "row", gap: 6 }]}
-                                          >
-                                            <Ionicons name="hourglass-outline" size={15} color="#fff" />
-                                            <Text style={styles.primaryBtnTxt}>Enter Waiting Room</Text>
-                                          </TouchableOpacity>
-                                        )}
-                                      </View>
-                                    ))}
+                                          requiresPermissionRequest && req?.status !== "approved" ? (
+                                             req?.status === "pending" ? (
+                                               <View style={{ marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: "#fff3e0", borderWidth: 1, borderColor: "#ffe0b2", flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                                 <ActivityIndicator size="small" color="#e65100" />
+                                                 <Text style={{ fontSize: 12, fontWeight: "bold", color: "#e65100", flex: 1 }}>
+                                                   ⏳ Permission Requested — Awaiting Admin Approval
+                                                 </Text>
+                                               </View>
+                                             ) : (
+                                               <TouchableOpacity
+                                                 onPress={async () => {
+                                                   const cleanSId = String(myStudent?.id || user?.userId || user?.username || "std").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+                                                   const reqDocId = `req_${t.id}_${cleanSId}`;
+
+                                                   const reqObj = {
+                                                     id: reqDocId,
+                                                     testId: t.id,
+                                                     testTitle: t.title,
+                                                     studentId: myStudent?.id || user?.userId || user?.username || cleanSId,
+                                                     studentName: getStudentName(myStudent) || user?.fullName || user?.username || "Offline Student",
+                                                     rollNumber: myStudent?.rollNumber || user?.username || "—",
+                                                     batch: myStudent?.batch || myStudent?.batchName || "Offline",
+                                                     username: user?.username || "",
+                                                     status: "pending",
+                                                     requestedAt: new Date().toISOString()
+                                                   };
+                                                   try {
+                                                     await api.post("/test-portal/test-creation/permission-requests", reqObj);
+                                                     try {
+                                                       await setDoc(doc(db, "offlineTestPermissionRequests", reqDocId), reqObj, { merge: true });
+                                                     } catch (_) { }
+                                                     setOfflineTestRequests(prev => [reqObj, ...prev.filter((r: any) => !(String(r.testId || '') === String(t.id || '') && (r.studentId === reqObj.studentId || r.rollNumber === reqObj.rollNumber || r.id === reqDocId)))]);
+                                                     Alert.alert("Permission Requested", "Your request to attend this test has been sent to Super Admin / Admin for approval.");
+                                                   } catch (e: any) {
+                                                     Alert.alert("Error", e.message || "Failed to send permission request. Please check your connection.");
+                                                   }
+                                                 }}
+                                                 style={[styles.primaryBtn, { marginTop: 10, backgroundColor: "#e65100", flexDirection: "row", gap: 6 }]}
+                                               >
+                                                 <Ionicons name="hand-right-outline" size={18} color="#fff" />
+                                                 <Text style={styles.primaryBtnTxt}>{req?.status === "rejected" ? "❌ Request Rejected (Tap to Re-send)" : "✋ Request Permission to Attend Test"}</Text>
+                                               </TouchableOpacity>
+                                             )
+                                           ) : (
+                                             <TouchableOpacity
+                                               onPress={() => setWaitingRoomTest(t)}
+                                               style={[styles.primaryBtn, { marginTop: 10, backgroundColor: "#f57c00", flexDirection: "row", gap: 6 }]}
+                                             >
+                                               <Ionicons name="hourglass-outline" size={15} color="#fff" />
+                                               <Text style={styles.primaryBtnTxt}>Enter Waiting Room</Text>
+                                              </TouchableOpacity>
+                                            )
+                                         )}
+                                       </View>
+                                     );
+                                   })}
                                   </>
                                 )}
                               </>
@@ -25681,28 +26452,64 @@ function MainApp() {
                                         const paid = Number(s.feesPaid) || 0;
                                         const pending = tot - paid;
                                         const isPending = pending > 0;
+                                        const isBlocked = isStudentFeeBlocked(s);
+                                        const isOverdue = s.feeAlertActive && s.feeAlertDueDate && isPending && (new Date().toISOString().slice(0, 10) > s.feeAlertDueDate);
+
                                         return (
                                           <View key={s.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderColor: "#eeeeee", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                                            <View style={{ flex: 1 }}>
+                                            <View style={{ flex: 1, paddingRight: 8 }}>
                                               <Text style={{ fontWeight: "bold", color: "#212121", fontSize: 13 }}>{getStudentName(s)}</Text>
                                               <Text style={{ fontSize: 11, color: "#757575", marginTop: 1 }}>Roll: {s.rollNumber || s.loginUsername || "N/A"} | Batch: {s.batch || "N/A"}</Text>
                                               <Text style={{ fontSize: 11, color: "#757575" }}>Total: ₹{tot.toLocaleString()} | Paid: ₹{paid.toLocaleString()}</Text>
                                             </View>
                                             <View style={{ alignItems: "flex-end", gap: 6 }}>
-                                              {isPending ? (
-                                                <View style={{ backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
-                                                  <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending: ₹{pending.toLocaleString()}</Text>
-                                                </View>
-                                              ) : tot > 0 ? (
-                                                <View style={{ backgroundColor: "#e8f5e9", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
-                                                  <Text style={{ color: "#2e7d32", fontSize: 11, fontWeight: "bold" }}>Paid in Full</Text>
-                                                </View>
-                                              ) : (
-                                                <View style={{ backgroundColor: "#f5f5f5", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
-                                                  <Text style={{ color: "#757575", fontSize: 11 }}>No Fees Set</Text>
-                                                </View>
-                                              )}
-                                              <View style={{ flexDirection: "row", gap: 6 }}>
+                                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                {isPending ? (
+                                                  <View style={{ backgroundColor: "#ffebee", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
+                                                    <Text style={{ color: "#c62828", fontSize: 11, fontWeight: "bold" }}>Pending: ₹{pending.toLocaleString()}</Text>
+                                                  </View>
+                                                ) : tot > 0 ? (
+                                                  <View style={{ backgroundColor: "#e8f5e9", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
+                                                    <Text style={{ color: "#2e7d32", fontSize: 11, fontWeight: "bold" }}>Paid in Full</Text>
+                                                  </View>
+                                                ) : (
+                                                  <View style={{ backgroundColor: "#f5f5f5", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 2 }}>
+                                                    <Text style={{ color: "#757575", fontSize: 11 }}>No Fees Set</Text>
+                                                  </View>
+                                                )}
+                                                {isBlocked ? (
+                                                  <View style={{ backgroundColor: "#fee2e2", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: "#fca5a5" }}>
+                                                    <Text style={{ color: "#b91c1c", fontSize: 10, fontWeight: "bold" }}>
+                                                      {isOverdue ? "🚫 Overdue Block" : "🚫 Blocked"}
+                                                    </Text>
+                                                  </View>
+                                                ) : (
+                                                  <View style={{ backgroundColor: "#dcfce7", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                                                    <Text style={{ color: "#15803d", fontSize: 10, fontWeight: "bold" }}>🟢 Active Access</Text>
+                                                  </View>
+                                                )}
+                                              </View>
+
+                                              <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                                {/* Manual Block / Unblock Toggle Button */}
+                                                <TouchableOpacity
+                                                  onPress={() => handleToggleStudentFeeBlock(s)}
+                                                  style={{
+                                                    paddingHorizontal: 8,
+                                                    paddingVertical: 4,
+                                                    backgroundColor: isBlocked ? "#15803d" : "#475569",
+                                                    borderRadius: 4,
+                                                    flexDirection: "row",
+                                                    alignItems: "center",
+                                                    gap: 3
+                                                  }}
+                                                >
+                                                  <Ionicons name={isBlocked ? "lock-open-outline" : "lock-closed-outline"} size={11} color="#ffffff" />
+                                                  <Text style={{ color: "#ffffff", fontSize: 10, fontWeight: "bold" }}>
+                                                    {isBlocked ? "Unblock Access" : "Block Access"}
+                                                  </Text>
+                                                </TouchableOpacity>
+
                                                 {isPending && (
                                                   <TouchableOpacity
                                                     onPress={() => {
@@ -28828,174 +29635,7 @@ function MainApp() {
                             </View>
 
                             {/* Collapsible Apps Script Code Guide */}
-                            <View style={[styles.card, darkMode && styles.cardDark, { padding: 18, gap: 10 }]}>
-                              <TouchableOpacity
-                                onPress={() => setShowAppsScriptGuide(!showAppsScriptGuide)}
-                                style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                              >
-                                <Text style={{ fontSize: 14, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>
-                                  Apps Script Deployment Guide
-                                </Text>
-                                <Ionicons name={showAppsScriptGuide ? "chevron-up" : "chevron-down"} size={18} color="#757575" />
-                              </TouchableOpacity>
-
-                              {showAppsScriptGuide && (() => {
-                                const appsScriptTemplate = `function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var rootFolderId = data.rootFolderId;
-    var rootFolder = rootFolderId ? DriveApp.getFolderById(rootFolderId) : DriveApp.getRootFolder();
-    
-    // Support Action: test connection
-    if (data.test) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        status: "success",
-        folderName: rootFolder.getName(),
-        message: 'Connected successfully! Folder: "' + rootFolder.getName() + '"'
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    // Support Action: delete
-    if (data.action === "delete" && data.fileId) {
-      DriveApp.getFileById(data.fileId).setTrashed(true);
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        message: "File deleted successfully"
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    if (!data.fileName || !data.mimeType || !data.base64) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: false,
-        error: "Missing required properties: fileName, mimeType, or base64"
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    var activeFolder = rootFolder;
-    
-    // Support recursive sub-folder paths
-    if (data.subPath) {
-      var parts = data.subPath.split("/").filter(Boolean);
-      for (var i = 0; i < parts.length; i++) {
-        var partName = parts[i].trim();
-        var subFolders = activeFolder.getFoldersByName(partName);
-        if (subFolders.hasNext()) {
-          activeFolder = subFolders.next();
-        } else {
-          activeFolder = activeFolder.createFolder(partName);
-        }
-      }
-    }
-    
-    // Decoded base64 bytes
-    var decoded = Utilities.base64Decode(data.base64);
-    var blob = Utilities.newBlob(decoded, data.mimeType, data.fileName);
-    var file = activeFolder.createFile(blob);
-    
-    // Set view permissions
-    file.setSharing(DriveApp.Access.ANYONE, DriveApp.Permission.VIEW);
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      success: true,
-      fileId: file.getId(),
-      name: file.getName(),
-      previewUrl: "https://drive.google.com/file/d/" + file.getId() + "/preview",
-      webViewLink: file.getUrl()
-    })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false,
-      error: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-                                return (
-                                  <View style={{ gap: 12, marginTop: 6, borderTopWidth: 1, borderTopColor: darkMode ? "#333" : "#eee", paddingTop: 10 }}>
-                                    <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", lineHeight: 16 }}>
-                                      Follow these steps to deploy your Google Apps Script bypass:
-                                    </Text>
-
-                                    <View style={{ gap: 8, paddingLeft: 6 }}>
-                                      <TouchableOpacity onPress={() => Linking.openURL("https://script.google.com")} style={{ paddingVertical: 4 }}>
-                                        <Text style={{ fontSize: 11, color: "#1976d2", textDecorationLine: "underline", fontWeight: "bold" }}>
-                                          1. Click here to open Google Apps Script dashboard (script.google.com)
-                                        </Text>
-                                      </TouchableOpacity>
-                                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginVertical: 4 }}>
-                                        <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", flex: 1, minWidth: 200 }}>
-                                          2. Click <Text style={{ fontWeight: "bold" }}>"New Project"</Text> and replace all code in <Text style={{ fontWeight: "bold" }}>Code.gs</Text> with the following script:
-                                        </Text>
-                                        <TouchableOpacity
-                                          onPress={() => {
-                                            if (typeof navigator !== "undefined" && navigator.clipboard) {
-                                              navigator.clipboard.writeText(appsScriptTemplate);
-                                            }
-                                            setScriptCopied(true);
-                                            setTimeout(() => setScriptCopied(false), 3000);
-                                          }}
-                                          style={{
-                                            flexDirection: "row",
-                                            alignItems: "center",
-                                            gap: 6,
-                                            backgroundColor: scriptCopied ? "#2e7d32" : "#e64a19",
-                                            paddingHorizontal: 14,
-                                            paddingVertical: 8,
-                                            borderRadius: 6,
-                                            shadowColor: "#000",
-                                            shadowOpacity: 0.15,
-                                            shadowRadius: 4,
-                                            elevation: 3
-                                          }}
-                                        >
-                                          <Ionicons name={scriptCopied ? "checkmark-circle" : "copy-outline"} size={16} color="#fff" />
-                                          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "bold" }}>
-                                            {scriptCopied ? "Copied!" : "📋 Copy Script"}
-                                          </Text>
-                                        </TouchableOpacity>
-                                      </View>
-                                    </View>
-
-                                    {/* Script Code Block */}
-                                    <ScrollView style={{
-                                      backgroundColor: darkMode ? "#121212" : "#f4f4f4",
-                                      borderRadius: 8,
-                                      padding: 10,
-                                      maxHeight: 180,
-                                      borderWidth: 1,
-                                      borderColor: darkMode ? "#333" : "#e0e0e0"
-                                    }}>
-                                      <Text style={{ fontFamily: "monospace", fontSize: 9, color: darkMode ? "#81c784" : "#2e7d32" }}>
-                                        {appsScriptTemplate}
-                                      </Text>
-                                    </ScrollView>
-
-                                    <View style={{ gap: 4, marginTop: 4 }}>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                        3. Click <Text style={{ fontWeight: "bold" }}>"Deploy" &gt; "New deployment"</Text> at the top-right.
-                                      </Text>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                        4. Click the gear icon next to "Select type" and select <Text style={{ fontWeight: "bold" }}>"Web app"</Text>.
-                                      </Text>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                        5. Choose Configuration options:
-                                      </Text>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
-                                        • Execute as: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Me (your-email)"</Text>
-                                      </Text>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#ccc" : "#333", paddingLeft: 10, lineHeight: 15 }}>
-                                        • Who has access: <Text style={{ fontWeight: "bold", color: "#d32f2f" }}>"Anyone"</Text> (Required for API routing)
-                                      </Text>
-                                      <Text style={{ fontSize: 11, color: darkMode ? "#aaa" : "#555", lineHeight: 15 }}>
-                                        6. Click <Text style={{ fontWeight: "bold" }}>"Deploy"</Text> and copy the <Text style={{ fontWeight: "bold" }}>Web app URL</Text> into the Settings panel above.
-                                      </Text>
-                                    </View>
-                                  </View>
-                                );
-                              })()}
-                            </View>
+                            <AppsScriptGuideCard darkMode={darkMode} />
                           </View>
                         );
                       })()}
@@ -31407,6 +32047,7 @@ function MainApp() {
                     showsVerticalScrollIndicator={false}
                   >
                     {!crmSidebarCollapsed || isMobile ? <Text style={styles.categoryHeader}>ADMISSIONS & LEADS</Text> : null}
+                    {renderSidebarItem("merged-leads", crmSub, "Applications & Leads (New)", "people-outline", () => changeCrmSub("merged-leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
                     {renderSidebarItem("admissions", crmSub, "Admission Application", "mail-outline", () => changeCrmSub("admissions"), "crm-admissions", undefined, crmSidebarCollapsed && !isMobile, "admissions")}
                     {renderSidebarItem("leads", crmSub, "Leads", "funnel-outline", () => changeCrmSub("leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
                     {renderSidebarItem("custom-leads", crmSub, "Custom Leads", "clipboard-outline", () => changeCrmSub("custom-leads"), "crm-leads", undefined, crmSidebarCollapsed && !isMobile, "leads")}
@@ -32206,6 +32847,12 @@ function MainApp() {
                           <CustomLeadsPage />
                         </Suspense>
                       )}
+
+                      {crmSub === "merged-leads" && (
+                        <Suspense fallback={<View style={{ padding: 40, alignItems: "center" }}><ActivityIndicator size="large" color="#b91c1c" /></View>}>
+                          <MergedLeadsAdmissionsPage />
+                        </Suspense>
+                      )}
                     </>
                   )}
                 </ScrollView>
@@ -32941,12 +33588,16 @@ function MainApp() {
                       Alert.alert("Error", "Fees Paid cannot exceed the Total Course Fees.");
                       return;
                     }
-                    const payload = {
+                    const payload: any = {
                       totalFees: feeEditStudent.totalFees,
                       feesPaid: feeEditStudent.feesPaid,
                       modeOfPayment: feeEditModeOfPayment,
                       transactionId: feeEditTransactionId
                     };
+                    if (paid >= tot) {
+                      payload.feeBlocked = false;
+                      payload.feeAlertActive = false;
+                    }
                     executeEditOrApproval(
                       "fees_management",
                       "edit",
@@ -33355,6 +34006,180 @@ function MainApp() {
           </View>
         </Modal>
       )}
+
+      {/* ── STUDENT FEE BLOCKED / SUSPENDED ACCESS MODAL ── */}
+      {(() => {
+        if (user?.role !== "student") return null;
+        const loggedStudent = getLoggedInStudent(user, students);
+        if (!loggedStudent) return null;
+        const isBlocked = isStudentFeeBlocked(loggedStudent);
+        if (!isBlocked) return null;
+
+        // If the student is currently on the pay-fees subpage, let them view and complete their fee payment
+        if (activeTab === "erp" && erpSub === "pay-fees") return null;
+
+        const tot = Number(loggedStudent.totalFees) || 0;
+        const paid = Number(loggedStudent.feesPaid) || 0;
+        const pending = tot - paid;
+        const isOverdue = loggedStudent.feeAlertActive && loggedStudent.feeAlertDueDate && pending > 0 && (new Date().toISOString().slice(0, 10) > loggedStudent.feeAlertDueDate);
+
+        return (
+          <Modal visible={true} transparent={true} animationType="fade">
+            <View style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.85)",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: 16,
+              minHeight: "100vh" as any,
+              zIndex: 999999
+            }}>
+              <View style={{
+                width: "100%",
+                maxWidth: 480,
+                backgroundColor: darkMode ? "#1e1e1e" : "#ffffff",
+                borderRadius: 16,
+                padding: 24,
+                alignItems: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.35,
+                shadowRadius: 10,
+                elevation: 10,
+                borderWidth: 1.5,
+                borderColor: "#ef5350"
+              }}>
+                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: "#ffebee", justifyContent: "center", alignItems: "center", marginBottom: 16 }}>
+                  <Ionicons name="lock-closed" size={34} color="#c62828" />
+                </View>
+
+                <Text style={{ fontSize: 18, fontWeight: "900", color: "#c62828", textAlign: "center", marginBottom: 6 }}>
+                  Access Restricted
+                </Text>
+
+                <Text style={{ fontSize: 13, color: darkMode ? "#ccc" : "#424242", textAlign: "center", lineHeight: 18, marginBottom: 16 }}>
+                  {isOverdue
+                    ? `Your academy account access has been placed on hold because your fee payment due date (${loggedStudent.feeAlertDueDate}) has passed. Please pay your pending fee to restore full access.`
+                    : loggedStudent.feeBlocked
+                    ? "Your academy account services have been temporarily restricted due to pending tuition dues. Please pay the pending fee to get access."
+                    : "Your portal access is restricted due to outstanding fee dues. Please pay the pending fee to get access."}
+                </Text>
+
+                {/* Outstanding Fee Summary Card */}
+                <View style={{
+                  width: "100%",
+                  backgroundColor: darkMode ? "#2a2a2a" : "#fef2f2",
+                  borderRadius: 12,
+                  padding: 14,
+                  borderWidth: 1,
+                  borderColor: "#fecaca",
+                  marginBottom: 16,
+                  gap: 6
+                }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 12, color: "#757575" }}>Student Name:</Text>
+                    <Text style={{ fontSize: 12, fontWeight: "bold", color: darkMode ? "#fff" : "#212121" }}>{getStudentName(loggedStudent)}</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 12, color: "#757575" }}>Roll / Batch:</Text>
+                    <Text style={{ fontSize: 12, color: darkMode ? "#ddd" : "#424242" }}>{loggedStudent.rollNumber || loggedStudent.loginUsername || "N/A"} • {loggedStudent.batch || "General"}</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 12, color: "#757575" }}>Total Fees:</Text>
+                    <Text style={{ fontSize: 12, color: darkMode ? "#ddd" : "#424242" }}>₹{tot.toLocaleString()}</Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ fontSize: 12, color: "#757575" }}>Paid Amount:</Text>
+                    <Text style={{ fontSize: 12, color: "#2e7d32", fontWeight: "600" }}>₹{paid.toLocaleString()}</Text>
+                  </View>
+                  <View style={{ height: 1, backgroundColor: "#fca5a5", marginVertical: 4 }} />
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                    <Text style={{ fontSize: 13, fontWeight: "bold", color: "#c62828" }}>Pending Balance:</Text>
+                    <Text style={{ fontSize: 16, fontWeight: "900", color: "#b91c1c" }}>₹{pending > 0 ? pending.toLocaleString() : "0"}</Text>
+                  </View>
+                  {loggedStudent.feeAlertDueDate && (
+                    <Text style={{ fontSize: 11, color: "#d97706", fontWeight: "600", marginTop: 2, textAlign: "right" }}>
+                      Deadline: {loggedStudent.feeAlertDueDate}
+                    </Text>
+                  )}
+                </View>
+
+                {loggedStudent.feeAlertNote ? (
+                  <View style={{ width: "100%", backgroundColor: darkMode ? "#2a2a2a" : "#fff8e1", borderRadius: 8, padding: 10, borderWidth: 1, borderColor: "#ffe082", marginBottom: 16 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "bold", color: "#b45309" }}>Office Note:</Text>
+                    <Text style={{ fontSize: 11, color: "#78350f", marginTop: 2 }}>{loggedStudent.feeAlertNote}</Text>
+                  </View>
+                ) : null}
+
+                {/* Primary Action Button: Pay Fees */}
+                <TouchableOpacity
+                  onPress={() => {
+                    setActiveTab("erp");
+                    setErpSub("pay-fees");
+                  }}
+                  style={{
+                    width: "100%",
+                    backgroundColor: "#c62828",
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    alignItems: "center",
+                    flexDirection: "row",
+                    justifyContent: "center",
+                    gap: 8,
+                    marginBottom: 10,
+                    shadowColor: "#c62828",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 4,
+                    elevation: 4
+                  }}
+                >
+                  <Ionicons name="card-outline" size={18} color="#ffffff" />
+                  <Text style={{ color: "#ffffff", fontWeight: "bold", fontSize: 14 }}>Pay Fees Online via QR Code / UPI</Text>
+                </TouchableOpacity>
+
+                {/* Support Contact / Log Out */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", width: "100%", marginTop: 6, gap: 10 }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Alert.alert(
+                        "Nermai IAS Academy Office",
+                        "For fee inquiries or assistance, please contact the academy office or your course coordinator directly."
+                      );
+                    }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: "#e0e0e0",
+                      alignItems: "center",
+                      backgroundColor: darkMode ? "#2a2a2a" : "#f9f9f9"
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, color: "#616161", fontWeight: "600" }}>📞 Office Help</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleLogout}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: "#ffcdd2",
+                      alignItems: "center",
+                      backgroundColor: "#fff5f5"
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, color: "#c62828", fontWeight: "700" }}>🚪 Sign Out</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        );
+      })()}
 
       {/* Preview Modal for Daily Content (PDF & JPEG) */}
       {selectedDailyContentPreview && (
@@ -34102,7 +34927,7 @@ export default function App() {
 
   if (!splashDone) {
     return (
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={safeInitialMetrics} initialSafeAreaInsets={safeInitialInsets}>
         <SplashScreen onDone={() => setSplashDone(true)} />
       </SafeAreaProvider>
     );
@@ -34110,7 +34935,7 @@ export default function App() {
 
   if (!onboardDone) {
     return (
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={safeInitialMetrics} initialSafeAreaInsets={safeInitialInsets}>
         <OnboardingScreens onDone={() => setOnboardDone(true)} />
       </SafeAreaProvider>
     );
@@ -34118,17 +34943,17 @@ export default function App() {
 
   if (Platform.OS !== "web") {
     return (
-      <SafeAreaProvider>
+      <SafeAreaProvider initialMetrics={safeInitialMetrics} initialSafeAreaInsets={safeInitialInsets}>
         <MainApp />
       </SafeAreaProvider>
     );
   }
   return (
-    <HashRouter>
-      <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={safeInitialMetrics} initialSafeAreaInsets={safeInitialInsets}>
+      <HashRouter>
         <MainApp />
-      </SafeAreaProvider>
-    </HashRouter>
+      </HashRouter>
+    </SafeAreaProvider>
   );
 }
 

@@ -479,7 +479,12 @@ export class StudentService {
 
     if (type === 'batch') {
       if (!batchId) throw new AppError('Batch ID is required for batch bulk actions', 400);
-      targetStudents = students.filter(s => s.batch === batchId);
+      targetStudents = students.filter(s => 
+        s.batch === batchId || 
+        s.batchName === batchId || 
+        s.batchId === batchId || 
+        (Array.isArray(s.batches) && s.batches.includes(batchId))
+      );
     } else if (type === 'paid') {
       targetStudents = students.filter(s => s.type === 'online' || s.type === 'offline' || s.type === 'recorded' || s.accessTier === 'paid');
     } else if (type === 'free') {

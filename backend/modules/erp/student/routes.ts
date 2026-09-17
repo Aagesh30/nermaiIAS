@@ -41,7 +41,7 @@ router.put("/:id", (req, res, next) => {
   
   const idCardKeys = ["idCardGenerated", "idCardTheme", "idCardRole", "idCardExpiry"];
   const hallTicketKeys = ["hallTicketGenerated", "hallTicketExamName", "hallTicketExamDate", "hallTicketVenue", "hallTicketTime", "hallTicketInstructions"];
-  const feesKeys = ["feesPaid", "totalFees", "modeOfPayment", "transactionId"];
+  const feesKeys = ["feesPaid", "totalFees", "modeOfPayment", "transactionId", "feeBlocked", "feeBlockedReason", "feeAlertActive", "feeAlertDueDate", "feeAlertSentAt", "feeAlertNote"];
   
   const hasIdCardKeys = bodyKeys.some(k => idCardKeys.includes(k));
   const hasHallTicketKeys = bodyKeys.some(k => hallTicketKeys.includes(k));

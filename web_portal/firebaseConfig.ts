@@ -37,11 +37,29 @@ const firebaseConfig = {
   measurementId: "G-K2L1JCLKP6"
 };
 
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from "firebase/firestore";
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-export const db = getFirestore(app);
+export const db = (() => {
+  if (Platform.OS === "web") {
+    try {
+      return initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      });
+    } catch (e) {
+      return getFirestore(app);
+    }
+  }
+  return getFirestore(app);
+})();
 
 // Initialize Auth with AsyncStorage persistence for React Native to resolve memory persistence warnings
 export const auth = (() => {

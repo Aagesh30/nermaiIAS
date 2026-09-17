@@ -99,10 +99,18 @@ export const QRCodePermissionsPage = () => {
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(() => {
+      fetchData();
+    }, 12000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
     fetchAcknowledgements();
+    const interval = setInterval(() => {
+      fetchAcknowledgements();
+    }, 15000);
+    return () => clearInterval(interval);
   }, [ackFilter]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -454,7 +462,11 @@ export const QRCodePermissionsPage = () => {
                 onChange={(e) => setSelectedBatchId(e.target.value)}
                 options={[
                   { value: '', label: 'Select batch...' },
-                  ...batches.map(b => ({ value: b.id || '', label: b.name || '' }))
+                  ...batches.map(b => {
+                    const name = b.batchName || b.name || b.title || b.id || 'Unnamed Batch';
+                    const val = b.batchName || b.id || name;
+                    return { value: val, label: b.course ? `${name} (${b.course})` : name };
+                  })
                 ]}
               />
               
